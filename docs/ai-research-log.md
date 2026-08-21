@@ -1,8 +1,8 @@
 # AI research log & session archive
 
-This file is the **research journal + session history** carved out of `CLAUDE.md` so the operating manual stays lean. It holds the AI-strength campaigns (Spender & CoC), the dated session narratives, rejected-experiment postmortems, and the detailed "do not relitigate" verdicts. `CLAUDE.md` keeps a one-paragraph pointer per campaign and links back here.
+This file is the **research journal + session history** carved out of `CLAUDE.md` so the operating manual stays lean. It holds the AI-strength campaigns (Spender, CoC and **Dissonance**), the dated session narratives, rejected-experiment postmortems, and the detailed "do not relitigate" verdicts. `CLAUDE.md` keeps a one-paragraph pointer per campaign and links back here.
 
-Content below is preserved **verbatim** from the pre-split `CLAUDE.md` (git also holds the full original). Durable operating facts and footguns were also surfaced up into `CLAUDE.md`; this archive keeps the complete detail.
+Content down to the ARCHIVE blocks is preserved **verbatim** from the pre-split `CLAUDE.md` (git also holds the full original); the dated Dissonance sessions at the foot were written here natively. Durable operating facts and footguns were also surfaced up into `CLAUDE.md`; this archive keeps the complete detail.
 
 > Status lines, dates, commit hashes, and "RUNNING/IN PROGRESS" markers here are historical snapshots — trust git and the live code over them.
 
@@ -3581,3 +3581,478 @@ one that says the two branches share no state.
   `hard` arena between the two fits says so.
 * **Minor's talon** is still unfitted, and now has a method that costs nothing
   to run: `swaplab.py minor <n> <lo> <hi> play`.
+
+<!-- ===================================================================== -->
+## TWO PARALLEL LINES, ONE BASE — read this before the sessions below (2026-08-21)
+
+The Dissonance entries from here on were produced by **two independent session
+lineages that both branched from `00170c9`** and never saw each other's results.
+They are complementary rather than contradictory, but one pair of conclusions
+has to be read together or the file appears to argue with itself.
+
+**The line above** (cross-fitting, opponent uncertainty, leaf calibration, the
+finer HAND abstraction, skat's talon) ran seven treatments to null-or-worse and
+closed with: *the residual is not an aggression problem, every failed treatment
+was tuning the one axis already right, and what is left must be CONDITIONAL —
+which hands the tree wins the auction with, not how high it bids.*
+
+**The line below** (the Double margin, the belief prior's trump channel, the
+pass/raise shading, the contested gate, the real ACTION space, and the CFR
+sampler work) reached the same wall from the other side and then measured a way
+through it: the level-only action abstraction — a bid names a level, and the
+pricer then takes the best suit still legal — **costs 14.0 points a deal**,
+because a level chosen blind to the suit is a commitment the real hand may not
+support.
+
+**That is the same word from two directions.** One line concluded a conditional
+defect must be what remains and asked for a finer abstraction to see it; the
+other widened a DIFFERENT abstraction (actions, not hands) and put a number on
+one. Neither knew about the other, which makes the agreement worth more than
+either alone.
+
+**So "the campaign closes" above should be read as scoped to what that line
+tested** — uniform coefficients over the shipped action space. It does not cover
+the action space itself, and the 14-point measurement reopens the auction as the
+place with the most recoverable value. The stopping rule that entry proposes is
+still right about aggression dials.
+
+## WHERE THE DISSONANCE RESEARCH TOOLING LIVES (2026-08-21)
+
+**THE FINDINGS BELOW ARE ON `main`. THE INSTRUMENTS THAT PRODUCED THEM ARE
+NOT.** They live on an unmerged branch, kept because none of it is
+user-visible — no engine change, no frontend change, no shipped bot change — and
+merging it would republish a byte-identical site, stamping a fresh
+`__BUILD_ID__` that nudges every open tab to refresh, for code the server never
+imports.
+
+    archive  claude/dissonance-research-2026-08-archive   <- use this
+    working  claude/superhuman-ai-game-research-o5pwel
+    base     00170c9                                        ~55 commits
+
+**BOTH OF THOSE ARE BRANCHES, WHICH IS NOT WHAT THIS WANTS TO BE.** A branch is
+a moving pointer, not durable storage: delete it and the commits become
+unreachable and are eventually pruned. The archive branch exists only so the
+working branch can be cleaned up without taking the commits with it — it is a
+second pointer, not a stronger one.
+
+**The durable form is a tag, and it takes three lines from a checkout with push
+rights.** It resolves the archive BRANCH rather than a commit id on purpose:
+this block named a head SHA for exactly one commit before the commit that
+updated it made it stale, which is the failure it is itself warning about (the session that produced this work could not create it — tag pushes
+returned HTTP 403, since its credentials are scoped to the `claude/*` branch
+namespace):
+
+    git fetch origin claude/dissonance-research-2026-08-archive
+    git tag -a dissonance-research-2026-08 FETCH_HEAD -m "Dissonance AI research campaign, 2026-08"
+    git push origin dissonance-research-2026-08
+
+Once that tag exists, **both branches are safe to delete** and this block should
+be updated to name the tag instead. Until then, do not delete the archive
+branch.
+
+**What is on it that would be expensive to rebuild.** The measurements are
+recorded here and in `games/dissonance/CLAUDE.md`; the instruments are not, and
+several of them cost most of a session to get right:
+
+| tool | what it measures | why it was hard |
+|---|---|---|
+| `tools/cfrcheck.py` | MCCFR estimator unbiasedness, by exact enumeration under a frozen strategy | the only instrument that localises a weighting bug; a convergence ladder cannot |
+| `tools/liftlab.py` | what the level-only abstraction costs, via an exact embedding into the wide one | two exploitability numbers from two abstractions are incomparable in principle |
+| `tools/shadeprobe.py` | `tree value − price-list value` at the same node on the same worlds | the control is exactly 0.000 only if both pricers share the one-slot `Solved` cache |
+| `tools/dblreport.py` | every `DOUBLE_MARGIN` candidate, paired and exact, off recorded sums | a CRN arena would cost hours a candidate to measure the same thing worse |
+| `tools/channelprobe.py` | belief-prior bias per channel, any tilt as a free lookup | `draws_of` split from `score` so a sweep costs one run of draws |
+| `tools/featlab.py`, `tools/gate_pool.py` | the widened-abstraction feature ground; pooled gate runs | — |
+| `rust-cores/.../bin/{pimcprops,sigma,priorexp}.rs` | the three PIMC axes, σ, prior exponent | native, so they are the only affordable form |
+
+Also on the branch: `cfrlab`'s outcome sampler and `CFR_DENOMS` action space,
+`best_response`'s port onto `_step`, and three tests that gate the above —
+`test_cfr_unbiased.py`, `test_lift_is_faithful.py`, `test_cfrlab_blueprint.py`.
+**Those three run nowhere while the branch is unmerged**, which is worth stating
+plainly: they protect the correctness of MEASUREMENTS, so what they actually
+guard is this log.
+
+## 2026-08-20 — Dissonance: five nulls, one positive, and the campaign's first localised defect
+
+Continuing directly from the 2026-08-19 attribution work. That session ended
+with a diagnosis rather than a fix: *in the tree, passing is a LEAF priced
+myopically from the opponent's side; raising continues into a subtree whose
+modelled opponent knows our exact hand.* This session tested that, and cleared
+four smaller questions out of the way first.
+
+### 1. `DOUBLE_MARGIN` stays at 12 — the +1.45 peak was one run's luck
+
+A previous run had put margin 20 at **+0.681 ± 0.351** (1.94 SE): a smooth
+single-humped curve with a mechanism that reads as sound (the asymmetric payoff
+really does push break-even above 50%). An independent 320-deal sample put the
+same candidate at **−0.156**. Pooled over 1280 recorded doubles, every candidate
+above the shipped 12 sits at ~1 SE and none is separated from any other; every
+candidate below it is decisive in the other direction (−3.82 SE at 8, −6.54 at
+4, −9.11 at 0).
+
+So the one thing the measurement establishes is that **the 2026-08-16 re-fit
+downward was wrong** — already known, but now with a number instead of a
+postmortem. There is no measured reason to move the constant up.
+
+**The error bar is paired and exact, and that is why it could be had at all.**
+The margin changes which doubles are TAKEN and nothing else: the auction tree
+does not model the Double, so the contracts are identical at every candidate,
+and a Double changes the payoff rather than the card play, so the rounds are
+too. Every round appears in both arms and most contribute exactly zero. The
+`moved` column — how many rounds a candidate actually re-decides — is 34 of 1280
+at margin 14, which is why a swept table with no error bar reads far more
+confidently than the data supports. A CRN-paired arena would have been the
+**wrong instrument**: hours per candidate to re-measure the same quantity
+through 18 points of per-deal payoff noise, when the recorded sums price every
+candidate for free.
+
+**The method note, recorded here for the fifth time:** a smooth curve with a
+mechanism is not a replication. This is the same constant the repo has already
+re-fitted wrongly once. The only thing that stopped it happening twice was
+running the second sample **before** writing the first one down as a result.
+
+### 2. The belief prior's unspent channel is trump length — and it is worth nothing
+
+The prior's own axis was already finished (strength percentile 0.508 ± 0.014
+against an unbiased 0.500). Trump length was the one channel still reading
+biased at **0.744**. A flat worth per trump on top of the rank curve —
+`exp(beta x strength + gamma x trumps)`, gamma 0 being the shipped prior byte
+for byte — corrects it cleanly to **0.530** at gamma 1.0, and is nearly free on
+every other channel.
+
+Arena: **+0.328 ± 0.784.** Nothing. The fourth consecutive entry where a real,
+measured belief bias did not become a measured gain — and the first where the
+null came with its own decomposition, so it is "here is where the apparent
+effect went" rather than merely "no effect". `BidPrior.trump_len` is built,
+correct, and ships at 0.0.
+
+### 3. Nets and MCTS, asked directly and ruled out for this architecture
+
+The user asked whether the answer is a larger architectural rethink. For the
+architecture this game already has, no — and the reasons are specific rather
+than general:
+
+* **A net cannot help the CARD-PLAY leaf.** That leaf is an exact double-dummy
+  solve. Every other game in this repo carries a net *precisely because* its
+  leaf cannot be solved. A net here buys only SPEED, speed buys WORLD COUNT, and
+  world count is measured at its stop: `pimc:24` vs `pimc:8` reads **50.0%**,
+  and `pimc:32` over `pimc:8` is **+0.21 for four times the compute**.
+* **MCTS fails for the mirror reason** — it is what you reach for when you
+  cannot solve, and here a world solves exactly in ~20–74 ms.
+* **The prize is small either way.** 89.5% of card decisions are already exactly
+  optimal, the whole oracle gap is 0.79 pts/round on a 5-point pool, and IIMC —
+  the correct tool for the reducible part — measured **+0.067 ± 0.053**.
+* **In the AUCTION a net is an eval**, and the exact leaf (`threat_value`, the
+  best evaluation obtainable) measured null twice.
+
+**Parked with their reasons, at the user's request: R-NaD/DeepNash and ReBeL.**
+Both replace the whole approach rather than a component, which is why neither is
+refuted by anything above. R-NaD is not runnable in this container (4 CPU cores,
+15 GB RAM, no GPU, and neither torch, numpy, jax nor scipy installed) and would
+need the auction+play loop exposed as a stepped RL environment. That is a
+resource fact, not a judgement about the method — it is the one candidate with a
+plausible route to a step change.
+
+### 4. THE POSITIVE ONE: the tree is pessimistic only about the branch that continues
+
+**The first positive finding of this campaign.** Ten items had attacked the
+SAMPLER (four nulls) or the ABSTRACTION (three refusals); this is the first
+instrument pointed at the defect the attribution kept naming.
+
+The statistic needs no ground truth and no continuation assumption:
+
+    shade(option) = tree value - price-list value, SAME option, SAME node
+
+Passing is a leaf in BOTH pricers, so its shade is an **exact control**. Both
+vectors come off the same `entry.worlds` (`answer_auction` computes them
+together), so this cannot be a leaf-accuracy or sampling artefact.
+`tools/shadeprobe.py`, 400 deals, 900 decisions where both branches were legal:
+
+| | per-world payoff points |
+|---|---|
+| **passing (the CONTROL)** | **+0.000 ± 0.000** — exactly zero on every node |
+| bidding, every option unselected | −0.735 ± 0.056 (13 SE) |
+| **bidding, the price list's favourite** | **−10.222 ± 0.391** (26 SE) |
+
+**The tree concedes 44.4% where the price list concedes 29.0%**, and the shade
+rises monotonically with the standing bid. At standing 6–7 the two pricers agree
+to the decision and the shade is zero; **every point of divergence is at standing
+1–4** — which is the "concedes level 4" complaint, localised.
+
+### 5. And both diagnostics answer: it is clairvoyance, and almost none of it is legitimate
+
+Two questions had to be answered before a correction could be designed. Both
+measured on 400 deals / 973 decisions, control exactly zero at every arm.
+
+**Which mechanism?** The temperature is a direct lever, so it is the modelled
+opponent's clairvoyance rather than the optimiser's curse. Every temp is priced
+at the SAME node on the SAME worlds (`opp_model`/`opp_temp` are search
+parameters, not world parameters — they are not in `hand_key`):
+
+| opp_temp | pass (control) | bid, the chosen one | concedes |
+|---|---|---|---|
+| **5** *(shipped)* | +0.000 | **−10.050 ± 0.378** | **41.1%** |
+| 10 | +0.000 | −4.820 ± 0.366 | 32.4% |
+| **12** | +0.000 | −2.190 ± 0.363 | **29.0%** |
+| 15 | +0.000 | +2.103 ± 0.357 | 23.1% |
+| 25 | +0.000 | +15.827 ± 0.331 | 10.6% |
+
+The shade on the option actually being chosen **crosses zero at temp ≈ 13.5**,
+and temp 12 puts the tree's concession rate at 29.0% — the price list's own rate
+to the decimal. Two independent routes landing on the same place.
+
+**How much is legitimate?** Essentially none. Splitting the shade into what the
+auction really did realise versus what it would have realised settling here:
+
+| | payoff points |
+|---|---|
+| **LEGITIMATE** (realised − settles here) | **−0.206 ± 0.855** — indistinguishable from zero |
+| **EXCESS** (shade − legitimate) | **−9.763 ± 0.915** |
+
+### 6. The contested gate: the mechanism works exactly as designed, and it does not pay
+
+`EXPERT_OPP_TEMP_CONTESTED = 12` softens the modelled opponent only where a PASS
+is legal; the opening — the one node that cannot pass — keeps its fitted 5.
+Pre-registered, CRN-paired, dd-resolved.
+
+**−0.4786 ± 0.3951 payoff/round, 95% CI [−1.253, +0.296], t = −1.21, n = 2900.**
+
+**The sign FLIPPED on the way there, and that is the point.** The pre-registered
+first read at n=800 was **+1.1938 ± 0.7555**, and I recorded it as "promising,
+not established". Carried to the declared 2900 it is mildly negative, in blocks
+of 500: **+2.62**, −1.08, −1.93, −0.88, −1.47, −0.04. The entire positive
+reading was the first 500 deals. The pre-registration is what made that a
+correction rather than a shipped regression — and my own budget was
+under-powered too (I assumed σ=18, measured 21.3, so n=800 bought ±0.76 not
+±0.64, and n=800 was never enough at any σ).
+
+The mechanism did exactly what it was built to do — opening unmoved (2.46 vs
+2.48), passes 21.4% against 31.4% — which is the **fifth** time in this campaign
+that a confirmed mechanism has not paid. The make rate is the row that explains
+it: 58.7% against 60.3%.
+
+### 7. The real action space: cheap in states, 51x in solver time
+
+The standing finding was that the blueprint's binding constraint is its ACTION
+space, not its hand space. Built (`CFR_DENOMS`, off by default) and costed:
+
+| abstraction | reachable states |
+|---|---|
+| levels only, no denominations | 58 |
+| **+ real denominations** | **384** — 1.2x what `cfrlab` reaches today (321) |
+| + the per-player FOREVER-BAN's `used` masks | **30,373** — 79x on top |
+
+**And the state count is the wrong cost model, which is the actual finding.**
+External-sampling MCCFR evaluates EVERY action at our own nodes, so its cost is
+driven by branching factor, not state count:
+
+| | opening actions | walk calls / iteration | ms / iteration |
+|---|---|---|---|
+| level-only (shipped) | 8 | **102** | 0.94 |
+| real action space | 40 | **4,128** | **47.6** |
+
+**40x the traversals and 51x the wall clock for 1.2x the states.** A converged
+200k solve goes from ~3 minutes to ~2.6 hours per seed. The prerequisite is a
+cheaper CFR — which this file had already named: outcome sampling.
+
+### Instrument bugs found this session, because they are the recurring cost
+
+* **Importing `auction_arena` RUNS it** (no `__main__` guard, argv parsed at
+  module level). My argv parsed as mode "6" with **k=0**, and the harness
+  produced a complete, plausible shade table off a search over ZERO worlds.
+  Fixed by importing under a forced-valid argv and reading `K` back off the
+  arena rather than copying `ask()`.
+* **Two pricers on different worlds.** Sending the myopic ask down its own
+  channel made the control read −13.2 ± 6.5 instead of 0. The `Solved` cache is
+  one slot keyed on `hand_key ^ swap.key() ^ exact`, so both asks must go to the
+  same processes with the `swap` block included.
+* **`str.replace(pat, new, 1)` patched the wrong function** — `jump_main`
+  instead of `curve_main`. The running playout read packed action codes as
+  levels and printed settled "levels" of 8..40, mean 23.33, 0.0% made. **The
+  byte-identical control passed throughout**, because with `DENOMS` off both
+  copies are equivalent. *A control that only exercises the OFF path cannot
+  catch an ON path that was never wired.*
+* **A module-reload benchmark reported 1.16x** where the truth was 51x. Deleting
+  `sys.modules` and re-importing does NOT re-read an env flag read at import, so
+  it measured level-only twice — visible only as an infoset count that did not
+  move (1,218 vs 1,354). **Fork, don't reload.**
+
+---
+
+## 2026-08-21 — Dissonance: a biased sampler, an equal-time reversal, and the first measured prize
+
+### 1. The outcome sampler was biased, and a convergence ladder could not say where
+
+It had shipped the day before explicitly marked NOT correct: on the level-only
+abstraction it and external sampling converged to DIFFERENT equilibria, which is
+the signature of a mis-weighted estimator rather than a slow one.
+
+**A ladder says THAT, never WHERE.** Regret matching is a feedback loop: a small
+weighting error moves the strategy, which moves the next estimate, and nothing
+localises. `tools/cfrcheck.py` asks the one question with an exact answer —
+freeze the strategy at UNIFORM, and both samplers estimate `v(I,a) − v(I)`,
+which a tiny game (`CFR_MAXL=3`, one deal, 22 infosets) computes by enumeration.
+That unbiasedness property holds **independently of the dynamics**. One run,
+decisive:
+
+    external  mean |estimate - truth| / mean |truth| = 0.0021
+    outcome   mean |estimate - truth| / mean |truth| = 0.7115
+
+**The defect** was a `descend(a)` closure capturing the PARENT's `q`. The
+recursive branch was entered with `q * probe[a]`, but a terminal reached by a
+PASS was priced at plain `q` — the sampled action's own probability missing from
+exactly the outcomes that end the auction. Worst infoset: 2.83 against a true
+6.64. `dbl_os` had the same omission twice (the pass never entered the
+defender's reach either).
+
+**The fix is structural, not a patched line:** draw the action FIRST, compute
+`nq`/`n_opp` ONCE above the branch, then build the child, so a terminal and a
+node cannot disagree about what has been sampled. After: 0.0187 at 400k, and the
+residual is variance rather than a second bias — **0.0459 / 0.0187 / 0.0095**
+across 100k / 400k / 1.6M is a clean `1/sqrt(n)` (4.83x over 16x).
+
+**Gated permanently** as `tests/test_cfr_unbiased.py`, on hand-written deal
+records rather than the gitignored research cache (a test that needs an artifact
+is a test that skips, which this package forbids). It proves its own
+non-vacuity: a third test re-injects the defect's SHAPE — a missing
+multiplicative factor in `1/q` — at a MILDER constant than the real one, and
+asserts the band still catches it.
+
+### 2. And outcome sampling loses at equal time, by MORE in the space it was built for
+
+Extracting the CFR+ floor into a single `bump()` seam was what made the checker
+possible at all — the floor is what makes CFR+ work and also what makes the raw
+estimates unrecoverable, so an unbiasedness check has nowhere to look unless
+every increment passes through one owner.
+
+With the sampler correct, the comparison that matters is EQUAL TIME — this
+repo's own ship criterion everywhere else, and I had been quoting a
+per-iteration figure. Level-only, exact best response:
+
+| sampler | iters | solve | exploitability |
+|---|---|---|---|
+| external | 200k | 170.9s | **1.04** |
+| outcome | 1M | 40.9s | 6.58 |
+| outcome | 4M | 163.1s | 4.11 |
+
+External is 4x less exploitable at matched wall clock. I then extrapolated that
+the 51x cost gap in the DENOMS space would make the two near-even there. **That
+extrapolation was wrong, and the measurement reverses it:**
+
+| sampler | iters | solve | exploitability |
+|---|---|---|---|
+| external | 2k | 63.7s | 9.97 |
+| external | 19k | 351.6s | **4.27** |
+| outcome | 500k | 64.4s | 37.83 |
+| outcome | 4.7M | 641.7s | 25.79 |
+
+External at **two thousand** iterations beats outcome at a hundred thousand, and
+the gap WIDENS with budget (3.8x at ~64s, ~8x at ~640s).
+
+**Why, and it is the lesson worth carrying.** The extrapolation assumed each
+sampler's exploitability-vs-iterations curve TRANSFERS between abstractions.
+Outcome sampling's does not. Widening the action space 5x costs external only
+per-iteration TIME; it costs outcome sampling VARIANCE — each infoset is visited
+a fifth as often per trajectory and every `1/q` weight grows. **A per-iteration
+cost ratio is not a convergence ratio, and a decay curve fitted in one
+abstraction says nothing about another.**
+
+The sampler is correct, gated, and kept — it is the right tool if the action
+space ever grows to where external's branching is genuinely unaffordable (the
+forever-ban's 30,373 states). It is NOT the answer for `DENOMS`. Do not re-open
+it on the strength of the 260x.
+
+### 3. What was actually blocking the real action space was the instrument, not the solver
+
+`best_response` refused to run under `CFR_DENOMS` because it read a transition
+off the action by hand — `(a, level, 0, 1 - actor)` treats the action as a bare
+level, and a packed one (`level * 8 + rank`) would have bid level 41, or worse
+landed on a plausible one. The refusal was right; it just left the real action
+space with no way to be priced.
+
+**The port is not a `DENOMS` branch.** Every transition now goes through
+`_step`, the one owner of what an action does, so neither abstraction is
+described twice and neither can drift. `states()` needed nothing at all: under
+`DENOMS` its third slot is the standing bid's RANK rather than a hold count —
+different meaning, identical range (`0..E.NOTRUMP` either way) and identical
+ordering guarantee, since a same-level bid must name a strictly higher rank.
+
+Verified behaviour-free on the path that already worked: the same solve at the
+same seed reads b0 0.8163159305704718 / b1 2.798671028798192 before and after,
+bit for bit. **A refactor that changes a measurement is a new measurement.**
+
+### 4. THE PRIZE: the level-only abstraction costs 14 points a deal
+
+The question the whole `DENOMS` arm exists for, asked properly for the first
+time — and it cannot be asked by comparing two exploitability numbers.
+Exploitability is only defined against a best responder, the two abstractions
+hand that responder different action sets, so they are numbers from **different
+games**. What was needed was one game and one responder.
+
+**The embedding is exact, which is what makes it possible.** The level-only game
+is a strict SUB-GAME of the wide one, not an approximation:
+
+    pass          -> pass
+    HOLD          -> the SAME level at rank `holds + 1`
+    raise to L    -> level L at rank 0
+
+`leaf` already prices a contract as "rank = holds", and level-only's `_step`
+resets `holds` on a raise and increments it on a HOLD — so a level-only state
+and a wide state with `rank == holds` are THE SAME CONTRACT at THE SAME PAYOFF.
+The lift is a relabelling. `tools/liftlab.py` does it.
+
+**And `tests/test_lift_is_faithful.py` PROVES it rather than asserting it**, by
+the one identity that settles the matter: restrict the wide responder to the
+lift's image and the exact best response must come back at the level-only value
+to floating point. It does. Two further tests kill the ways that identity could
+be worthless — handing the responder the full denomination set must MOVE the
+number (and never downward, since a larger action set cannot do worse), and a
+one-character mis-lift (a HOLD sent to rank 0 instead of `holds + 1`) must be
+caught. Without those, a mangled lift reports a large, confident, entirely
+manufactured cost.
+
+**Matched wall clock (324s vs 343s), 600 all-denomination deals:**
+
+| policy | backoff | BR seat 0 | BR seat 1 | exploitability |
+|---|---|---|---|---|
+| level-only, LIFTED | False | 14.73 | 19.07 | 16.90 |
+| **level-only, LIFTED** | **True** | 15.93 | 19.33 | **17.63** |
+| wide (native) | False | 5.23 | 2.05 | 3.64 |
+| **wide (native)** | **True** | 5.23 | 2.05 | **3.64** |
+
+**14.0 points a deal**, and not a convergence artifact in either direction: 2.5x
+the level-only iterations moved it 21.33 → 17.63 while the wide arm sat at 3.64.
+
+**The artifact that would have manufactured this was checked, not argued.** An
+unseen infoset concedes — which `Policy`'s own docstring calls the most
+exploitable thing a policy can do — and the lifted policy is structurally the
+one with holes (12.9% of reach-weighted lookups). With backoff on the holes
+close and **the gap gets BIGGER** (16.90 → 17.63). Coverage was flattering the
+narrow arm, not damning it.
+
+This is the same defect the head-to-head already saw from the other end: the
+blueprint lost to Expert by **−12.84 ± 1.47** while making **49.6%** of its
+contracts against Expert's **73.0%** at the same levels — because a level chosen
+blind to the suit is a commitment the real hand may not support. That was
+inferred from a play-out; this measures it directly against a best responder.
+The two are close and the correspondence is suggestive, but they are **not the
+same quantity** (points a deal against an exact responder vs points a round
+against Expert) and should not be quoted as one number.
+
+### Where this leaves the campaign
+
+After a long run of nulls — eval weights, the exact leaf, the trump channel, the
+contested gate, diverse continuations — this is the first item with a **measured
+prize attached**. It ships nothing yet: `blueprint_bid` and `_path_to` still
+refuse under `DENOMS`, because serving must map an abstract action back onto a
+REAL bid, which is a genuinely new mapping rather than a transition `_step`
+already owns. That port is the next step.
+
+**And the two method lessons this session paid for, both of which are about
+trusting a shape over a measurement:**
+
+1. *A per-iteration cost ratio is not a convergence ratio.* I extrapolated a
+   decay curve across abstractions and got the magnitude wrong by 4–8x.
+2. *A number that resists comparison usually means the wrong instrument, not the
+   wrong question.* Two exploitability figures from two abstractions are
+   incomparable in principle; the fix was an exact embedding, and the embedding
+   had to be PROVED before its answer meant anything.

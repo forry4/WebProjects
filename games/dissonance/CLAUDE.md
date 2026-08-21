@@ -1,5 +1,13 @@
 # Dissonance — Claude context
 
+> **The AI-research sections below reference tools that are not on `main`** —
+> `tools/cfrlab.py`'s solver arms, `cfrcheck`, `liftlab`, `shadeprobe`,
+> `dblreport`, `channelprobe`, `featlab` and three Rust bins. They are on branch
+> **`claude/dissonance-research-2026-08-archive`**, unmerged on purpose: nothing on it is user-visible. See the head of
+> [`docs/ai-research-log.md`](../../docs/ai-research-log.md) for the inventory,
+> what each one measures, and the one command that turns that branch into a
+> proper tag.
+
 Sixth game. Two-player trick-taking where **taking tricks is not simply good**:
 even-numbered tricks score **+2** to whoever wins them, odd-numbered ones
 **−1**. Six positive against seven negative, so both players' totals always sum
@@ -834,11 +842,16 @@ declared. **Every round runs all thirteen tricks** — see the overtrick section
 ## THE JUMP BONUS — classic dropped the raise cap and prices the leap instead (2026-08-13)
 
 Classic's `MAX_RAISE` is gone: an overtake may raise by ANY amount up to the
-ceiling. What replaced it is a scoring rule, `JUMP_SET_BONUS` (3, classic
-only): **if the FINAL bid of the auction raised the level — a jump of j over
-the bid it overtook — the defender scores an extra `3 × j` on a set.** THE
+ceiling. What replaced it is a scoring rule, **`JUMP_SET_BONUS` — 6 in classic since the
+2026-08-16 re-price, 3 when this section was written**: **if the FINAL bid of
+the auction raised the level — a jump of j over the bid it overtook — the
+defender scores an extra `6 × j` on a set.** THE
 OPENING BID COUNTS, as a raise over level 0 (**v2, same day**): open at 6 and
-get set and the defender collects +18 on top; open at 1 and it costs 3. A
+get set and the defender collects +36 on top; open at 1 and it costs 6.
+(**CORRECTED 2026-08-19.** This section — the one that DEFINES the rule — still
+said 3 three days after `a317bb1` changed it to 6, while `rules.jsx` had been
+updated and was telling players the right number. A constant stated in the
+section that defines it is the one place a reader trusts without checking.) A
 same-level overtake in a higher denomination is a jump of 0 — the only
 jump-free way to buy a contract. The intent: keep the auction climbing in
 small steps (every rung gives the opponent a decision) by making the leap
@@ -4788,8 +4801,56 @@ double-dummy `pts` against what the shipped PIMC search actually achieves on the
 same deal and contract — and it has not been measured. Until it is, read every
 "the ladder is too coarse" statement here as an upper bound on the coarseness.
 
-**What shipping a rate change would entail** (it is a scoring change, so it is
-not a one-constant edit): `JUMP_SET_BONUS` in `engine.py`, the mirrored constant
+**MEASURED 2026-08-19 — AND THE "NOT MEASURED" ABOVE WAS ALREADY STALE WHEN
+WRITTEN.** Two things, and the first is a documentation fault. `cfrlab playnoise`
+had measured this three sections up ("THE REAL LADDER IS 16% LOOSER"), reading
+sd **1.94** and a mean deviation of **+0.95** for the declarer at an imposed
+contract. This section asked for it as though nobody had. Both numbers stand;
+what follows is an INDEPENDENT second instrument, `dissonance-core/bin/sigma`,
+measuring a deliberately different quantity — symmetric points play with no
+imposed contract, both seats on the shipped `pimc:8`, every deal played in all
+five denominations and BOTH lead directions.
+
+| | double-dummy | real play |
+|---|---|---|
+| seat 0 points, sd | 2.053 | 2.447 |
+| **sigma** (real minus double-dummy) | — | **sd 1.586**, mean +0.013 ± 0.041 |
+| landed exactly on the solver's value | — | 28.4% |
+| per-rung cost in P(make), live range | 13.3 pts | 12.3 pts (**7.7% looser**) |
+
+**Sigma replicates**: 1.590 on a 240-deal single-lead run and 1.586 on this
+150-deal paired one. So does the looseness, 7.9% and 7.7%.
+
+**THE CONVOLUTION OVERSTATES THE LOOSENING BY ABOUT 2.4x, which is the point of
+having measured it.** Interpolating the table above to the measured sigma of
+1.59 predicts a per-rung cost of ~14.3 against 17.6 at sigma 0 — i.e. ~19%
+looser. Measured: **7.7%.** The model assumed the noise is additive, symmetric
+and independent of the position; it is none of those (`playnoise` already
+measured the two seats' outcomes at −0.658 correlated). So "read every 'too
+coarse' statement as an upper bound" was the right instruction and the bound is
+loose by a factor of roughly two.
+
+**AND THE OPENING LEAD IS WORTH A THIRD LESS THAN THE NUMBER THAT JUSTIFIED IT.**
+Solving and playing the same shuffle with each seat leading in turn, 750 pairs:
+
+| | paired swing |
+|---|---|
+| double-dummy | **+0.992 ± 0.031** pts |
+| real play | **+0.673 ± 0.072** pts |
+
+The double-dummy figure reproduces this file's own **+0.93** to inside its error
+bar, which is what validates the harness — and settles that the +0.93 is the
+PAIRED SWING rather than a one-sided edge over par, a factor of two this file
+never stated. Under real play it falls to +0.673, a drop of 0.319 ± 0.079 (4
+SE). **"The opening lead was measured at +0.93 pts, the strongest single lever
+on contract height" is a double-dummy number, and about a third of it is play
+the shipped tier does not find.** That bears on `declarer leads` and on the
+Null-defending asymmetry, both of which are argued from it.
+
+**What shipping a rate change would entail** — **and it HAS since shipped: 3 → 6
+in `a317bb1`, the same commit that re-priced make and set. Read this list as the
+checklist that was followed, not as pending work** (it is a scoring change, so it
+is not a one-constant edit): `JUMP_SET_BONUS` in `engine.py`, the mirrored constant
 and the committed parity fixtures in `rust-cores/dissonance-core`, the rules copy
 in `rules.jsx`, Expert's own calibration (it was fitted against 3j), and a re-run
 of the `DOUBLE_MARGIN` sweep — the margin of 20 was fitted against a 72.9% make
@@ -4815,7 +4876,8 @@ checkpoint, and the reporter reads every shard — **a per-shard summary is a
 quarter of the sample and reads exactly like the whole thing.**
 
 **The bug this nearly shipped a conclusion on:** the leaf originally priced every
-contract with `jump=level`. Classic's set base is `(N + 10 + 3j) × D`, so that
+contract with `jump=level`. Classic's set base was `(N + 10 + 3j) × D` when this
+was written and is `(2N + 2 + 6j) × D` today, so that
 charges the maximum jump penalty on a climb that earned none — it taxes exactly
 the deep auctions the harness exists to judge, in the direction that manufactures
 the answer "the equilibrium bids lower than Expert". Fixed to `level - prev`
@@ -5519,7 +5581,1224 @@ states); and it is **not a sampling-noise problem**, because doubling the worlds
 does not touch it. It is a judgement the tree makes about a KIND of hand, and
 the remaining candidates for it are structural rather than parametric.
 
+### TWO PARALLEL RESEARCH LINES MEET HERE (2026-08-21)
+
+Everything from here to the end came from **two session lineages that both
+branched from `00170c9` and never saw each other's results**. The block
+immediately below is the line that ran on `main` (cross-fitting, opponent
+uncertainty, leaf calibration, the finer HAND abstraction, skat's talon); the
+block after it is the line that ran on the research branch (the Double margin,
+the trump channel, the pass/raise shading, the contested gate, the real ACTION
+space, the CFR sampler).
+
+**They agree, and the agreement is the interesting part.** The first closed with
+"what is left must be CONDITIONAL — which hands the tree wins the auction with,
+not how high it bids". The second widened a different abstraction and measured
+one: the level-only ACTION space costs **14.0 points a deal**. Read "the
+campaign closes" as scoped to uniform coefficients over the shipped action
+space; it does not cover the action space itself.
+
+Full narrative and the reconciliation: [`docs/ai-research-log.md`](../../docs/ai-research-log.md).
+
+### AND THE WIDENED BLUEPRINT LOSES TO EXPERT BY 12.8 POINTS A ROUND (2026-08-20)
+
+**`bpwt` vs `expertst`, CRN-paired, dd-resolved, 354 paired deals:**
+
+| | |
+|---|---|
+| **blueprint − Expert** | **−12.8377 ± 1.4738 payoff/round** |
+| 95% CI | **[−15.726, −9.949]** |
+| auctions that differ | 342/345 (99.1%) |
+| mirror (`hard hard`) | exactly **+0.0000** |
+
+**8.7 SE, and stable the whole way** (−13.28 at n=87, −13.74 at n=95, −12.84 at
+n=345). Stopped there rather than run to 1550: nothing at that separation
+reverses, and the box was better spent elsewhere. For scale, the entire
+`opp_temp` gain this file ships is **+0.957**, and Expert's whole edge over Hard
+is **+1.19** — the blueprint loses by ten times either.
+
+**THE MECHANISM IS ONE NUMBER:**
+
+| | declared | mean level | **made** |
+|---|---|---|---|
+| blueprint | 337 | 4.08 | **49.6%** |
+| Expert | 363 | 4.42 | **73.0%** |
+
+**It buys contracts at the same heights and fulfils barely half of them.** That
+is what an abstraction with NO DENOMINATIONS produces when its policy is
+shipped: the blueprint names a LEVEL, the pricer then takes the best suit still
+legal, and a level chosen blind to the suit is a commitment the actual hand may
+not support. Expert's tree picks level and denomination together and makes three
+quarters.
+
+**SO THE WIDENING WAS THE WRONG AXIS, and that is the finding to carry.** The
+extra hand features are real — the section below shows the equilibrium
+conditioning on them by up to 1.9 rungs — and they are nowhere near the binding
+constraint. **The abstraction's problem is its ACTION space, not its hand
+space.** Anyone returning to this should put denominations in the tree and raise
+the `MAXL = 8` ladder cap before adding a single further feature; more private
+resolution on a policy that cannot name a suit buys nothing.
+
+**AND IT BRACKETS THE THEORY EMPIRICALLY.** The equilibrium direction was argued
+here as producing SAFETY rather than STRENGTH — in a two-player zero-sum game an
+equilibrium guarantees the game value against any opponent but does not punish a
+flawed one, so a perfect equilibrium bidder should DRAW with Expert. It lost by
+12.8, which is worse than the theory predicts, and the extra distance is the
+second fault: **an equilibrium of a coarse abstraction is not an equilibrium of
+this game at all.** It is simply a policy, and a bad one. Its measured
+exploitability of **1.46** was taken inside that same toy — the circularity
+flagged when the number was first computed, now with a price attached.
+
+Together with the `Diverse` gate above, two independent arms now say the same
+thing: **exploitability is not strength here, and optimising it produces bidders
+that are equal at best and catastrophic at worst.**
+
+**HARNESS GAP, recorded because it is mine.** The `bp` branch returns before the
+arena's opening-telemetry block, so `open` events are not recorded for a
+blueprint tier — `mean opening` reads 0.00 at n=0 for `bpwt` above. It affects
+the descriptive stats only; the strength number and the make rates come from the
+round resolution and are unaffected.
+
+### THE DOUBLE IS FINE. THE "-3.73" WAS THE DRIVER'S BASE RATE. (2026-08-20)
+
+**RETRACTION FIRST.** The entry below concluded from `dblprobe` that the shipped
+Double is "net destructive" and "the largest single shipped defect" — doubling
+31% of contracts when 9.5% deserve it, discriminating by 3.5 points, capturing
+−3.73 payoff a round. **That is wrong, and it is wrong for exactly the reason
+that entry flagged as its load-bearing caveat: `dblprobe` drives with the SERVER
+bot.** Re-taken on EXPERT-bid contracts, via `ARENA_DBL=1` + `tools/dblreport.py`
+over 320 paired deals (640 doubles):
+
+| | server-bot bid | **Expert bid** |
+|---|---|---|
+| doubles taken | 31.0% | 33.1% |
+| doubles that SHOULD be | **9.5%** | **29.4%** |
+| agreement with truth | 66.0% | **81.9%** |
+| hit / false alarm / miss | 13 / 111 / 25 | **142 / 70 / 46** |
+| doubles contracts that MADE | 30.7% | **15.5%** |
+| doubles contracts that FAILED | 34.2% | **75.5%** |
+| **discrimination** | **+3.5 pts** | **+60.0 pts** |
+| **value captured** | **−3.73** | **+0.66** (of +5.36 available) |
+
+**The Double doubles three quarters of failing contracts and one seventh of
+making ones. It is not broken; it is working.**
+
+**THE MECHANISM IS A BASE RATE, and it is worth carrying because it will happen
+again.** Only **9.5%** of the server bot's contracts are worth doubling against
+**29.4%** of Expert's. When almost nothing deserves a double, almost every
+double taken is a false alarm BY CONSTRUCTION, and both the discrimination and
+the captured value collapse without the decision rule changing at all. The
+harness was measuring its driver's bidding, not the Double. **"Which bot did the
+bidding IS the distribution" is already this file's rule; it applies to
+DEFENDING decisions too, and a probe that drives itself is choosing its own
+base rate.**
+
+**THE MARGIN IS THE ONE THING THAT MIGHT STILL MOVE.** `dblsweep --live 12` over
+the same recorded run — the sums are recorded, so every threshold is priced
+exactly off one run:
+
+| margin | dbl% | on FAIL | on MADE | disc | defender gain |
+|---|---|---|---|---|---|
+| **12** *(shipped)* | 32.5% | 74.5% | 15.0% | +59.4 | **+0.77** |
+| 15 | 29.1% | 70.2% | 11.9% | +58.3 | +1.22 |
+| **20** | 20.9% | 52.1% | 8.0% | +44.2 | **+1.45** |
+| 24 | 11.6% | 28.7% | 4.4% | +24.3 | +1.04 |
+| 32 | 5.3% | 16.0% | 0.9% | +15.1 | +1.14 |
+
+**20 roughly doubles the defender's gain over the shipped 12**, by doubling less
+often and more selectively — the payoff is asymmetric (a doubled contract that
+MAKES costs far more than a doubled set wins), so the break-even sits well above
+"more likely than not to fail".
+
+**DO NOT SHIP THAT OFF THIS TABLE.** The declarer-EV column carries ±2.4–3.0, so
+these candidates are not separated; the gain column has no error bar at all; and
+**this file already records a `DOUBLE_MARGIN` re-fit that was wrong, shipped and
+reverted (2026-08-16)**.
+
+### AND IT WAS ONE RUN'S LUCK. `DOUBLE_MARGIN` STAYS AT 12. (2026-08-20)
+
+**The +1.45 above did not replicate, and the constant does not move.** Re-taken
+on deals 320–640 — a deal sample the first run never touched, same tier, same
+harness — margin 20 reads **+0.966 against the shipped 12's +1.122**, i.e. the
+peak is not merely smaller, it is on the wrong side. Pooled over both runs,
+1280 recorded doubles:
+
+| margin | dbl% | on FAIL | on MADE | disc | value/round | **vs 12** | **SE** | **t** | moved |
+|---|---|---|---|---|---|---|---|---|---|
+| 0 | 57.7% | 90.3% | 42.2% | +48.1 | −1.748 | **−2.694** | 0.296 | **−9.11** | 288 |
+| 4 | 49.2% | 86.4% | 31.6% | +54.8 | −0.706 | **−1.652** | 0.252 | **−6.54** | 180 |
+| 8 | 41.9% | 82.0% | 22.8% | +59.2 | +0.206 | **−0.739** | 0.193 | **−3.82** | 88 |
+| **12** *(shipped)* | 34.8% | 71.8% | 17.3% | +54.6 | **+0.945** | — | — | — | 0 |
+| 16 | 29.8% | 63.1% | 14.1% | +49.1 | +1.144 | +0.198 | 0.168 | +1.18 | 64 |
+| 18 | 27.3% | 58.3% | 12.7% | +45.6 | +1.159 | +0.214 | 0.190 | +1.12 | 92 |
+| 20 | 22.7% | 49.0% | 10.1% | +38.9 | +1.208 | +0.263 | 0.240 | +1.09 | 152 |
+| 22 | 17.7% | 38.3% | 7.8% | +30.5 | +1.166 | +0.220 | 0.284 | +0.77 | 214 |
+| 24 | 14.2% | 29.1% | 7.1% | +22.0 | +0.819 | −0.127 | 0.309 | −0.41 | 258 |
+| 40 | 2.8% | 6.3% | 1.2% | +5.2 | +0.473 | −0.472 | 0.402 | −1.17 | 400 |
+
+**THE VALUE CURVE IS FLAT FROM 12 TO 22 AND FALLS OFF A CLIFF BELOW IT.** Every
+candidate above the shipped value sits at ~1 SE and none is separated from any
+other; every candidate below it is decisive in the other direction (−3.8 SE at
+8, −6.5 at 4, −9.1 at 0). **So the one thing this measurement establishes is
+that the 2026-08-16 re-fit downward was wrong**, which is already known — and it
+now has a number instead of a postmortem. There is no measured reason to move
+the constant up, and one run said there was.
+
+**THE ERROR BAR IS PAIRED AND EXACT, AND THAT IS WHY IT COULD BE HAD AT ALL.**
+The margin changes which doubles are TAKEN and nothing else — the auction tree
+does not model the Double, so the contracts are identical at every candidate,
+and a Double changes the payoff rather than the card play, so the rounds are
+too. Every round therefore appears in both arms and most contribute exactly
+zero. `moved` is how many rounds a candidate actually re-decides, so the SE is
+visibly a statement about those: **at margin 14 it is 34 rounds of 1280**, which
+is why a swept table with no error bar reads so much more confidently than the
+data supports. **A CRN-paired arena would have been the wrong instrument** — it
+would re-measure this same quantity through 18 points of per-deal payoff noise,
+at hours per candidate, when the recorded sums and the exact ground truth price
+every candidate for free.
+
+**THE METHOD NOTE, and this file has now recorded it five times.** A single 320-
+deal run put margin 20 at **+0.681 ± 0.351** — 1.94 SE, a plausible-looking
+peak, a smooth single-humped curve, and a mechanism that reads as sound (the
+asymmetric payoff really does push break-even above 50%). The independent sample
+put it at −0.156. **A smooth curve with a mechanism is not a replication.** This
+is the same constant the repo has already re-fitted wrongly once; the only thing
+that stopped it happening twice was running the second sample before writing the
+first one down as a result.
+
+**Instrument notes.** `dbl_truth` runs on its own bidserve channel for the reason
+`quality_of` documents — the `Solved` cache is one slot and an off-tier ask
+evicts the auction entry; the mirror still reads exactly +0.0000 with recording
+on. `dblreport` pools BOTH flips of a pair, since each flip is its own Double by
+its own tier and reading `events[0]` alone would halve the sample and silently
+drop every decision the second seating made.
+
+### THE PRIOR'S UNSPENT CHANNEL IS TRUMP LENGTH — and the DOUBLE turned out to be fine (2026-08-20)
+
+**THE PRIOR'S OWN AXIS IS FINISHED.** `tools/channelprobe.py`, 400 rounds at the
+Double, 200 resamples each, shipped tilt 0.35. Percentile of the declarer's TRUE
+holding inside the sampler's own distribution; **0.500 is unbiased**:
+
+| statistic | uniform | under the shipped tilt |
+|---|---|---|
+| **strength** *(the control)* | 0.737 | **0.508 ± 0.014** |
+| **trumps** — cards in the DECLARED denomination | 0.779 | **0.744 ± 0.011** |
+| **tops** — cards in the top two ranks | 0.624 | **0.457 ± 0.013** |
+| **voids** | 0.506 | 0.506 ± 0.005 |
+
+The control validates the instrument: the prior takes strength from 0.737 to
+0.508, i.e. it does exactly what it claims and there is nothing left on that
+axis. **Re-tuning tilt/curve/tries is spent.**
+
+**TRUMP LENGTH IS THE UNSPENT CHANNEL, AND IT IS BIGGER THAN THE BIAS THE PRIOR
+WAS BUILT FOR.** *(SPENT, 2026-08-20 — it corrects cleanly and is worth nothing;
+see "THE TRUMP CHANNEL: CORRECTED, CENTRED, AND WORTH NOTHING" below. Read the
+rest of this paragraph as the diagnosis, not as an open lever.)* 0.779 against the 0.765 that started this whole thread — and
+the tilt removes only **0.035 of a 0.279 bias, about 13% of it**. The reason is
+structural: `trump_mult = 2.0` makes trumps count double *in a scalar sum*,
+which is not the same as modelling suit LENGTH — a hand reaches the same sum
+with high cards anywhere. A declarer who NAMED a denomination is direct evidence
+about that suit specifically, and the sampler still deals them too few of it.
+
+`tops` is mildly OVER-corrected (0.624 → 0.457, past centre) and `voids` carries
+nothing. So of four dimensions: one finished, one large and untouched, one
+slightly over-shot, one empty.
+
+**TWO CHANNELS COULD NOT BE MEASURED AT ALL under a server-bot driver, and that
+is a fact about the harness rather than about the channels.** `to_double` drives
+with `bot.act`, which opens at the level it settles on and always swaps:
+
+* **bid path** — only **5 of 400** rounds had the declarer pushed above its
+  opening. Those 5 read **0.704 ± 0.105** against 0.506 for the rest, which
+  hints that a pushed declarer is badly under-rated, but n=5 is a hint and
+  nothing more.
+* **talon swap** — **400 of 400** swapped. Zero information; the split cannot
+  exist under this driver.
+
+Both need Expert-driven auctions (`ARENA_DEALS=1` records the position at the
+Double for exactly this).
+
+---
+
+**THE DOUBLE: the prior does not help it, and the Double has a much bigger
+problem than the prior.** `tools/dblprobe.py`, same 400 rounds, ground truth an
+exact double-dummy resolve under both the doubled and undoubled terms:
+
+| | prior ON *(shipped)* | prior OFF |
+|---|---|---|
+| doubles taken | 124 (**31.0%**) | 115 (28.8%) |
+| doubles that SHOULD be taken | 38 (9.5%) | 38 (9.5%) |
+| agreement with truth | 264 (**66.0%**) | 273 (**68.2%**) |
+| hit / false alarm / miss | 13 / **111** / 25 | 13 / **102** / 25 |
+| **value captured** | **−3.73** | **−3.33** |
+| doubles contracts that MADE | 111/362 = **30.7%** | 102/362 = 28.2% |
+| doubles contracts that FAILED | 13/38 = **34.2%** | 13/38 = 34.2% |
+
+**The prior makes the Double slightly WORSE.** Identical hits (13), nine MORE
+false alarms, lower agreement, worse value. So the one place the belief thread
+left open — "the Double is a binary make/fail call, not a move choice, so
+strategy fusion does not apply there" — measures negative too.
+
+**AND THE DOUBLE BARELY DISCRIMINATES AT ALL — RETRACTED, see the section above.
+On EXPERT-bid contracts it discriminates by 60.0 points and captures POSITIVE
+value; everything in this paragraph is the server-bot driver's base rate.** It
+doubles contracts that MADE at 30.7% and contracts that FAILED at 34.2% —
+three and a half points of separation. `value captured` is `sum(gain) / rounds` where
+`gain = payoff(undoubled) − payoff(doubled)`, so **−3.73 means the doubles taken
+COST the defender 3.73 payoff a round**, against **+2.84** available if they
+were targeted perfectly. The shipped Double is not a small inefficiency; it is
+net destructive on this measurement.
+
+**CAVEATS, and the first is load-bearing.** These rounds are driven by the
+SERVER bot, so the contracts arriving at the Double are its contracts, not
+Expert's — and this file's own rule is that **which bot did the bidding IS the
+distribution**. The ON/OFF comparison is clean because both arms share the
+driver; the ABSOLUTE rates may not transfer to an Expert-bid room, and should be
+re-run through `ARENA_DEALS` positions before anything is re-priced on them.
+`DOUBLE_MARGIN` was live at its shipped 12 in both arms, so this is the Double
+*with* its suppressor already applied.
+
+**AND `dblprobe` WAS MEASURING A DOUBLE THE SERVER DOES NOT PLAY.** Its `ask`
+said "the armed double request, exactly as main.py builds it" while sending
+NEITHER shipped knob — no `bid_prior`, no `double_margin`. Every number it ever
+produced described an adjacent decision. Fourth instrument of this exact shape
+after `cmatch`, `abench` and `nullbot`; both knobs now default to the shipped
+values with `DIS_BID_PRIOR=0` / `DIS_DBL_MARGIN=<x>` keeping the control arms
+reachable.
+
+**A METHOD NOTE worth carrying.** `channelprobe`'s percentile is MID-RANK, and
+that is not a refinement: three of its four statistics are small integers
+(0–13 trumps, 0–4 tops, 0–4 voids), so ties are the common case and a strict `<`
+counts every tie as "above me". The first cut did that and `voids` read exactly
+0.000 on every round. `beliefprobe` gets away with strict `<` because its
+statistic is a float sum that essentially never ties; a discrete one cannot.
+
+### THE TRUMP CHANNEL: CORRECTED, CENTRED, AND WORTH NOTHING (2026-08-20)
+
+**`BidPrior.trump_len` is built, correct and SHIPS AT 0.0.** The fourth
+consecutive entry in this file where a real, measured belief bias did not become
+a measured gain — and the first where the null came with its own decomposition,
+so it is not merely "no effect" but "here is where the apparent effect went".
+
+**THE CORRECTION WORKS, AND IT IS NEARLY FREE ON EVERY OTHER CHANNEL.** A flat
+worth per trump added on top of the rank curve — `exp(beta x strength + gamma x
+trumps)`, gamma 0 being the shipped prior byte for byte. Swept offline over one
+run of draws (`channelprobe sweep`, 400 rounds, 200 resamples each; `draws_of`
+is split from `score` so every candidate gamma is a lookup, the `swaplab`
+method):
+
+| gamma | strength *(control)* | trumps | tops | voids |
+|---|---|---|---|---|
+| **0.00** *(shipped)* | 0.508 | **0.744** | 0.457 | 0.506 |
+| 0.50 | 0.491 | 0.639 | 0.465 | 0.502 |
+| **1.00** | **0.483** | **0.530** | **0.477** | 0.497 |
+| 1.50 | 0.481 | 0.429 | 0.491 | 0.491 |
+
+At gamma 1.0 the trump channel centres and **nothing pays for it**: strength
+stays inside 2 SE of 0.500, voids do not move, and `tops` — which the shipped
+prior OVER-corrects to 0.457 — comes back toward centre. This is not the usual
+trade of one channel against another, which is what made it worth gating.
+
+**WHY A FLAT TERM AND NOT A BIGGER `trump_mult`:** the multiplier scales a
+trump's RANK, so the same strength sum is reachable with high cards anywhere and
+a long suit is worth only what its cards happen to be. A flat term values the
+sixth trump as much as the first, which no multiplier on a curve can express at
+any dose. That is the shape the 0.779 → 0.744 residual is made of.
+
+**THE GATE: 320 CRN-PAIRED DEALS, ONE CHANGE WIDE, EXACT GROUND TRUTH.**
+`expertst` self-play both arms, same seeds, `ARENA_DBL=1` so every Double is
+scored against an exact double-dummy resolve of both branches:
+
+| | gamma 0 *(shipped)* | gamma 1.0 |
+|---|---|---|
+| doubles taken | 33.1% | 35.6% |
+| **agreement with truth** | **81.9%** | **80.0%** |
+| **discrimination** | **+60.0** | **+56.9** |
+| value captured | +0.66 | +0.98 |
+| *of an available* | *+5.36* | *+5.84* |
+
+**PAIRED PER DEAL: +0.328 ± 0.784 a round, t = +0.42.** Nothing — and the two
+quality columns that carry no base rate at all (agreement, discrimination) both
+move slightly the WRONG way.
+
+**AND THE DECOMPOSITION IS THE FINDING.** The available value moved **+0.481 ±
+0.547** on the same pairing: the trump term changes the BIDDING as well as the
+doubling, so more contracts worth doubling arrived at the Double. Net of that,
+the decision itself is **−0.153 ± 0.565**. **The entire nominal gain is a base
+rate.** That is the exact mechanism behind the `dblprobe` claim this file
+retracted a day earlier, caught this time BEFORE it was written down as a
+result — which is the whole return on having understood it: *"which bot did the
+bidding IS the distribution"* applies to a bot bidding against ITSELF under a
+changed prior, not only to swapping one bot for another. **Any measurement of a
+defensive decision must report the base rate beside the value captured, or it
+cannot tell a better defender from an easier population.**
+
+**IT IS KEPT, OFF, AND THAT IS DELIBERATE.** `trump_len` is optional on the
+wire, so 0.0 is the old prior byte for byte and a cached wasm reads 0.0 — the
+`tilt = 0` discipline. No wasm was rebuilt, which is safe for exactly that
+reason and does mean the term reaches only the offline harnesses until one is.
+`DIS_BID_TRUMP_LEN` arms it for any future arm that needs a better-calibrated
+sampler for its own reasons.
+
+**THIS CLOSES THE BELIEF THREAD FOR THE SECOND TIME, on its last open channel.**
+The file already recorded it closed on the strength axis with a mechanism —
+`DOUBLE_MARGIN` discards every decision below its threshold and the prior
+sharpens precisely those, so the two are treatments for one disease and the
+margin gets there first. The trump channel was the one large uncorrected bias
+left, it corrects cleanly, and it lands in the same place. Four instruments now
+agree (the Double at +0.161 ± 0.623, card play at +0.617 ± 2.522,
+exploitability, and this): **in this game a better world distribution is not a
+better bot**, which is CAMPAIGN.md's strategy-fusion verdict arrived at from a
+fourth direction. Do not re-open this without a mechanism that is not "the
+sampler is biased" — that has now been true, correctable and worthless four
+times.
+
+### THE WIDENED ABSTRACTION CARRIES REAL SIGNAL — the equilibrium conditions on it (2026-08-20)
+
+The Edelkamp direction, first half. `CFR_FEATURES=2` makes the private bucket a
+JOINT index over strength x `tops` (quick tricks: cards in the top two ranks the
+seat can NAME), 8 buckets to 24. Solved on a purpose-built 1500-deal cache,
+200k external-sampling iterations, all 24 buckets occupied:
+
+**MEAN OPENING BY (strength bucket, tops bin) — and read across the ROWS:**
+
+| strength | tops=0 | tops=1 | tops=2 | spread |
+|---|---|---|---|---|
+| 0 | 1.43 | 1.57 | 1.68 | 0.24 |
+| 1 | 1.50 | 1.96 | 1.75 | 0.47 |
+| 2 | 1.49 | 2.00 | 1.89 | 0.52 |
+| 3 | 3.28 | 2.03 | 2.35 | 1.26 |
+| 4 | 3.83 | 3.28 | 2.67 | 1.16 |
+| 5 | 2.31 | 3.03 | 3.49 | 1.18 |
+| 6 | 2.92 | 2.85 | 3.95 | 1.10 |
+| 7 | 3.94 | 3.05 | 4.95 | 1.90 |
+
+**At the SAME strength, the equilibrium opens up to 1.9 rungs apart depending on
+quick tricks.** That is the whole claim the widening had to support: the feature
+is not merely correlated with the leaf, it changes what the solved policy does.
+A feature the policy ignored would have shown flat rows and the 24 buckets would
+have been 8 buckets in an expensive coat.
+
+**MEASURED BEFORE BUILT.** `tools/featlab.py` scored every candidate by the R^2
+it adds ON TOP of the strength already in the bucket — `tops` +0.0294,
+`shortest` +0.0216, `voids` +0.0114 against a 0.4013 baseline, over 1600
+seat-hands. The control in that table is `s_mean`: 0.3660 alone, **+0.0001
+incremental**, the same information restated. Anything that could not separate
+those two would be measuring correlation and calling it structure.
+
+**THE COST IS REAL AND VISIBLE IN THE OCCUPANCY.** 24 buckets over 3000
+seat-hands: median 117, **minimum 1**. The tail is thin, which is precisely what
+this file records as having wrecked the exploitability instrument once already
+(54% of a best responder's winnings coming from infosets nobody visited).
+Widening is only affordable against a bigger cache, which is the bootstrapping
+half of the idea and why the cache was rebuilt at 1500 rather than reused at 400.
+`CFR_FEATURES=3` (adding `shortest`, 72 buckets) is built and should not be run
+until the cache is several times larger again.
+
+**WHAT IS NOT ESTABLISHED, and it is the important half.** This says the widened
+equilibrium BIDS DIFFERENTLY, conditioned on a feature the narrow one cannot
+see. It says nothing about whether it PLAYS BETTER. Per the gate above,
+exploitability and head-to-head strength are close to independent in this game,
+so the only thing that can answer that is a CRN-paired arena — blueprint-wide
+against blueprint-narrow, and against Expert. Until that runs this is a
+structural result, not a strength result.
+
+### THE GATE: DIVERSE IS LESS EXPLOITABLE AND NOT STRONGER. IT DOES NOT SHIP. (2026-08-20)
+
+**`expertdt` vs `expertst`, CRN-paired, dd-resolved, 1550 paired deals — the
+same n the shipped `opp_temp` result was published at:**
+
+| | |
+|---|---|
+| **diverse − Expert** | **−0.6810 ± 0.5329 payoff/round** |
+| 95% CI | **[−1.725, +0.363]** |
+| auctions that differ | 1512/1550 (**97.5%**) |
+| mirror (`hard hard`) | exactly **+0.0000** |
+
+**1.28 SE, spanning zero, and pointing the wrong way. The ship bar is a positive
+head-to-head at equal time; this does not clear it, and `Diverse` costs ~2.5x.
+It stays behind its flag, off.**
+
+**THE TWO NUMBERS TOGETHER ARE THE FINDING, and they are worth more than either
+alone.** `Diverse` is **23% less exploitable** (9.14 → 7.06, split-half bands
+not overlapping) and **not measurably stronger**. This file already records the
+same dissociation in the other direction — Expert is MORE exploitable than Hard
+while beating it +0.957 ± 0.454. Two independent instances, opposite signs:
+
+> **In this game, exploitability and head-to-head strength are close to
+> independent. The exploitability instrument is not a proxy for strength, and a
+> campaign steering by it alone is steering by something else.**
+
+That is the durable lesson of the whole 2026-08-19/20 run and it applies
+retroactively: every exploitability figure in the sections above is a statement
+about exploitability, and none of them was ever evidence about strength.
+
+**WHY IT COMES OUT NULL, and the mechanism is legible in the arms' own
+statistics:**
+
+| | mean opening | mean settled | made |
+|---|---|---|---|
+| `expertdt` (diverse) | 2.56 | 4.00 | 66.7% |
+| `expertst` (Expert) | 2.42 | 4.17 | 66.5% |
+
+**97.5% of auctions take a different SEQUENCE and the aggregate SHAPE barely
+moves.** Diverse rearranges which line it walks without changing the
+distribution it lands on — so a best responder finds it harder to punish (fewer
+crisply predictable nodes) while the opponent across the table sees the same
+contracts made at the same rate. Less exploitable, equally strong, by
+construction.
+
+**AND IT LEAVES THE STANDING DIAGNOSIS UNTOUCHED, which was predicted before the
+run.** The conditional defect is that the opening barely varies with the hand;
+the equilibrium opens near 4 almost regardless. Diverse moved the mean opening
+**2.42 → 2.56 — a fifth of a rung.** It attacks the pass-vs-raise pessimism
+asymmetry, which is a real and different defect. Nothing here is evidence about
+the conditional one.
+
+**METHOD NOTE, and this file has now recorded it four times.** The running
+estimate wandered **−2.57 (n=196) → −2.02 → −1.51 → −0.77 → −0.21 (n=718) →
+−0.85 → −0.68 (n=1550)**. Any of those early reads, quoted alone, would have
+been a different conclusion — including a confident "diverse is clearly worse"
+at n≈200. The harness's own warning is the same one: a 300-deal read once said
++1.71 where the full run said −0.28.
+
+**COST OF THE MEASUREMENT, for whoever runs the next one:** ~5.5 deals/min on an
+uncontended 4-core box at 4 shards, so n=1550 is 4-5 hours; per-deal sigma ≈18.
+**And the harness's variance reduction is inert for expert-vs-expert races** —
+the quality covariate is captured only when a seat's tier is literally `hard`,
+so `q` is 0 throughout and the adjustment does nothing. That is true of this
+gate and of the `opp_temp` measurement whose ±0.454 was therefore raw. Fixing it
+costs one extra myopic ask per deal. See `tools/GATE_RESUME.md`.
+
+### MULTI-VALUED STATES CUT EXPLOITABILITY 23%, AND THE BLUEPRINT NUMBER IS CIRCULAR (2026-08-19)
+
+Three bidders, **same 400-deal cache, same instrument, same 90 rounds, same
+`CFR_PROBES=96`** — so the three are comparable TO EACH OTHER and to nothing
+else in this file:
+
+| bidder | BR seat 0 | BR seat 1 | exploitability | split-halves |
+|---|---|---|---|---|
+| CFR equilibrium (the floor) | −1.73 | +3.22 | **0.75** | — |
+| **base** — shipped Expert, `soft` temp 5 | +8.08 | +10.20 | **9.14** | 10.01 / 10.77 |
+| **diverse** — `OppModel::Diverse(6, 3)` | +4.64 | +9.47 | **7.06** | 7.76 / 7.71 |
+| **blueprint** — the equilibrium as the bidder | −0.88 | +3.81 | **1.46** | 1.67 / 1.59 |
+
+**THE ABSOLUTE NUMBERS DO NOT COMPARE TO THE 5.45 / 5.70 ON RECORD.** Different
+deal cache (400 deals against 2000), different corpus size (90 rounds against
+420), and the floor moves with it — 0.75 here against 1.47 there. This file
+already states the rule and it applies to its own new rows: read the two rows as
+a difference, and only within one cache.
+
+**DIVERSE IS THE REAL RESULT: 9.14 → 7.06, a 23% cut**, with split-halves 7.76 /
+7.71 against base's 10.01 / 10.77 — the two bands do not overlap. It is the first
+thing this campaign has measured that moves exploitability at all: the opening
+bias did not, the exact leaf did not, and the temperature knob's own sweep
+cancelled. And it is **not** circular — `Diverse` is a minimax variant, not the
+equilibrium, so the abstraction's best responder has no special purchase on it.
+
+**THE BLUEPRINT'S 1.46 IS LARGELY CIRCULAR AND MUST NOT BE READ AS STRENGTH.**
+The blueprint plays (an approximation of) the abstraction's own equilibrium, and
+the best responder is computed *inside that same abstraction*. A policy scoring
+near the floor of the game it was solved for is the expected outcome, not
+evidence about the real game — where denominations exist, the forever-ban binds,
+and a real opponent is not restricted to the ladder. **The only thing that can
+price the blueprint is a CRN-paired auction arena against Expert at equal time,
+with the mirror reading exactly 0.5000.** That has not been run.
+
+**COSTS, measured.** `Diverse` runs about **2.5x slower** than `soft` on the
+control arm (the base arm's three shards finished in ~6 minutes; diverse took
+~15). That is worth understanding before shipping: a MIN node under `soft`
+evaluates every child and memoises, while `Diverse` evaluates at most three but
+also prices every legal reply through `opp_myopic` first, and the narrower child
+set appears to share less of the memo. At the shipped 12s watchdog that matters.
+
+**WHAT IS NOT ESTABLISHED.** 90 rounds is well under the 200–414 this file's own
+readings use (200 read 6.01, 414 read 5.87 on the other cache), so treat all
+three as preliminary. No head-to-head has been run for either arm, and this file
+is explicit that exploitability and head-to-head strength are different
+quantities — Expert is *more* exploitable than Hard while beating it +0.957.
+
+**THE STAMP HAD THE SAME BUG AGAIN, ONE RELEASE LATER.** The blueprint corpus
+carried `dv: 0` and `temp: 5`, so `corpus_tiers` labelled it "soft temp 5
+(expert)" — the exact mislabelling the stamp exists to prevent, reintroduced by
+adding a bidder without adding it to the stamp. `bp` is in the row now. Fourth
+instrument bug of this shape.
+
+### THE 2026-08-16 RE-PRICE LEFT THREE OFFLINE HARNESSES AND FOUR DOC CLAIMS BEHIND (audited 2026-08-19)
+
+**The question that started it: "anything tested against the wrong scoring must
+be invalid — do we need to restart anything?" The answer is yes for two
+harnesses, no for a third, and no for anything measured on 2026-08-19.**
+
+`a317bb1` re-priced classic in one commit — make `N²+10 → N²+4`, set
+`N+10 → 2N+2`, and `JUMP_SET_BONUS 3 → 6`. It updated the engine, `rules.jsx`
+and `payoff.jsonl`. It did not update anything that builds its own `Contract`.
+
+**THE THREE STALE BINS.** Each was internally consistent, which is why each
+stayed wrong:
+
+| bin | carried | shipped | what it invalidates |
+|---|---|---|---|
+| `cmatch.rs` | `N²+10` / `N+10` / **`over: 0`** | `N²+4` / `2N+2` / `over: 1` | every contract-vs-points number, incl. "+0.55 at level 4, +1.25 at level 1" and "6–7 Nulls per 40 rounds" |
+| `nullbot.rs` | `N²+10` / `N+10` / `over: 1` | as above | every Null rate it has reported |
+| `abench.rs` | level-3 `make 19` / `set_base 13` / `over: 0` | `13` / `8` / `1` | **nothing — see below** |
+
+**`abench` SURVIVES, and the reason is worth stating rather than assumed.** Its
+numbers are NODE COUNTS (18,435k → 7,220k, −61%; MTD(f) −6%; the cross-world
+seeding null). Those measure hits in `bid::Solved`, which is keyed on the HAND
+and the denomination — the price list changes the arithmetic layered on top of a
+solve, never which solves happen. The caching results stand as measured.
+
+**`cmatch`, RE-RUN on the shipped price list** (80 deals x2, k=8):
+
+| level | edge (contract-aware − points) | mirror control | Nulls |
+|---|---|---|---|
+| 1 | **+2.562 ± 1.605** | **0.000 ± 1.602** | 12 vs 0 |
+| 4 | **+7.112 ± 3.442** | **0.000 ± 3.552** | 14 vs 0 |
+
+**AND THE HARNESS PRINTED NO ERROR BAR UNTIL NOW, WHICH IS THE REAL FINDING.**
+At n=160 the level-1 edge is **1.6 SE** and level 4 is **2.1 SE** — one interval
+spans zero and the other barely clears it. The recorded +1.25 and +0.55 were
+taken at n=80 with no interval printed at all, so results that were never
+established have read as settled fact for months. This file's own
+rule ("an interval spanning zero is not a direction") could not be applied to a
+harness incapable of producing one. It produces one now.
+* The mirror reading **exactly 0.000** is the good news: `cmatch` rotates which
+  bot is contract-aware across the two seatings, so the seed asymmetry that
+  makes `arena`'s null read +0.147 at n≈200 genuinely cancels here. Its pairing
+  is sounder than `arena`'s.
+* **The Null rate roughly HALVED, exactly as this file predicted and never
+  re-ran**: 12 per 160 rounds is 3 per 40, against the recorded 6–7 per 40. The
+  standing note — "the cliff is smaller and the Null rate should have fallen
+  with it. **Nobody has re-run it**" — is now discharged.
+* **THE CONCLUSION SURVIVES; THE EVIDENCE FOR IT IS WEAKER THAN THE FILE
+  IMPLIED.** The direction is positive at both levels with clean mirrors, and
+  the Null counts are a CATEGORICAL difference no error bar touches — the points
+  searcher takes zero Nulls in 160 rounds at either level, which is the
+  structural claim ("a points solver cannot see the consolation cliff") showing
+  up as a count rather than a margin. That is what actually justifies the
+  contract-aware tier; the payoff margins never carried it.
+* Do NOT read +2.562 against the old +1.25 as a ratio. The payoff CURRENCY moved
+  too (a level-1 make base went 11 → 5), which is this file's own
+  `DOUBLE_MARGIN` lesson: a measurement in payoff units is silently re-scaled by
+  a re-pricing.
+
+**FOUR DOC CLAIMS FROM THE SAME COMMIT, now corrected**: the section that
+DEFINES the jump bonus still said 3 (`rules.jsx` had 6 all along, so players
+were told the truth and the manual was not); "what shipping a rate change would
+entail" read as pending work when it had shipped; the leaf-bug postmortem quoted
+the set base as `(N + 10 + 3j) × D`; and `Dissonance.jsx`'s worked example
+showed `(N × N + 10)`.
+
+**VERIFIED CLEAN:** `payoff.jsonl` regenerates byte-identical, and a sweep of
+every `src/bin/*.rs` plus the Python and JSX finds no other copy.
+
+**THE MECHANICAL FIX, so this class cannot recur.**
+`tools/gen_shipped_terms.py` emits the plain per-level classic terms — and the
+jump axis — straight out of `engine._terms_for` into
+`tests/fixtures/shipped_terms.jsonl`; `dd::shipped_classic_terms` is the crate's
+ONE copy and two Rust tests hold it to that fixture. The pre-existing
+`wire::payoff_parity` pins the arithmetic that turns terms into a number; this
+pins WHICH TERMS the game charges, which is the half nothing covered and the
+half a bin inventing its own was free to get wrong. Verified non-vacuous
+(reverting the make base fails it), and a jump-rate test would have caught the
+documentation half too.
+
+**NOT AFFECTED: everything measured on 2026-08-19.** `pimcprops`, `sigma` and
+the alpha-mu arena all score in trick POINTS and never build a contract; the
+three `cfrlab` exploitability arms price through `engine._terms_for`, i.e. the
+live engine; and `priorexp` was written after the fix and reads
+`shipped_classic_terms`. None needs re-running.
+
 ## Not built yet
+
+
+**Before picking anything here up, read
+[`docs/dissonance-external-ai-survey.md`](../../docs/dissonance-external-ai-survey.md)
+(2026-08-19).** It maps the world's strongest AIs for adjacent games — Skat
+(Kermit, and Edelkamp's paranoia search / hope cards), bridge declarer play
+(NooK), heads-up poker (Libratus / Modicum / ReBeL), DouDizhu (PerfectDou) — onto
+the two open problems this file has measured, and it names published algorithms
+for both. The three findings worth knowing without opening it:
+
+* **No game with this shape has a superhuman AI** (two-player trick-taking WITH a
+  competitive auction). Skat is expert-level and is the closest cousin for CARD
+  PLAY; heads-up poker is the closest cousin for the AUCTION.
+* **The auction is a BETTER-CONDITIONED problem than the one poker solved**,
+  because its leaf is exactly solvable and cached per hand. `cfrlab`'s
+  equilibrium is currently only an instrument; poker's answer to "the abstraction
+  is too coarse to ship" was to make the blueprint a SEED and re-solve the real
+  subgame at decision time.
+* **`OppModel::Soft` and CAMPAIGN.md's "untried one-sided search" are both
+  hand-rolled cousins of published algorithms** — multi-valued states
+  (Brown/Sandholm/Amos) and αµ (Cazenave/Ventos) respectively. The two cheapest
+  items are pure diagnostics that need no new search: this game's three PIMC
+  properties (leaf correlation / bias / disambiguation factor), which predict in
+  advance how much strategy fusion is recoverable, and the sigma measurement this
+  file already asks for and has never run.
+
+### THE TREE IS PESSIMISTIC ONLY ABOUT THE BRANCH THAT CONTINUES — CONFIRMED, QUANTIFIED, LOCALISED (2026-08-20)
+
+**The first positive finding of this campaign.** Ten items attacked the SAMPLER
+(four nulls) or the ABSTRACTION (three refusals); this is the first instrument
+pointed at the defect the attribution kept naming, and the defect is real.
+
+**THE STATISTIC, and it needs no ground truth and no continuation assumption:**
+
+    shade(option) = tree value - price-list value, SAME option, SAME node
+
+Passing is a LEAF IN BOTH pricers, so its shade is an exact control. Bidding
+continues into a subtree whose modelled opponent holds our exact hand. Both
+vectors come off the SAME `entry.worlds` — `answer_auction` computes them
+together — so this cannot be a leaf-accuracy artefact or a sampling artefact.
+`tools/shadeprobe.py`, 400 deals, 900 decisions where both branches were legal,
+`expertst` driving its own auction:
+
+| | per-world payoff points |
+|---|---|
+| **passing (the CONTROL)** | **+0.000 ± 0.000** — exactly zero on every node |
+| bidding, every option unselected | **−0.735 ± 0.056** (13 SE) |
+| **bidding, the price list's favourite** | **−10.222 ± 0.391** (26 SE) |
+
+**THE TREE SHADES THE BID BRANCH BY ~10 POINTS ON THE OPTION IT IS ACTUALLY
+CHOOSING, AND THE PASS BRANCH BY EXACTLY NOTHING.** Consequence at the same
+nodes: **the tree concedes 44.4% where the price list concedes 29.0%.**
+
+**AND IT IS LOCALISED EXACTLY WHERE THE DEFECT WAS NAMED.** The shading decays
+monotonically as the standing bid rises — because a higher standing bid leaves
+fewer rungs, i.e. less subtree to be pessimistic about:
+
+| standing | n | bid shade | tree passes | price list passes |
+|---|---|---|---|---|
+| 1 | 264 | −1.193 ± 0.159 | **22.3%** | **0.0%** |
+| 2 | 67 | −1.803 ± 0.197 | **31.3%** | **1.5%** |
+| 3 | 108 | −1.192 ± 0.115 | **36.1%** | **9.3%** |
+| 4 | 170 | −0.472 ± 0.067 | **48.8%** | **34.1%** |
+| 5 | 181 | −0.111 ± 0.033 | 60.2% | 56.9% |
+| 6 | 100 | +0.027 ± 0.016 | 79.0% | 79.0% |
+| 7 | 9 | +0.013 ± 0.013 | 100.0% | 100.0% |
+
+At standing 6–7 the two pricers agree to the decision, and the shade is zero.
+Every point of divergence is at standing 1–4. **That is the "concedes level 4"
+finding, plus three rungs below it nobody had looked at.**
+
+**WHERE THE SHADING FLIPS THE DECISION (153 nodes), IT LOOKS WRONG — and this
+row is the confounded one.** Against an exact double-dummy resolve of each
+branch, the tree's choice is worth **−9.020 ± 1.816** against the price list's,
+better on 54 and worse on 99. **Read it as direction, not magnitude**, for two
+reasons that both cut the same way: the resolve prices each option as if the
+auction SETTLES there, and a bid's true value is at most its settled value (the
+opponent may raise over it), so it FLATTERS bidding; and the price list is not
+a better bidder in general — the tree beats the worlds-matched price list
+**+1.19 ± 0.32** head to head — so these 153 nodes are selected on disagreement.
+The shade rows above carry no such confound.
+
+**THE FIX IS A ONE-CONSTANT ADDITIVE CORRECTION AND NEEDS NO RUST CHANGE.**
+A per-option term the SERVER computes and the search adds is a pattern this
+package already ships twice (`double_margin`, `open_bias`), so a pass penalty —
+or equivalently a bid bonus — rides the same wire field. And it can be swept
+EXACTLY off recorded nodes rather than arena'd per candidate, the method that
+priced every `DOUBLE_MARGIN` for free: record each node's two vectors plus an
+exact resolve, and every candidate correction is a re-argmax over numbers
+already in hand. **The ship gate is unchanged and is not the sweep table** — a
+CRN-paired arena at equal time, mirror exactly +0.0000 — because this file
+already records one constant re-fitted on a sweep, shipped, and reverted.
+
+**TWO INSTRUMENT TRAPS, both of which produced clean plausible tables first.**
+* **The two pricers must land on the SAME WORLDS.** Sent to its own channel per
+  the `quality_of` discipline, the price list drew a fresh sample and the
+  control read **−13.2 ± 6.5** — two samples disagreeing, not a tree shading
+  anything. It now goes to the SAME `bidserve` processes right after the tree
+  ask, where the one-slot `Solved` entry is already filled with the union of
+  denominations and the price list wants a subset, so it is a pure cache hit.
+  **The `swap` block is load-bearing**: it is XOR'd into the cache key, so a
+  myopic ask omitting the talon model keys differently, misses, solves fresh
+  worlds, and evicts the tree's entry on the way out.
+* **IMPORTING `auction_arena` RUNS IT.** It reads `sys.argv` at module level and
+  its race body has no `__main__` guard, so the first run of this parsed argv as
+  mode "6", **k = 0**, and reported a full table off a search over ZERO worlds.
+  It is imported under a valid empty-window argv now, with `K` read back OFF the
+  arena so the two cannot diverge — rather than copying `ask()`, which is
+  exactly how `cfrlab` spent a campaign measuring Hard while claiming Expert.
+* And the control read `−0.000` rather than `0.000` until the **`1e-5 × myopic`
+  tie-break** was subtracted back off the tree's sums. It is recoverable exactly
+  (the same `myopic` vector is in hand), and the report now SHOUTS if the
+  control is ever non-zero rather than leaving it to be noticed.
+
+### AND BOTH DIAGNOSTICS ANSWER: IT IS CLAIRVOYANCE, AND ALMOST NONE OF IT IS LEGITIMATE (2026-08-20)
+
+**The two questions a correction had to answer before it could be designed, both
+measured on 400 deals / 973 decisions, control exactly zero at every arm.**
+
+**1. WHICH MECHANISM — the temperature is a direct lever, so it is the modelled
+opponent's clairvoyance, not the optimiser's curse.** Every temp is priced at
+the SAME node on the SAME worlds (`opp_model`/`opp_temp` are search parameters,
+not world parameters — they are not in `hand_key`), and the first drives the
+auction, so the arms are exactly paired:
+
+| opp_temp | pass (control) | bid, all options | bid, the chosen one | concedes |
+|---|---|---|---|---|
+| **5** *(shipped)* | +0.000 | −0.618 ± 0.043 | **−10.050 ± 0.378** | **41.1%** |
+| 8 | +0.000 | +0.243 ± 0.045 | −7.183 ± 0.369 | 36.3% |
+| 10 | +0.000 | +1.060 ± 0.051 | −4.820 ± 0.366 | 32.4% |
+| **12** | +0.000 | +2.112 ± 0.061 | −2.190 ± 0.363 | **29.0%** |
+| 15 | +0.000 | +4.190 ± 0.077 | +2.103 ± 0.357 | 23.1% |
+| 25 | +0.000 | +14.934 ± 0.111 | +15.827 ± 0.331 | 10.6% |
+
+**The shade on the option actually being chosen crosses zero at temp ≈ 13.5, and
+temp 12 puts the tree's concession rate at 29.0% — which is the price list's own
+rate to the decimal.** Two independent routes landing on the same place is the
+same pattern that first justified `DOUBLE_MARGIN = 20`.
+
+**2. HOW MUCH IS LEGITIMATE — essentially NONE of it**, which is the finding
+that changes what should be built (573 nodes where the tree bid; `settles here`
+is an exact resolve of the chosen bid, `realised` an exact resolve of the
+contract the auction actually reached, signed for the deciding seat):
+
+| | |
+|---|---|
+| the tree shades the chosen bid by | **−9.969 ± 0.442** |
+| **LEGITIMATE** (realised − settles here) | **−0.206 ± 0.855** — indistinguishable from zero |
+| **EXCESS** (shade − legitimate) | **−9.763 ± 0.915** |
+
+**Being outbid costs essentially nothing.** The standing worry — that a bid is
+genuinely worth less than its settled value because the opponent can raise over
+it, so correcting the shade would delete the lookahead — **is measured false**.
+The mechanism is the game's own shape: the set base rises with the level, so
+being raised over hands us a *better* defensive proposition, and the two roughly
+cancel. Almost the whole −10 is bias.
+
+**SO WHERE IS THE TREE'S MEASURED +1.19 OVER THE PRICE LIST?** Not in the
+discount — that is zero. It must be in WHICH bid the tree picks and in the
+capping play, not in WHETHER it bids. That is a coherent and testable split:
+**the tree adds value choosing among bids and adds bias choosing between bidding
+and passing.** Correcting the second need not cost the first.
+
+**THEREFORE: DO NOT SHIP AN ADDITIVE CONSTANT.** Three reasons, all measured
+here. The shade is not constant (−1.13 at standing 2, +0.02 at standing 6, where
+the two pricers already agree on 100% of decisions, so a flat term is pure
+damage there). The lever that moves it already exists and is already fitted. And
+a constant would be a fourth tuning knob where a knob is already in the payload.
+
+**THE IMPLEMENTATION IS THE EXISTING TEMPERATURE, GATED TO CONTESTED NODES.**
+`opp_temp` is read per REQUEST, and the server knows whether a pass is legal at
+this node because it built the option list — so a higher temperature can be sent
+exactly where the asymmetry lives and the opening can keep its fitted 5. **No
+new wire field, no Rust change, no wasm rebuild.** This is precisely the
+isolating change this file already said was required and had never been built:
+the recorded temp sweep (2/5/12 at n=150, +1.07/+0.99, "somewhere around 5–12,
+not a tuned optimum") was UNGATED, and the file's own explanation for why
+softening cancelled is that it *also lowered the opening across every bucket*.
+Gating it separates the two effects for the first time.
+
+**WHAT IS STILL NOT ESTABLISHED, and it is the whole ship question.** Every
+number here is about the ESTIMATOR, not about strength. Zeroing the shade is not
+self-evidently right — the price list concedes 29.0% and the *equilibrium*
+concedes 0–5%, so both pricers may be conceding far too much and matching the
+price list would only be matching a bidder the tree already beats. The gate is
+unchanged: a CRN-paired arena at equal time, mirror exactly +0.0000, **watching
+the settled distribution and make rate as well as payoff** — this file records
+Experts already bidding each other past the making point, and a correction that
+wins on points while pushing contracts up the ladder is buying strength the
+game's shape says it should not keep.
+
+**ONE ROW IS UNSTABLE AND IS THE ONE ALREADY FLAGGED AS CONFOUNDED.** The
+flipped-decision row read −9.020 ± 1.816 on the first sample and −2.752 ± 1.758
+on this one — same deals, different world draws (the six temp asks advance
+`bidserve`'s per-request seed, so a later deal is determinized differently),
+i.e. ~2.5 SE apart on nominally ±1.8 error bars. The shade rows are stable
+across the same two samples (−10.222 vs −10.050 on the chosen bid; concession
+44.4% vs 41.1%), which is the difference between a measurement and an artefact.
+**Do not quote the flip row as a magnitude.**
+
+### THE CONTESTED GATE: THE MECHANISM WORKS EXACTLY AS DESIGNED AND IT DOES NOT PAY (2026-08-20)
+
+**Built, pre-registered, run to the declared n, and it stays OFF.**
+`EXPERT_OPP_TEMP_CONTESTED = 12` softens the modelled opponent only at nodes
+where a PASS is legal; the opening — the one node that cannot pass — keeps its
+fitted 5. `expertsgt` vs shipped `expertst`, CRN-paired, dd-resolved:
+
+**−0.4786 ± 0.3951 payoff/round, 95% CI [−1.253, +0.296], t = −1.21, n = 2900.**
+
+**It does not ship, and the interesting part is that the sign FLIPPED on the way
+there.** The pre-registered first read at n=800 was **+1.1938 ± 0.7555** and was
+recorded as "promising, not established"; carried to the declared 2900 it is
+mildly NEGATIVE. In blocks of 500:
+
+| deals | 0–500 | 500–1000 | 1000–1500 | 1500–2000 | 2000–2500 | 2500–2900 |
+|---|---|---|---|---|---|---|
+| | **+2.62** | −1.08 | −1.93 | −0.88 | −1.47 | −0.04 |
+
+**The entire positive reading was the first 500 deals**, and every block after it
+is negative. This is the same lesson this file has now recorded five times
+(+1.71 at n=300 → −0.28 at n=2250; −2.57 at n=196 → −0.68 at n=1550; a
+`DOUBLE_MARGIN` peak that vanished on the next 320 deals) — and this time it
+caught a result that had already been written down as encouraging. **The
+pre-registration is what made that a correction rather than a shipped
+regression.**
+
+**AND THE MECHANISM DID EXACTLY WHAT IT WAS BUILT TO DO — which is now the
+FIFTH time in this campaign that a confirmed mechanism has not paid.** At the
+full 2900:
+
+| | gated (12) | shipped (5) |
+|---|---|---|
+| **mean opening** | **2.46** | **2.48** |
+| contracts declared | **3531** | 2269 |
+| decisions that PASS | **21.4%** | 31.4% |
+| mean settled level | **4.45** | 4.71 |
+| settled at level 6 | **23%** | 30% |
+| sacrifices | 14.0% | 12.4% |
+| **made** | **58.7%** | **60.3%** |
+
+**THE MAKE RATE IS THE ROW THAT EXPLAINS THE RESULT, AND IT FLIPPED WITH THE
+SAMPLE** (60.1% vs 58.9% at n=800; 58.7% vs 60.3% at n=2900). The gate wins far
+more auctions — 3531 contracts against 2269 — but the extra ones it buys are
+MARGINAL: it makes fewer of them and sacrifices more. So the tree's pessimism
+about contesting, although formally a bias by every measurement in the section
+above, was suppressing decisions that were close to worthless. **A shade can be
+a genuine estimator bias and still be suppressing nothing worth having.**
+
+**THE OPENING IS UNMOVED TO WITHIN 0.02 OF A RUNG WHILE THE CONCESSION RATE
+FALLS TEN POINTS.** That is the whole design goal, demonstrated: the ungated
+2/5/12 sweep cancelled *because softening also lowered the opening across every
+bucket*, and gating on "is a pass legal here" separates the two effects for the
+first time. The level-6 pile-up this file has flagged since the 800-round
+profile (28% settling at 6, 64% of those set) comes down to 22%, the settled
+mean falls, and the make rate rises — so the correction is not buying points by
+climbing the ladder.
+
+**METHOD NOTE, AND IT IS THE EXPENSIVE ONE.** Per-deal σ measured **21.3**, not
+the 18 the pre-registration budgeted with, so the declared first read at n=800
+bought ±0.76 rather than ±0.64 — **the pre-registration under-powered itself.**
+σ is a property of the ARM, not of the harness, and a new arm's σ must be
+measured on its first shard rather than inherited from the last campaign.
+**But the deeper lesson is that n=800 was never going to be enough at any σ:
+at this harness's noise, an arena arm's minimum useful n is ~2000–3000, and
+anything smaller can only produce a number that later gets corrected.** Declare
+that up front or do not start the run.
+
+**DOES A DIFFERENT TEMPERATURE HELP? PROBABLY NOT, AND THE REASON IS NOW
+STRUCTURAL RATHER THAN A GUESS.** 12 was chosen because the shade crosses zero
+at ≈13.5. Zeroing the shade turns out to be the wrong target: the marginal
+contracts it buys are ones the bot makes less often, so pushing FURTHER (15, 20)
+buys more of exactly what measured negative here. The old note that "the
+equilibrium concedes 0–5%, so both pricers may still concede far too much"
+survives only as a statement about the equilibrium — and this package already
+measured that equilibrium's blueprint losing by **−12.84** as a bidder. **Read
+this arm as closing the direction, not as one dose of it.** A further sweep
+needs a new reason, not a new number.
+
+**Verified before any number was taken**, and all three are the reason the
+result can be attributed to one change: unarmed `expertsgt` vs `expertst` reads
+**exactly +0.0000** (byte-identical when the gate is off), the armed mirror
+reads **exactly +0.0000**, and armed it changes 13 of 14 auctions.
+`test_the_contested_gate_softens_only_where_a_pass_is_legal` pins both ends and
+is verified non-vacuous by defeating the gate.
+
+### THE REAL ACTION SPACE: BUILT, CHEAP IN STATES, 51x IN SOLVER TIME (2026-08-20)
+
+**The ReBeL direction, costed properly — and the cost is not where this file
+said it was.** The standing finding was that the blueprint's binding constraint
+is its ACTION space (no denominations, ladder capped at 8), not its hand space.
+That is now built (`CFR_DENOMS`, off by default) and the arithmetic is measured
+rather than inferred.
+
+**THE STATE COUNT SAYS IT IS NEARLY FREE.** Enumerated exactly:
+
+| abstraction | reachable states |
+|---|---|
+| levels only, no denominations | 58 |
+| **+ real denominations** | **384** — 1.2x what `cfrlab` reaches today (321) |
+| + the per-player FOREVER-BAN's `used` masks | **30,373** — 79x on top |
+
+So denominations were never the expensive half. **The ban is**, and it alone
+would want ~19M iterations against the 200k that converges here. **Dropping the
+ban is measured, not assumed**: `cfrlab banned` put the pass rate at standing 4
+at 44% whether the seat's best denomination was still free or not (9,032 probed
+decisions), and the suit-priced ladder measured a same-level overtake costing
+1.13 points of difficulty against a level's 1.00 while paying the same. The
+rungs the ban withholds are rungs nobody wants.
+
+**AND THE STATE COUNT IS THE WRONG COST MODEL, WHICH IS THE ACTUAL FINDING.**
+External-sampling MCCFR samples ONE action at the opponent's node and evaluates
+EVERY action at ours, so its per-iteration cost is driven by the branching
+factor at our own nodes — not by how many distinct states exist. Measured in
+separate processes:
+
+| | opening actions | walk calls / iteration | ms / iteration |
+|---|---|---|---|
+| level-only (shipped) | 8 | **102** | 0.94 |
+| real action space | 40 | **4,128** | **47.6** |
+
+**40x the traversals and 51x the wall clock for 1.2x the states.** A converged
+200k-iteration solve goes from ~3 minutes to **~2.6 hours per seed**, before
+allowing that a 5x larger action set plausibly needs more iterations too.
+
+**SO THE PREREQUISITE IS A CHEAPER CFR, AND THIS FILE ALREADY NAMED IT.** The
+finer-ladder note says "converging it needs a cheaper CFR (outcome sampling) or
+a real compute budget", and that is exactly right for the same reason: outcome
+sampling draws OUR action as well, making per-iteration cost independent of the
+branching factor. **Build that before running this arm**, or budget ~2.6 hours a
+seed. Do not re-derive the state count and conclude it is cheap.
+
+**WHAT IS COMMITTED.** `DENOMS` packs a bid as `level * 8 + rank` so every
+existing reader that tests `a == -1` keeps working; `actions`/`_step`/`act_level`
+/`act_rank` are the only new vocabulary; `leaf` needed NO change because it
+already indexed the all-denomination cache by rank ("rank = holds"). The four
+paths that still read an action as a bare level — `blueprint_bid`,
+`best_response`, `_live_abstract_state`, `_path_to` — **refuse loudly** under
+`CFR_DENOMS` rather than bidding level 41. With the flag off the `curve` output
+is **byte-identical** to before the change.
+
+**TWO INSTRUMENT BUGS, BOTH OF THE FAMILY THIS FILE KEEPS RECORDING.**
+* **A control that only exercises the OFF path cannot catch an ON path that was
+  never wired.** `str.replace(pat, new, 1)` patched the FIRST match — which was
+  `jump_main`, not `curve_main` — so the playout that actually runs still read
+  packed action codes as levels. It printed a full, plausible table: settled
+  "levels" of 8..40, a settled mean of 23.33 and a make rate of 0.0%. The
+  byte-identical control passed throughout, because with DENOMS off both copies
+  are equivalent. **A duplicated function is not caught by a flag-off control.**
+* **A module reload that does not re-read its env flag reports the null twice.**
+  The first per-iteration benchmark deleted `sys.modules` entries and
+  re-imported with `CFR_DENOMS` flipped, and reported **1.16x** — it had
+  measured level-only both times, visible in hindsight as "infosets touched
+  1,218 vs 1,354" when a real DENOMS run touches 40x more. Re-run in SEPARATE
+  PROCESSES it is 51x. **Fork, do not reload, when a module reads its config at
+  import.**
+
+### THE OUTCOME SAMPLER WAS BIASED, AND EXTERNAL STILL WINS AT EQUAL TIME (2026-08-21)
+
+The sampler landed 2026-08-20 explicitly marked NOT correct: on the level-only
+abstraction it and external sampling converged to DIFFERENT equilibria, which is
+the signature of a mis-weighted estimator rather than a slow one. Both halves of
+that are now settled.
+
+**THE BUG, AND THE INSTRUMENT THAT FOUND IT.** A convergence ladder can only say
+THAT the two disagree — regret matching is a feedback loop, so a small weighting
+error moves the strategy, which moves the next estimate, and nothing localises.
+`tools/cfrcheck.py` asks the one question with an exact answer: freeze the
+strategy at UNIFORM, and both samplers estimate `v(I,a) - v(I)`, which a tiny
+game (`CFR_MAXL=3`, one deal) computes by enumeration. That property holds
+independently of the dynamics. It read:
+
+    external  mean |estimate - truth| / mean |truth| = 0.0021
+    outcome   mean |estimate - truth| / mean |truth| = 0.7115
+
+— decisive in one run, and it points at the weighting and nowhere else.
+
+The defect was a `descend(a)` closure that captured the PARENT's `q`. The
+recursive branch was entered with `q * probe[a]`, but a terminal reached by a
+PASS was priced at plain `q`: the sampled action's own probability was missing
+from exactly the outcomes that end the auction. Every such estimate came back
+shrunk toward zero (worst infoset: 2.83 against a true 6.64). The fix is
+structural rather than a patched line — **draw the action FIRST, compute
+`nq`/`n_opp` ONCE above the branch, then build the child** — so a terminal and a
+node cannot disagree about what has been sampled. `dbl_os` had the same omission
+twice over (the pass never entered the defender's reach either).
+
+After: 0.7115 -> 0.0187 at 400k iterations, and the residual is variance, not a
+second bias — 0.0459 / 0.0187 / 0.0095 across 100k / 400k / 1.6M is a clean
+`1/sqrt(n)` (4.83x over 16x).
+
+**A GATE THAT RUNS, NOT A NOTE.** `tests/test_cfr_unbiased.py` is the checker as
+a permanent test, on four hand-written deal records rather than the gitignored
+research cache (a test that needs an artifact is a test that skips, which this
+package forbids). It carries its own non-vacuity proof: a third test re-injects
+the defect's SHAPE — a missing multiplicative factor in `1/q` — at a MILDER
+constant than the real one, and asserts the band still catches it. The iteration
+counts are per sampler and sized off five seeds, because their costs and
+variances run in opposite directions: external ~0.005 at 60k, outcome
+0.036–0.045 at 400k, one 0.10 band over both.
+
+**AND THE COST RESULT DOES NOT SURVIVE AN EQUAL-TIME READING.** The 260x
+per-iteration figure is real and unchanged. It is also the wrong axis. Solving
+for real and pricing with the exact best response, on the level-only
+abstraction:
+
+      sampler     iters     solve      exploitability
+      external     200k     170.9s               1.04
+      outcome        1M      40.9s               6.58
+      outcome        4M     163.1s               4.11
+
+At matched wall clock external is **4x less exploitable**. Outcome sampling is
+converging — 12.15 / 6.58 / 4.11 at 200k / 1M / 4M — just far slower per
+iteration, which is the standard OS-MCCFR trade and not a defect. Its decay
+fits `n^-0.36` against external's `n^-0.24`, and extrapolating both into the
+`DENOMS` space (where external costs 51x more per iteration and outcome barely
+changes) still favours external, narrowly. **So the sampler is correct, it is
+kept, and it is NOT the automatic answer for the real action space** — this
+repo's own equal-time rule applies to solvers exactly as it does to arenas.
+What actually blocks pricing `DENOMS` is that `best_response` still reads
+actions as bare levels and refuses to run; that port, not the sampler, is the
+next thing standing between here and a number.
+
+### OUTCOME SAMPLING LOSES BY *MORE* IN THE SPACE IT WAS BUILT FOR (2026-08-21)
+
+Follow-on from the bias fix above, and it closes the sampler question rather
+than merely qualifying it. `best_response` is now abstraction-agnostic (it
+routes every transition through `_step`), so the real action space can finally
+be PRICED, and the equal-time comparison runs where it always should have.
+
+**`DENOMS`, 600 all-denomination deals, exact best response:**
+
+      sampler      iters     solve     exploitability
+      external        2k     63.7s               9.97
+      external        5k    131.4s               6.76
+      external       19k    351.6s               4.27
+      outcome       100k     12.7s              44.97
+      outcome       500k     64.4s              37.83
+      outcome       4.7M    641.7s              25.79
+
+At ~64 seconds external reads 9.97 against outcome's 37.83; at ~640 it is
+roughly 3.3 (extrapolated from 4.27 at 352s) against 25.79. **External is
+3.8x better at the small budget and ~8x at the large one, and the gap WIDENS.**
+External at TWO THOUSAND iterations beats outcome at a hundred thousand.
+
+**AND THAT REVERSES THE EXTRAPOLATION, WHICH IS THE lesson worth keeping.** The
+level-only reading (external 1.04 vs outcome 4.11 at matched time) plus the
+measured 51x cost gap suggested the two would be near-even here. They are not
+close. The extrapolation assumed each sampler's exploitability-vs-iterations
+curve TRANSFERS between abstractions, and outcome sampling's does not: widening
+the action space 5x costs external only per-iteration TIME, but it costs
+outcome sampling VARIANCE -- each infoset is visited a fifth as often per
+trajectory and every `1/q` weight grows. Its cost advantage is real and its
+statistical efficiency degrades faster than the advantage buys back. **A
+per-iteration cost ratio is not a convergence ratio, and fitting a decay curve
+in one abstraction says nothing about another.**
+
+**WHAT THIS MEANS FOR THE SAMPLER.** It is correct, it is gated
+(`tests/test_cfr_unbiased.py`), and it stays -- it is the right tool if the
+action space ever grows to where external's per-node branching is genuinely
+unaffordable (the FOREVER-BAN's 30,373 states, say). It is NOT the answer for
+`DENOMS`, and `CFR_SAMPLING` should stay on `external` for everything this
+campaign currently measures. Do not re-open it on the strength of the 260x.
+
+### THE LEVEL-ONLY ABSTRACTION COSTS 14 POINTS A DEAL, AND NOW IT IS MEASURED (2026-08-21)
+
+The question the whole `DENOMS` arm exists for, finally asked properly.
+
+**WHY IT COULD NOT BE ASKED BEFORE, and it is not the reason I assumed.** Two
+exploitability numbers from two abstractions cannot be compared: exploitability
+is only defined against a best responder, and the two abstractions hand the
+responder different action sets, so they are numbers from different games.
+Ranking them is meaningless. What was needed was ONE game and ONE responder.
+
+**THE EMBEDDING IS EXACT, WHICH IS WHAT MAKES IT POSSIBLE.** The level-only
+game is a strict SUB-GAME of the wide one, not an approximation:
+
+    pass            -> pass
+    HOLD            -> the SAME level at rank `holds + 1`
+    raise to `L`    -> level `L` at rank 0
+
+`leaf` already prices a contract as "rank = holds", and level-only's `_step`
+resets `holds` on a raise and increments it on a HOLD -- so a level-only state
+`(level, prev, holds)` and a wide state `(level, prev, rank)` with
+`rank == holds` are THE SAME CONTRACT at THE SAME PAYOFF. The lift is a
+relabelling. `tools/liftlab.py` does it; `tests/test_lift_is_faithful.py`
+PROVES it, by the one identity that settles the matter: restrict the wide
+responder to the lift's image and the exact best response must come back at the
+level-only value to floating point. It does. The test also asserts the two
+things that would make that identity worthless -- that handing the responder
+the full denomination set MOVES the number (and never downward, since a larger
+action set cannot do worse), and that a one-character mis-lift is caught.
+
+**THE RESULT, at matched wall clock (324s vs 343s), 600 all-denomination
+deals:**
+
+      policy                 backoff   BR seat 0   BR seat 1   exploitability
+      level-only, LIFTED       False       14.73       19.07            16.90
+      level-only, LIFTED        True       15.93       19.33            17.63
+      wide (native)            False        5.23        2.05             3.64
+      wide (native)             True        5.23        2.05             3.64
+
+**14.0 points a deal.** And it is not a convergence artifact in either
+direction: 2.5x the level-only iterations moved it 21.33 -> 17.63 while the
+wide arm sat at 3.64, so the narrow policy is converging toward something well
+above the wide one, not merely under-solved.
+
+**READ THE BACKOFF ROWS, NOT THE NO-BACKOFF ONES.** `Policy`'s docstring
+records why an unseen infoset conceding makes a number "mostly the sample
+size", and the lifted policy is structurally the one with holes (12.9% of
+reach-weighted lookups). That is the artifact that would manufacture exactly
+this answer, so it was checked rather than argued: with backoff on, the holes
+close and the gap gets BIGGER (16.90 -> 17.63). Coverage was flattering the
+narrow arm, not damning it.
+
+**THIS IS THE SAME DEFECT THE HEAD-TO-HEAD ALREADY SAW, from the other end.**
+The blueprint lost to Expert by **-12.84 +- 1.47** and the mechanism was one
+number: it made **49.6%** of its contracts against Expert's **73.0%** at the
+same levels -- because a level chosen blind to the suit is a commitment the
+real hand may not support. That was inferred from a play-out; this measures it
+directly against a best responder. The two figures are close and the
+correspondence is suggestive, but they are NOT the same quantity (points a deal
+against an exact responder vs points a round against Expert) and should not be
+quoted as one number.
+
+**WHAT THIS UNBLOCKS AND WHAT IT DOES NOT.** It says the widened action space
+is where the auction's remaining money is, which is the first positive result
+this campaign has had after a long run of nulls (eval weights, exact leaf,
+trump channel, contested gate, diverse continuations). It does NOT yet ship
+anything: `blueprint_bid` and `_path_to` still refuse under `DENOMS`, because
+serving needs to map an abstract action back onto a REAL bid -- a new mapping,
+not a transition `_step` already owns. That port is the next step, and unlike
+every other item on the list it now has a measured 14-point prize attached.
+
+### THE TWO ARCHITECTURAL REWRITES, PARKED WITH THEIR REASONS (noted 2026-08-20)
+
+Neither is scheduled. They are here because the question "should this be a
+neural net or an MCTS" now has a measured answer for the ARCHITECTURE THIS GAME
+ALREADY HAS, and the answer is no — so anyone returning to it should know which
+two things were NOT ruled out, and why they are different in kind.
+
+**WHAT WAS RULED OUT, so it is not re-argued.** A net cannot help the CARD-PLAY
+leaf: that leaf is an exact double-dummy solve, and every other game in this
+repo carries a net precisely because its leaf cannot be solved. A net there buys
+only SPEED, speed buys WORLD COUNT, and world count is measured at its stop
+(`pimc:24` vs `pimc:8` reads 50.0%; `pimc:32` over `pimc:8` is +0.21 for four
+times the compute). MCTS fails for the mirror reason — it is what you reach for
+when you cannot solve, and here a world solves exactly in ~20–74ms. And the
+prize is small either way: **89.5% of card decisions are already exactly
+optimal**, the whole oracle gap is 0.79 pts/round on a 5-point pool, CAMPAIGN.md
+reads most of that as irreducible, and IIMC — the correct tool for the reducible
+part — measured **+0.067 ± 0.053**. In the AUCTION a net is an eval, and the
+exact leaf (`threat_value`, the best evaluation obtainable) measured null twice.
+
+**WHAT THAT LEAVES.** Both survivors replace the whole approach rather than a
+component, which is why neither is refuted by anything above.
+
+* **R-NaD / DeepNash. NOT RUNNABLE IN THIS CONTAINER, and here is exactly what
+  it would need** (checked 2026-08-20): 4 CPU cores, 15GB RAM, **no GPU, and
+  neither torch, numpy, jax nor scipy installed**. R-NaD is model-free deep RL
+  over millions of self-play games; it needs a GPU box, a DL framework, and the
+  auction+play loop exposed as a stepped RL environment (the Rust engine is the
+  simulator but has no such API). None of that is a judgement about the method —
+  it is the one candidate here with a plausible route to a STEP change — and all
+  of it is why nothing about it can be measured on this machine. It is the only
+  method on the survey's list that took a
+  two-player zero-sum imperfect-information game of this size to top-human, and
+  it uses NO SEARCH — regularised Nash dynamics, model-free, over millions of
+  self-play games. It is the only candidate with a plausible route to a STEP
+  change rather than another tenth of a point. Two things here make it less
+  far-fetched than it sounds: the Rust engine is already a fast simulator, which
+  is the usual blocker, and **CoC already proves this repo can serve a fetched
+  `.bin` model client-side**, so the serving path exists. The cost is weeks to
+  months of training compute against a Hard tier whose whole edge over greedy is
+  +1.10 pts/round — disproportionate for this site, which is why it is parked
+  and not scheduled.
+* **ReBeL.** Better SUITED in principle than anywhere it has been applied: its
+  hard part is a value function over public belief states at a depth limit, and
+  this game's leaf is *exactly solvable and cached per hand*, which is the part
+  that makes it expensive elsewhere. It is the natural successor to the
+  blueprint arm that failed — poker's own answer to "the abstraction is too
+  coarse to ship" was to make the blueprint a SEED and re-solve the real subgame
+  at decision time, which is exactly what `cfrlab`'s blueprint never did.
+
+**IF EITHER IS PICKED UP, the gate is unchanged and is the lesson of this whole
+campaign: a CRN-paired arena at equal time, mirror reading exactly +0.0000.**
+Not exploitability — two independent arms measured exploitability and
+head-to-head strength close to INDEPENDENT in this game, and the blueprint that
+scored near the abstraction's floor lost by −12.84 a round.
 
 * **Announcements beyond Sharp.** `auction_payoff_options` enumerates Sharp but
   never Open, and the multiplier is priced without modelling the extra risk.
