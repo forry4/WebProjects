@@ -525,6 +525,23 @@ def leaf(rec, level, prev, declarer, holds=0, dbl=False):
 #: wants. The abstraction is entitled to leave it out.
 DENOMS = os.environ.get("CFR_DENOMS") not in (None, "", "0")
 
+#: `external` (the shipped sampler) or `outcome`. See `CFR.walk_os`.
+SAMPLING = os.environ.get("CFR_SAMPLING", "external")
+#: Exploration mixed into the traversing player's sampling policy under outcome
+#: sampling, so the trajectory probability cannot collapse and blow up 1/q.
+OS_EPS = float(os.environ.get("CFR_OS_EPS", "0.6"))
+
+
+def _pick(acts, dist, rng):
+    """Draw one action from `dist`. The tail falls to the last legal action,
+    which matters only for floating-point residue, never for a real mass."""
+    r, acc = rng.random(), 0.0
+    for a in acts:
+        acc += dist[a]
+        if r <= acc:
+            return a
+    return acts[-1]
+
 #: Actions stay INTs so every existing reader that tests `a == -1` or sorts them
 #: keeps working; under `DENOMS` a bid packs as `level * 8 + rank`. 8 rather
 #: than 5 so the rank never carries into the level under any `MAXL`.
@@ -717,7 +734,7 @@ def load_blueprint():
         rec = recs[rng.randrange(len(recs))]
         cfr.t = i + 1
         for me in (0, 1):
-            cfr.walk(rec, 0, 0, 0, 0, me, rng)
+            cfr.iterate(rec, me, rng)
     _BP["cfr"], _BP["cuts"] = cfr, cuts
     return _BP
 
@@ -1124,6 +1141,136 @@ class CFR:
         for a in acts:
             self.R[key][a] = max(self.R[key][a] + vals[a] - node, 0.0)
         return node
+
+    #: OUTCOME-SAMPLING MCCFR (2026-08-20) -- ONE trajectory per iteration.
+    #:
+    #: WHY IT EXISTS. `walk` above is EXTERNAL sampling: it samples one action at
+    #: the opponent's node and evaluates EVERY action at ours, so its
+    #: per-iteration cost tracks the BRANCHING FACTOR at our own nodes rather
+    #: than the state count. Measured, that is what blocks the real action space:
+    #: giving a bid a denomination as well as a level takes the abstraction from
+    #: 321 reachable states to 384 (1.2x) but from **102 to 4,128 walk calls per
+    #: iteration** (40x), and 0.94 -> 47.6 ms. A converged 200k solve goes from
+    #: ~3 minutes to ~2.6 hours a seed.
+    #:
+    #: Outcome sampling draws ONE action at EVERY node, so a traversal is a
+    #: single path and its cost is the DEPTH -- independent of how many actions
+    #: each node offers. That is the whole point, and it is what makes
+    #: `CFR_DENOMS` affordable.
+    #:
+    #: THE PRICE IS VARIANCE, PAID FOR BY IMPORTANCE WEIGHTING, and this is the
+    #: part that fails silently if it is wrong: a mis-weighted estimator still
+    #: runs, still converges to SOMETHING, and still prints a plausible policy.
+    #: So the gate is not that it runs -- it is that on the SAME abstraction it
+    #: reaches the SAME equilibrium as `walk`. `cfrlab sampling` is that check.
+    #:
+    #: `eps` mixes the traversing player's sampling policy toward uniform so the
+    #: trajectory probability cannot collapse toward zero and blow the 1/q
+    #: weight up. 0.6 is Lanctot's default for OS-MCCFR.
+    def iterate(self, rec, me, rng):
+        """One training iteration for `me` -- THE ONE PLACE that knows which
+        sampler is live, so a loop cannot half-switch and measure a mixture."""
+        if SAMPLING == "outcome":
+            return self.walk_os(rec, 0, 0, 0, 0, me, rng)
+        if SAMPLING != "external":
+            raise SystemExit(f"unknown CFR_SAMPLING {SAMPLING!r}")
+        return self.walk(rec, 0, 0, 0, 0, me, rng)
+
+    def walk_os(self, rec, level, prev, holds, to_act, me, rng,
+                pi_me=1.0, pi_opp=1.0, q=1.0):
+        """One sampled trajectory. Returns `(u, tail)`.
+
+        `u` is the terminal utility to `me` DIVIDED BY `q`, the probability the
+        trajectory was sampled; `tail` is the product of the sampled actions'
+        probabilities under sigma from here down. Those two are what the regret
+        and average-strategy updates need, and returning them together is what
+        keeps the recursion single-pass.
+        """
+        holder = 1 - to_act if level else None
+        acts = actions(level, holds)
+        key = (rec["b"][to_act], level, prev, holds)
+        sig = self.strategy(key, acts)
+
+        # TAGGED, not a bare 2-tuple. The first version returned `(u, tail)` for
+        # a terminal and `(None, state)` for a node, so a terminal unpacked its
+        # own utility into the "is it a leaf" slot and the caller then tried to
+        # unpack a float. Tagging costs nothing and the untagged version fails
+        # as a TypeError only because `tail` happens not to be a tuple.
+        def descend(a):
+            if a == -1:
+                if WITH_DOUBLE:
+                    return "leaf", self.dbl_os(rec, level, prev, holds, to_act,
+                                               me, rng, pi_me, pi_opp, q)
+                u = leaf(rec, level, prev, holder, holds) * (1 if holder == me else -1)
+                return "leaf", (u / q, 1.0)
+            return "node", _step(level, prev, holds, a)
+
+        if to_act == me:
+            # SAMPLE OURSELVES TOO -- the difference from `walk`, and the only
+            # reason this is cheap. Mixed toward uniform so `q` stays bounded.
+            probe = {a: OS_EPS / len(acts) + (1 - OS_EPS) * sig[a] for a in acts}
+            a = _pick(acts, probe, rng)
+            kind, val = descend(a)
+            if kind == "node":
+                u, tail = self.walk_os(rec, val[0], val[1], val[2], 1 - to_act,
+                                       me, rng, pi_me * sig[a], pi_opp,
+                                       q * probe[a])
+            else:
+                u, tail = val
+            # The counterfactual regret of the SAMPLED action against the node's
+            # own value, importance-weighted by the opponent's reach. Every
+            # unsampled action gets the negative share, which is what makes the
+            # estimator unbiased over iterations rather than only in expectation
+            # at the sampled one.
+            w = u * pi_opp
+            for b in acts:
+                r = w * tail * ((1.0 - sig[a]) if b == a else -sig[a])
+                self.R[key][b] = max(self.R[key][b] + r, 0.0)
+            return u, tail * sig[a]
+
+        a = _pick(acts, sig, rng)
+        kind, val = descend(a)
+        if kind == "node":
+            u, tail = self.walk_os(rec, val[0], val[1], val[2], 1 - to_act, me,
+                                   rng, pi_me, pi_opp * sig[a], q * sig[a])
+        else:
+            u, tail = val
+        # THE AVERAGE STRATEGY IS THE OPPONENT'S HERE, exactly as in `walk` --
+        # each seat's average is accumulated during the OTHER seat's traversal,
+        # and both traversals run every iteration. Weighted by their own reach
+        # over the sampling probability, which `walk` does not need because
+        # external sampling already visits these nodes at the right rate.
+        wt = self.t * pi_opp / q
+        for b in acts:
+            self.S[key][b] += wt * sig[b]
+        return u, tail * sig[a]
+
+    def dbl_os(self, rec, level, prev, holds, defender, me, rng,
+               pi_me, pi_opp, q):
+        """`dbl_node`'s outcome-sampled twin -- one action, same weighting."""
+        decl = 1 - defender
+        key = ("D", rec["b"][defender], level, prev, holds)
+        acts = [0, 1]
+        sig = self.strategy(key, acts)
+        sign = 1 if decl == me else -1
+
+        def val(a):
+            return leaf(rec, level, prev, decl, holds, dbl=bool(a)) * sign
+
+        if defender == me:
+            probe = {a: OS_EPS / 2 + (1 - OS_EPS) * sig[a] for a in acts}
+            a = _pick(acts, probe, rng)
+            u = val(a) / (q * probe[a])
+            w = u * pi_opp
+            for b in acts:
+                r = w * ((1.0 - sig[a]) if b == a else -sig[a])
+                self.R[key][b] = max(self.R[key][b] + r, 0.0)
+            return u, sig[a]
+        a = _pick(acts, sig, rng)
+        wt = self.t * pi_opp / q
+        for b in acts:
+            self.S[key][b] += wt * sig[b]
+        return val(a) / (q * sig[a]), sig[a]
 
     def dbl_node(self, rec, level, prev, holds, defender, me, rng):
         """The DEFENDER's Double, priced as its own decision.
@@ -1559,7 +1706,7 @@ def jump_main(rate, iters, seed=1234):
         rec = recs[rng.randrange(len(recs))]
         cfr.t = _i + 1
         for me in (0, 1):
-            cfr.walk(rec, 0, 0, 0, 0, me, rng)
+            cfr.iterate(rec, me, rng)
     eqp = Policy({k: {a: max(x, 0.0) / sum(max(y, 0.0) for y in s.values())
                       for a, x in s.items()}
                   for k, s in cfr.S.items()
@@ -2095,7 +2242,7 @@ def curve_main(spec, iters, seed=1234):
         rec = recs[rng.randrange(len(recs))]
         cfr.t = _i + 1
         for me in (0, 1):
-            cfr.walk(rec, 0, 0, 0, 0, me, rng)
+            cfr.iterate(rec, me, rng)
     eqp = Policy({k: {a: max(x, 0.0) / sum(max(y, 0.0) for y in s.values())
                       for a, x in s.items()}
                   for k, s in cfr.S.items()
@@ -2412,7 +2559,7 @@ def br_main(iters):
             rec = recs[rng.randrange(len(recs))]
             cfr.t = _i + 1
             for me in (0, 1):
-                cfr.walk(rec, 0, 0, 0, 0, me, rng)
+                cfr.iterate(rec, me, rng)
         eq = {}
         for key, s in cfr.S.items():
             tot = sum(max(x, 0.0) for x in s.values())
@@ -2559,7 +2706,7 @@ def main():
         rec = recs[rng.randrange(len(recs))]
         cfr.t = _i + 1
         for me in (0, 1):
-            cfr.walk(rec, 0, 0, 0, 0, me, rng)
+            cfr.iterate(rec, me, rng)
         if (i + 1) % max(1, iters // 5) == 0:
             print(f"  {i+1}/{iters} iterations", flush=True)
 
