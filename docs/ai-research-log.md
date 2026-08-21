@@ -3259,7 +3259,7 @@ imports.
 
     archive  claude/dissonance-research-2026-08-archive   <- use this
     working  claude/superhuman-ai-game-research-o5pwel
-    base     00170c9        head 2477cdf        53 commits
+    base     00170c9                                        ~55 commits
 
 **BOTH OF THOSE ARE BRANCHES, WHICH IS NOT WHAT THIS WANTS TO BE.** A branch is
 a moving pointer, not durable storage: delete it and the commits become
@@ -3267,12 +3267,15 @@ unreachable and are eventually pruned. The archive branch exists only so the
 working branch can be cleaned up without taking the commits with it — it is a
 second pointer, not a stronger one.
 
-**The durable form is a tag, and it takes one command from a checkout with push
-rights** (the session that produced this work could not create it — tag pushes
+**The durable form is a tag, and it takes three lines from a checkout with push
+rights.** It resolves the archive BRANCH rather than a commit id on purpose:
+this block named a head SHA for exactly one commit before the commit that
+updated it made it stale, which is the failure it is itself warning about (the session that produced this work could not create it — tag pushes
 returned HTTP 403, since its credentials are scoped to the `claude/*` branch
 namespace):
 
-    git tag -a dissonance-research-2026-08 2477cdf -m "Dissonance AI research campaign, 2026-08"
+    git fetch origin claude/dissonance-research-2026-08-archive
+    git tag -a dissonance-research-2026-08 FETCH_HEAD -m "Dissonance AI research campaign, 2026-08"
     git push origin dissonance-research-2026-08
 
 Once that tag exists, **both branches are safe to delete** and this block should

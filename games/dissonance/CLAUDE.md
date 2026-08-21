@@ -3,8 +3,7 @@
 > **The AI-research sections below reference tools that are not on `main`** —
 > `tools/cfrlab.py`'s solver arms, `cfrcheck`, `liftlab`, `shadeprobe`,
 > `dblreport`, `channelprobe`, `featlab` and three Rust bins. They are on branch
-> **`claude/dissonance-research-2026-08-archive`** (head `2477cdf`), unmerged on
-> purpose: nothing on it is user-visible. See the head of
+> **`claude/dissonance-research-2026-08-archive`**, unmerged on purpose: nothing on it is user-visible. See the head of
 > [`docs/ai-research-log.md`](../../docs/ai-research-log.md) for the inventory,
 > what each one measures, and the one command that turns that branch into a
 > proper tag.
