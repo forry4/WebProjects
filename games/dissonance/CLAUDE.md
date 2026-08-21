@@ -5857,32 +5857,53 @@ across the same two samples (−10.222 vs −10.050 on the chosen bid; concessio
 44.4% vs 41.1%), which is the difference between a measurement and an artefact.
 **Do not quote the flip row as a magnitude.**
 
-### THE CONTESTED GATE: THE MECHANISM WORKS EXACTLY AS DESIGNED, THE PAYOFF IS NOT ESTABLISHED (2026-08-20)
+### THE CONTESTED GATE: THE MECHANISM WORKS EXACTLY AS DESIGNED AND IT DOES NOT PAY (2026-08-20)
 
 **Built, pre-registered, run to the declared n, and it stays OFF.**
 `EXPERT_OPP_TEMP_CONTESTED = 12` softens the modelled opponent only at nodes
 where a PASS is legal; the opening — the one node that cannot pass — keeps its
 fitted 5. `expertsgt` vs shipped `expertst`, CRN-paired, dd-resolved:
 
-**+1.1938 ± 0.7555 payoff/round, 95% CI [−0.287, +2.674], t = +1.58, n = 800.**
+**−0.4786 ± 0.3951 payoff/round, 95% CI [−1.253, +0.296], t = −1.21, n = 2900.**
 
-**Spans zero. Not established, and it does not ship on this.** Per shard of 200
-it read +2.59 / +2.02 / +1.56 / **−1.40** — the spread this package's ledger
-warns about four times over, and the reason the read was pre-registered.
+**It does not ship, and the interesting part is that the sign FLIPPED on the way
+there.** The pre-registered first read at n=800 was **+1.1938 ± 0.7555** and was
+recorded as "promising, not established"; carried to the declared 2900 it is
+mildly NEGATIVE. In blocks of 500:
 
-**BUT EVERY SECONDARY READ-OUT IS FAVOURABLE, AND THE PRE-DECLARED "HOLD"
-CONDITION DID NOT FIRE.** The gate was declared a hold if it won on payoff while
-pushing contracts up the ladder. It did the opposite:
+| deals | 0–500 | 500–1000 | 1000–1500 | 1500–2000 | 2000–2500 | 2500–2900 |
+|---|---|---|---|---|---|---|
+| | **+2.62** | −1.08 | −1.93 | −0.88 | −1.47 | −0.04 |
+
+**The entire positive reading was the first 500 deals**, and every block after it
+is negative. This is the same lesson this file has now recorded five times
+(+1.71 at n=300 → −0.28 at n=2250; −2.57 at n=196 → −0.68 at n=1550; a
+`DOUBLE_MARGIN` peak that vanished on the next 320 deals) — and this time it
+caught a result that had already been written down as encouraging. **The
+pre-registration is what made that a correction rather than a shipped
+regression.**
+
+**AND THE MECHANISM DID EXACTLY WHAT IT WAS BUILT TO DO — which is now the
+FIFTH time in this campaign that a confirmed mechanism has not paid.** At the
+full 2900:
 
 | | gated (12) | shipped (5) |
 |---|---|---|
-| **mean opening** | **2.42** | **2.44** |
-| opening distribution | 52/8/10/10/13/5/1% | 53/7/10/10/13/5/1% |
-| contracts declared | **970** | 630 |
-| decisions that PASS | **21.5%** | 31.3% |
-| mean settled level | **4.43** | 4.68 |
-| settled at level 6 | **22%** | 29% |
-| **made** | **60.1%** | 58.9% |
+| **mean opening** | **2.46** | **2.48** |
+| contracts declared | **3531** | 2269 |
+| decisions that PASS | **21.4%** | 31.4% |
+| mean settled level | **4.45** | 4.71 |
+| settled at level 6 | **23%** | 30% |
+| sacrifices | 14.0% | 12.4% |
+| **made** | **58.7%** | **60.3%** |
+
+**THE MAKE RATE IS THE ROW THAT EXPLAINS THE RESULT, AND IT FLIPPED WITH THE
+SAMPLE** (60.1% vs 58.9% at n=800; 58.7% vs 60.3% at n=2900). The gate wins far
+more auctions — 3531 contracts against 2269 — but the extra ones it buys are
+MARGINAL: it makes fewer of them and sacrifices more. So the tree's pessimism
+about contesting, although formally a bias by every measurement in the section
+above, was suppressing decisions that were close to worthless. **A shade can be
+a genuine estimator bias and still be suppressing nothing worth having.**
 
 **THE OPENING IS UNMOVED TO WITHIN 0.02 OF A RUNG WHILE THE CONCESSION RATE
 FALLS TEN POINTS.** That is the whole design goal, demonstrated: the ungated
@@ -5893,28 +5914,26 @@ profile (28% settling at 6, 64% of those set) comes down to 22%, the settled
 mean falls, and the make rate rises — so the correction is not buying points by
 climbing the ladder.
 
-**WHAT IT WOULD TAKE TO SETTLE IT: n ≈ 2900.** Per-deal σ measured **21.4**, not
-the 18 the pre-registration budgeted with, so the declared n=800 bought ±0.76
-rather than ±0.64 — **the pre-registration under-powered itself, and that is the
-method note to carry**: σ is a property of the ARM, not of the harness, and a
-new arm's σ should be measured on the first shard rather than assumed from the
-last campaign's. ±0.4 needs ~2900 paired deals, roughly five more hours at this
-box's ~6 deals/min.
+**METHOD NOTE, AND IT IS THE EXPENSIVE ONE.** Per-deal σ measured **21.3**, not
+the 18 the pre-registration budgeted with, so the declared first read at n=800
+bought ±0.76 rather than ±0.64 — **the pre-registration under-powered itself.**
+σ is a property of the ARM, not of the harness, and a new arm's σ must be
+measured on its first shard rather than inherited from the last campaign.
+**But the deeper lesson is that n=800 was never going to be enough at any σ:
+at this harness's noise, an arena arm's minimum useful n is ~2000–3000, and
+anything smaller can only produce a number that later gets corrected.** Declare
+that up front or do not start the run.
 
-**HOW TO READ IT HONESTLY.** +1.19 is the same size as the tree's entire edge
-over Hard (+1.19 ± 0.32) and as the shipped `opp_temp` gain (+0.957 ± 0.454), so
-if it is real it is a first-rank result — which is exactly why it needs the
-sample rather than the benefit of the doubt. The mechanism is confirmed
-independently of the payoff (shadeprobe's shade rows, the concession rate, the
-untouched opening); what is unconfirmed is that correcting it pays.
-
-**AND 12 IS A CANDIDATE, NOT AN OPTIMUM.** It was chosen because the shade
-crosses zero at ≈13.5 and 12 lands the concession rate on the price list's own
-29.0%. But zeroing the shade is not self-evidently right: the price list
-concedes 29.0% and the CFR equilibrium concedes **0–5%**, so both pricers may
-still be conceding far too much and 15 or 20 could be better. Each needs its own
-pre-registration — **not a sweep read off this run**, which is the mistake this
-file already records under `DOUBLE_MARGIN`.
+**DOES A DIFFERENT TEMPERATURE HELP? PROBABLY NOT, AND THE REASON IS NOW
+STRUCTURAL RATHER THAN A GUESS.** 12 was chosen because the shade crosses zero
+at ≈13.5. Zeroing the shade turns out to be the wrong target: the marginal
+contracts it buys are ones the bot makes less often, so pushing FURTHER (15, 20)
+buys more of exactly what measured negative here. The old note that "the
+equilibrium concedes 0–5%, so both pricers may still concede far too much"
+survives only as a statement about the equilibrium — and this package already
+measured that equilibrium's blueprint losing by **−12.84** as a bidder. **Read
+this arm as closing the direction, not as one dose of it.** A further sweep
+needs a new reason, not a new number.
 
 **Verified before any number was taken**, and all three are the reason the
 result can be attributed to one change: unarmed `expertsgt` vs `expertst` reads

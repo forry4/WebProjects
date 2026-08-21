@@ -1,33 +1,30 @@
-# The contested-node softening gate — PRE-REGISTERED, then RUN 2026-08-20
+# The contested-node softening gate — PRE-REGISTERED, RUN, and CLOSED 2026-08-20
 
-**RESULT (read once, at the declared n): +1.1938 ± 0.7555 payoff/round, CI
-[−0.287, +2.674], n = 800. Spans zero — NOT ESTABLISHED, does not ship.**
-Every secondary read-out is favourable and the pre-declared hold condition did
-not fire: the opening is unmoved (mean 2.42 vs 2.44), concessions fall 31.3% →
-21.5%, the settled mean falls 4.68 → 4.43, level-6 settlements fall 29% → 22%,
-and the make rate rises 58.9% → 60.1%. **The mechanism is confirmed; the payoff
-is not.** Settling it needs **n ≈ 2900** — σ measured 21.4, not the 18 budgeted
-below, so the declared n bought ±0.76 rather than ±0.64. Full write-up in
-`games/dissonance/CLAUDE.md`.
+**FINAL (read once, at the declared n=2900): −0.4786 ± 0.3951 payoff/round, CI
+[−1.253, +0.296], t = −1.21. It does not ship.**
 
-**EXTENSION PRE-REGISTERED (2026-08-20), before any further number exists.**
-Running deals **800–2900** in four NEW windows (525 each) with their own
-checkpoint files beside the first four. Fresh windows rather than widened ones
-on purpose: widening the existing shards would make shard 0's new range overlap
-deals shards 1–3 already recorded, and the pooled read would double-count them.
-The pooler also dedupes on the deal id as a net.
+**The sign flipped on the way to the declared n.** The first pre-registered read
+at n=800 was +1.1938 ± 0.7555 and was written down as "promising"; in blocks of
+500 the run reads **+2.62**, −1.08, −1.93, −0.88, −1.47, −0.04 — the whole
+positive reading was the first 500 deals.
 
-* **Read ONCE at n = 2900**, target ±0.40 at the measured σ = 21.4. No interim
-  totals — the n=800 read is the last number quoted until then.
-* **The n=800 read stands as recorded** (+1.1938 ± 0.7555) and is NOT revised
-  by the extension; the pooled 2900 is a different, larger sample that
-  CONTAINS it, and only the pooled figure gets quoted afterwards.
-* **The secondary read-outs are re-declared unchanged**: settled distribution,
-  make rate and mean opening are reported beside the payoff, and a payoff win
-  with contracts climbing the ladder is still a hold.
-* **The ship bar is unchanged and is not "positive"**: the CI must exclude zero.
+**The mechanism worked exactly as designed and still did not pay**, which is the
+fifth time in this campaign. Opening unmoved (2.46 vs 2.48), concessions 31.4%
+→ 21.4%, settled mean 4.71 → 4.45, level-6 settlements 30% → 23% — but contracts
+declared 2269 → 3531 while the make rate goes 60.3% → **58.7%** and sacrifices
+12.4% → 14.0%. The extra auctions it wins are marginal ones. **A shade can be a
+genuine estimator bias and still be suppressing nothing worth having.**
 
-Per-shard reads at n=800 were +2.59 / +2.02 / +1.56 / −1.40.
+**Do not re-run this at 15 or 20.** Zeroing the shade is the wrong target: a
+hotter gate buys more of exactly what measured negative. A further dose needs a
+new reason, not a new number.
+
+**σ measured 21.3 across 2900 deals.** The pre-registration below budgeted 18
+and under-powered itself; worse, n=800 could never have settled this at any σ.
+**At this harness's noise an arena arm's minimum useful n is ~2000–3000.**
+Declare that up front or do not start the run.
+
+Full write-up in `games/dissonance/CLAUDE.md`.
 
 ---
 

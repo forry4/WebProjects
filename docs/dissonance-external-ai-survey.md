@@ -338,8 +338,8 @@ It is the same reasoning Kermit's inference tables encode.
 ## Part 4 — RESULTS (eleven items built and measured, 2026-08-19/20)
 
 Everything below was implemented and run. **Not one produced a shippable strength
-gain** — though item 12, added last, is the first to find a real and actionable
-defect rather than another null. What they produced instead is a well-evidenced map of where the strength
+gain.** Item 12 came closest — a real, well-localised defect with a confirmed
+mechanism — and its correction still measured negative at n=2900. What they produced instead is a well-evidenced map of where the strength
 is not, several corrected instruments, and three methodological findings that are
 worth more than most of the results — which is the honest summary and is stated
 that way deliberately.
@@ -436,11 +436,29 @@ softened. No new wire field, no Rust change. That is exactly the isolating test
 this file had said was needed and that the recorded (ungated) sweep could not
 be, since softening also lowered the opening across every bucket.
 
-**Still unestablished, and it is the whole ship question:** all of this measures
-the ESTIMATOR, not strength. Both pricers may be conceding far too much — the
-equilibrium concedes 0–5% — so matching the price list would only match a bidder
-the tree already beats. Gate unchanged: CRN-paired arena, mirror +0.0000,
-watching the settled distribution and make rate as well as payoff.
+**AND THE GATE ANSWERED IT: THE CORRECTION DOES NOT PAY.** Built as
+`EXPERT_OPP_TEMP_CONTESTED = 12` (soften only where a pass is legal, opening
+untouched), pre-registered, and read once at n = 2900 CRN-paired deals:
+**−0.4786 ± 0.3951, CI [−1.253, +0.296].** It does not ship.
+
+**The sign flipped on the way there** — the first pre-registered read at n=800
+was +1.1938 ± 0.7555, and in blocks of 500 the run goes **+2.62**, −1.08, −1.93,
+−0.88, −1.47, −0.04. The whole positive reading was the first 500 deals. The
+pre-registration is what turned that into a correction rather than a shipped
+regression.
+
+**The mechanism worked exactly as designed and still did not pay** — the fifth
+time in this campaign. Opening unmoved (2.46 vs 2.48), concessions 31.4% →
+21.4%, settled mean 4.71 → 4.45 — but contracts declared 2269 → 3531 while the
+make rate falls 60.3% → 58.7% and sacrifices rise. **The extra auctions it wins
+are marginal ones**, so the tree's pessimism, though formally a bias by every
+measurement above, was suppressing decisions close to worthless. *A shade can be
+a genuine estimator bias and still be suppressing nothing worth having.*
+
+**Method, and it is the expensive one:** per-deal σ measured 21.3 and the
+pre-registration budgeted 18, so it under-powered itself — but n=800 could never
+have settled this at any σ. **At this harness's noise an arena arm's minimum
+useful n is ~2000–3000.** Declare that up front or do not start the run.
 
 **Still not done:** the one direction none of the eleven items touched. Every
 arm above attacked either the sampler (items 6, 8, 10 — all null, four
