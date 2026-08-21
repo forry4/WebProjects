@@ -754,7 +754,21 @@ def _bucket_of(g, seat, cuts):
     return joint_bucket(best, tops, short, cuts)
 
 
-def _live_abstract_state(g):
+def denom_order(g, seat):
+    """The seat's denominations, its OWN best first. THE definition of `rank`.
+
+    It must be the same call `sample_deal_alldenoms` makes, because that is what
+    ordered `pts[seat]`: rank `r` means "the seat's r-th best denomination", and
+    every leaf value the solve trained on was read at that index. A second,
+    independently plausible ordering here would silently re-index every payoff
+    the blueprint learned.
+
+    Information-legal: `hand_strength` reads only the cards the seat may name.
+    """
+    return sorted(range(E.NOTRUMP + 1), key=lambda d: -B.hand_strength(g, seat, d))
+
+
+def _live_abstract_state(g, seat=None):
     """`(level, prev, holds)` for a REAL auction in progress.
 
     Derived from the bid levels in order rather than from a second copy of the
@@ -762,21 +776,20 @@ def _live_abstract_state(g):
     and `prev` is the level under that run, which is exactly how `_path_to`
     builds a path to the same state. Reading it any other way would be the
     duplicate-rule mistake this file keeps recording.
+
+    UNDER `DENOMS` THE THIRD SLOT IS THE STANDING BID'S RANK, and it is
+    SEAT-RELATIVE -- the same auction reads a different state to each seat, so
+    `seat` becomes required. That is faithful rather than sloppy: the solve
+    shares one `holds` between both seats and `leaf` spends it as
+    `pts[declarer][holds]`, so the number has always meant "how far down the
+    preference ladder this contract sits, FOR WHOEVER DECLARES IT". Reading it
+    against the deciding seat's own order is that same meaning, evaluated by the
+    only seat whose hand we may look at.
+
+    `prev` needs no port. `_step` carries it on a same-level bid and sets it to
+    the old level on a raise, which is exactly "the level under the current
+    level's run" -- what the loop below already computes.
     """
-    # THE PATHS THAT STILL SPEAK THE LEVEL-ONLY ABSTRACTION. `DENOMS` packs a
-    # rank into every action, so a reader that treats an action as a bare level
-    # would silently bid level 41 -- or, worse, land on a plausible one. Refusing
-    # is the discipline this package already applies to a cache missing `tops`:
-    # a harness that half-understands its own encoding is how `cfrlab` measured
-    # Hard for a campaign while claiming Expert.
-    if DENOMS:
-        raise SystemExit(
-            "CFR_DENOMS is on and this path still reads actions as bare levels. "
-            "Ported: the SOLVE, `curve`, and the exact best response (via "
-            "`_step`, 2026-08-21). Not ported: blueprint SERVING into a live "
-            "auction and the off-policy probes -- those map an abstract action "
-            "back onto a real bid, which is a genuinely new mapping rather "
-            "than a transition `_step` already owns.")
     # THE LOG HAS NO `kind` FIELD -- a bid entry is `{seat, level, denom}` and a
     # pass is `{seat, pass: True}`. Filtering on `kind == "bid"` (which is the
     # MOVE's vocabulary, not the log's) matches nothing and silently reports the
@@ -792,7 +805,13 @@ def _live_abstract_state(g):
         holds += 1
         i -= 1
     prev = levels[i] if i >= 0 else 0
-    return level, prev, holds
+    if not DENOMS:
+        return level, prev, holds
+    if seat is None:
+        raise SystemExit("under CFR_DENOMS the abstract state is SEAT-RELATIVE "
+                         "(its third slot is the standing denomination's rank "
+                         "in that seat's own order) -- pass `seat`")
+    return level, prev, denom_order(g, seat).index(g["auction"]["denom"])
 
 
 def blueprint_bid(g, seat):
@@ -802,26 +821,29 @@ def blueprint_bid(g, seat):
     ladder, or no real option matches the chosen level), and the caller then
     falls back to the shipped bidder -- a blueprint that silently guessed
     outside its own support would be measuring the fallback.
+
+    UNDER `DENOMS` THE BLUEPRINT NAMES THE SUIT TOO, which is the whole point of
+    that arm: an action packs a level and a rank, and rank `r` resolves through
+    `denom_order` -- the same ordering the cache's `pts[seat]` was built in.
+
+    THE ONE PLACE THE ABSTRACTION AND THE RULES DISAGREE, stated here because it
+    bounds what this can deliver. `actions()` lets a same-level overtake name any
+    strictly higher RANK; the engine lets it name any higher DENOMINATION INDEX.
+    Those are two different orderings -- measured Kendall tau +0.722, exact
+    positional agreement 60.4% against a 20% chance rate -- so the blueprint's
+    favourite is sometimes not a legal bid. Legality is therefore delegated
+    ENTIRELY to `auction_payoff_options` and never re-derived here, and a miss
+    walks down the blueprint's own ranking exactly as the level-only path does.
+    How often that happens is a MEASUREMENT rather than a detail, because a
+    blueprint forced off its first choice on most decisions is not the policy
+    whose exploitability was measured: `CFR_BP_TRACE` counts it.
     """
-    # THE PATHS THAT STILL SPEAK THE LEVEL-ONLY ABSTRACTION. `DENOMS` packs a
-    # rank into every action, so a reader that treats an action as a bare level
-    # would silently bid level 41 -- or, worse, land on a plausible one. Refusing
-    # is the discipline this package already applies to a cache missing `tops`:
-    # a harness that half-understands its own encoding is how `cfrlab` measured
-    # Hard for a campaign while claiming Expert.
-    if DENOMS:
-        raise SystemExit(
-            "CFR_DENOMS is on and this path still reads actions as bare levels. "
-            "Ported: the SOLVE, `curve`, and the exact best response (via "
-            "`_step`, 2026-08-21). Not ported: blueprint SERVING into a live "
-            "auction and the off-policy probes -- those map an abstract action "
-            "back onto a real bid, which is a genuinely new mapping rather "
-            "than a transition `_step` already owns.")
     opts = E.auction_payoff_options(g)
     if not opts:
         return None
     bp = load_blueprint()
-    level, prev, holds = _live_abstract_state(g)
+    level, prev, holds = _live_abstract_state(g, seat)
+    order = denom_order(g, seat) if DENOMS else None
     if level > MAXL or holds > HOLDCAP:
         return None
     acts = actions(level, holds)
@@ -831,7 +853,7 @@ def blueprint_bid(g, seat):
     # no same-level overtake rule), so its favourite action may not exist here.
     # Walk its own ranking and take the best one that does, which keeps the
     # blueprint's preference order rather than falling through on the first miss.
-    for act in sorted(acts, key=lambda a: -dist.get(a, 0.0)):
+    for depth, act in enumerate(sorted(acts, key=lambda a: -dist.get(a, 0.0))):
         pool = []
         for o in opts:
             mv = o["move"]
@@ -839,14 +861,40 @@ def blueprint_bid(g, seat):
                 if mv["kind"] != "bid":
                     pool.append(o)
             elif mv["kind"] == "bid":
-                want = level if act == HOLD else act
-                if mv["level"] == want:
+                if DENOMS:
+                    if (mv["level"] == act_level(act)
+                            and mv["denom"] == order[act_rank(act)]):
+                        pool.append(o)
+                elif mv["level"] == (level if act == HOLD else act):
                     pool.append(o)
         if pool:
-            # THE PRICER PICKS THE SUIT. The blueprint has no opinion about
-            # denominations and must not be asked for one.
+            _bp_trace(depth)
+            # THE PRICER PICKS THE SUIT -- under the level-only abstraction
+            # ONLY. There the blueprint has no opinion about denominations and
+            # must not be asked for one; under `DENOMS` it has exactly one, and
+            # `pool` is the single bid that matches it.
             return max(pool, key=lambda o: o.get("value", 0))["move"]
+    _bp_trace(None)
     return None
+
+
+#: DOES THE BLUEPRINT GET THE BID IT ASKED FOR? Off by default -- a counter on a
+#: hot path is still a counter. See `blueprint_bid`: under `DENOMS` this is the
+#: headline caveat's own measurement, not diagnostics.
+BP_TRACE = os.environ.get("CFR_BP_TRACE") not in (None, "", "0")
+BP_HITS = defaultdict(int)
+
+
+def _bp_trace(depth):
+    if not BP_TRACE:
+        return
+    BP_HITS["decisions"] += 1
+    if depth is None:
+        BP_HITS["unexpressible"] += 1
+        return
+    BP_HITS["served"] += 1
+    BP_HITS["first_choice" if depth == 0 else "fell_back"] += 1
+    BP_HITS["depth_sum"] += depth
 
 
 #: How many OFF-POLICY probes to take per deal. 0 reproduces the self-play-only
