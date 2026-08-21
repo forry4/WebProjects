@@ -5594,7 +5594,9 @@ space, the CFR sampler).
 **They agree, and the agreement is the interesting part.** The first closed with
 "what is left must be CONDITIONAL — which hands the tree wins the auction with,
 not how high it bids". The second widened a different abstraction and measured
-one: the level-only ACTION space costs **14.0 points a deal**. Read "the
+one: the level-only ACTION space is **14.0 points a deal more EXPLOITABLE**
+than a denomination-aware one -- a gap between two research blueprints against
+an exact best responder, NOT a gain the shipped bot would make. Read "the
 campaign closes" as scoped to uniform coefficients over the shipped action
 space; it does not cover the action space itself.
 
@@ -6674,7 +6676,7 @@ unaffordable (the FOREVER-BAN's 30,373 states, say). It is NOT the answer for
 `DENOMS`, and `CFR_SAMPLING` should stay on `external` for everything this
 campaign currently measures. Do not re-open it on the strength of the 260x.
 
-### THE LEVEL-ONLY ABSTRACTION COSTS 14 POINTS A DEAL, AND NOW IT IS MEASURED (2026-08-21)
+### THE LEVEL-ONLY ABSTRACTION IS 14 POINTS MORE EXPLOITABLE (2026-08-21)
 
 The question the whole `DENOMS` arm exists for, finally asked properly.
 
@@ -6712,10 +6714,41 @@ deals:**
       wide (native)            False        5.23        2.05             3.64
       wide (native)             True        5.23        2.05             3.64
 
-**14.0 points a deal.** And it is not a convergence artifact in either
-direction: 2.5x the level-only iterations moved it 21.33 -> 17.63 while the
+**A 14.0-point gap in exploitability.** And it is not a convergence artifact in
+either direction: 2.5x the level-only iterations moved it 21.33 -> 17.63 while the
 wide arm sat at 3.64, so the narrow policy is converging toward something well
 above the wide one, not merely under-solved.
+
+**WHAT THIS NUMBER IS, AND FOUR THINGS IT IS NOT.** Written down because the
+shorthand "a 14-point prize" is wrong in four different ways, and I used it
+repeatedly in conversation before writing this paragraph.
+
+It **is** the difference in EXPLOITABILITY -- how much an exact best responder
+wins, in payoff points a deal -- between two CFR blueprints solved on the same
+deals and priced by the same responder in the same game.
+
+* **NOT a gain the shipped bot would make.** Neither policy here is the shipped
+  bot. Expert is a search-based tree bidder that uses no blueprint at all, and
+  the blueprint LOST to Expert by **−12.84 ± 1.47** a round.
+* **NOT comparable to "floor 1.47 / Hard 5.45 / Expert 5.70".** Those were
+  measured in the NARROW game, against a NARROW responder, on a different deal
+  cache. Setting 17.63 beside 5.70 is precisely the abstraction-mixing error
+  this whole measurement was built to avoid.
+* **NOT a strength claim.** This campaign has measured exploitability and
+  head-to-head strength close to INDEPENDENT in this game -- the Diverse arm was
+  less exploitable and not stronger; Expert is marginally MORE exploitable than
+  Hard while winning +0.957 head to head. A less-exploitable blueprint is not
+  automatically a better opponent.
+* **NOT an upper bound on anything shippable.** It bounds what the abstraction
+  costs a blueprint against a WORST CASE, and a worst-case opponent is not who
+  the bot plays.
+
+**What it is good for is direction.** It names a specific structural gap and
+puts a number on its size, which no null in this campaign has done. The number
+that would decide whether any of it is worth shipping does not exist yet, and
+requires two things in order: a denomination-aware bidder that can serve into a
+live auction, then a CRN-paired arena against Expert. **Until that arena runs,
+this is a reason to look here -- not a result.**
 
 **READ THE BACKOFF ROWS, NOT THE NO-BACKOFF ONES.** `Policy`'s docstring
 records why an unseen infoset conceding makes a number "mostly the sample
@@ -6742,7 +6775,9 @@ trump channel, contested gate, diverse continuations). It does NOT yet ship
 anything: `blueprint_bid` and `_path_to` still refuse under `DENOMS`, because
 serving needs to map an abstract action back onto a REAL bid -- a new mapping,
 not a transition `_step` already owns. That port is the next step, and unlike
-every other item on the list it now has a measured 14-point prize attached.
+every other item on the list this one points at a structural gap of a MEASURED
+SIZE. Not at a priced gain -- read the four caveats above before quoting the
+number.
 
 ### THE TWO ARCHITECTURAL REWRITES, PARKED WITH THEIR REASONS (noted 2026-08-20)
 

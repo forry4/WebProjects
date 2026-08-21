@@ -3600,9 +3600,12 @@ which hands the tree wins the auction with, not how high it bids.*
 pass/raise shading, the contested gate, the real ACTION space, and the CFR
 sampler work) reached the same wall from the other side and then measured a way
 through it: the level-only action abstraction — a bid names a level, and the
-pricer then takes the best suit still legal — **costs 14.0 points a deal**,
-because a level chosen blind to the suit is a commitment the real hand may not
-support.
+pricer then takes the best suit still legal — is **14.0 points a deal more
+EXPLOITABLE** than one that can name its own denomination, because a level
+chosen blind to the suit is a commitment the real hand may not support. (That is
+a gap between two research blueprints against an exact best responder, not a
+gain the shipped bot would make; the section itself lists the four ways the
+shorthand misleads.)
 
 **That is the same word from two directions.** One line concluded a conditional
 defect must be what remains and asked for a finer abstraction to see it; the
@@ -3612,9 +3615,9 @@ either alone.
 
 **So "the campaign closes" above should be read as scoped to what that line
 tested** — uniform coefficients over the shipped action space. It does not cover
-the action space itself, and the 14-point measurement reopens the auction as the
-place with the most recoverable value. The stopping rule that entry proposes is
-still right about aggression dials.
+the action space itself, and the 14-point measurement is a reason to reopen the
+auction — a direction with a measured size, not a priced gain. The stopping rule
+that entry proposes is still right about aggression dials.
 
 ## WHERE THE DISSONANCE RESEARCH TOOLING LIVES (2026-08-21)
 
@@ -3878,7 +3881,7 @@ cheaper CFR — which this file had already named: outcome sampling.
 
 ---
 
-## 2026-08-21 — Dissonance: a biased sampler, an equal-time reversal, and the first measured prize
+## 2026-08-21 — Dissonance: a biased sampler, an equal-time reversal, and a measured abstraction gap
 
 ### 1. The outcome sampler was biased, and a convergence ladder could not say where
 
@@ -3980,7 +3983,7 @@ Verified behaviour-free on the path that already worked: the same solve at the
 same seed reads b0 0.8163159305704718 / b1 2.798671028798192 before and after,
 bit for bit. **A refactor that changes a measurement is a new measurement.**
 
-### 4. THE PRIZE: the level-only abstraction costs 14 points a deal
+### 4. THE LEVEL-ONLY ABSTRACTION IS 14 POINTS MORE EXPLOITABLE — and what that is not
 
 The question the whole `DENOMS` arm exists for, asked properly for the first
 time — and it cannot be asked by comparing two exploitability numbers.
@@ -4019,8 +4022,41 @@ manufactured cost.
 | wide (native) | False | 5.23 | 2.05 | 3.64 |
 | **wide (native)** | **True** | 5.23 | 2.05 | **3.64** |
 
-**14.0 points a deal**, and not a convergence artifact in either direction: 2.5x
-the level-only iterations moved it 21.33 → 17.63 while the wide arm sat at 3.64.
+**A 14.0-point gap in exploitability**, and not a convergence artifact in
+either direction: 2.5x the level-only iterations moved it 21.33 → 17.63 while
+the wide arm sat at 3.64.
+
+**WHAT THIS NUMBER IS, AND FOUR THINGS IT IS NOT.** Written down because the
+shorthand "a 14-point prize" is wrong in four different ways, and I used it
+repeatedly in conversation before writing this paragraph.
+
+It **is** the difference in EXPLOITABILITY — how much an exact best responder
+wins, in payoff points a deal — between two CFR blueprints solved on the same
+deals and priced by the same responder in the same game.
+
+* **NOT a gain the shipped bot would make.** Neither policy here is the shipped
+  bot. Expert is a search-based tree bidder that uses no blueprint at all, and
+  the blueprint LOST to Expert by **−12.84 ± 1.47** a round.
+* **NOT comparable to "floor 1.47 / Hard 5.45 / Expert 5.70".** Those were
+  measured in the NARROW game, against a NARROW responder, on a different deal
+  cache. Setting 17.63 beside 5.70 is precisely the abstraction-mixing error
+  this whole measurement was built to avoid.
+* **NOT a strength claim.** This campaign has measured exploitability and
+  head-to-head strength close to INDEPENDENT in this game — the Diverse arm was
+  less exploitable and not stronger; Expert is marginally MORE exploitable than
+  Hard while winning +0.957 head to head. A less-exploitable blueprint is not
+  automatically a better opponent.
+* **NOT an upper bound on anything shippable.** It bounds what the abstraction
+  costs a blueprint against a WORST CASE, and a worst-case opponent is not who
+  the bot plays.
+
+**What it is good for is direction.** It names a specific structural gap and
+puts a number on its size, which no null in this campaign has done. The number
+that would decide whether any of it is worth shipping does not exist yet, and
+requires two things in order: a denomination-aware bidder that can serve into a
+live auction, then a CRN-paired arena against Expert. **Until that arena runs,
+this is a reason to look here — not a result.**
+
 
 **The artifact that would have manufactured this was checked, not argued.** An
 unseen infoset concedes — which `Policy`'s own docstring calls the most
@@ -4041,8 +4077,10 @@ against Expert) and should not be quoted as one number.
 ### Where this leaves the campaign
 
 After a long run of nulls — eval weights, the exact leaf, the trump channel, the
-contested gate, diverse continuations — this is the first item with a **measured
-prize attached**. It ships nothing yet: `blueprint_bid` and `_path_to` still
+contested gate, diverse continuations — this is the first item that points at a
+specific structural gap **with a measured size**, rather than at a knob. That is
+worth something and it is not a payout: see the four caveats above. It ships
+nothing yet: `blueprint_bid` and `_path_to` still
 refuse under `DENOMS`, because serving must map an abstract action back onto a
 REAL bid, which is a genuinely new mapping rather than a transition `_step`
 already owns. That port is the next step.
