@@ -168,11 +168,17 @@ const MODES = [
   { id: "skat", label: "Skat", title: "Bid a number, then declare the game that satisfies it" },
   { id: "minor", label: "Minor", title: "Even tricks pay only +1 — a harsher, quieter game to 25" },
   { id: "dummy", label: "Dummy", title: "A third hand, face up — the declarer plays it, and it plays second in every trick" },
+  { id: "quartet", label: "Quartet", title: "Four hands, two players — you play the hand opposite you too, and keep three cards back" },
 ];
-const MODE_LABEL = { classic: "Classic", skat: "Skat", minor: "Minor", dummy: "Dummy" };
+const MODE_LABEL = { classic: "Classic", skat: "Skat", minor: "Minor", dummy: "Dummy", quartet: "Quartet" };
 //: The dummy's index into the seat arrays. Positions are not seats: 0 and 1
 //: are the players, 2 is the hand the declarer also plays.
 const DUMMY_POS = 2;
+//: QUARTET: how many hands one player commands. Positions 0 and 1 are the
+//: players' OWN hands, 2 and 3 the hands opposite them, so a player holds
+//: `p` and `p + QUARTET_HANDS` and the side of a position is `pos % 2`.
+//: Mirrors `engine.QUARTET_HANDS`.
+const QUARTET_HANDS = 2;
 
 /** The announcement stack, spelled out for the result and side panels. */
 function multParts(ct) {
@@ -422,10 +428,19 @@ const beats = (led, follow, trump) => {
  *  second copy of the winner fold is exactly where the two would drift. */
 function trickList(game) {
   const h = game.history || [];
-  // THREE cards to a trick once there is a dummy. Off the wire (`tricks` is
-  // the round length, `seats` the width) rather than assumed, so the one
-  // renderer serves both shapes.
-  const w = game.dummy ? 3 : 2;
+  // HOW MANY CARDS TO A TRICK -- two normally, three with a dummy, FOUR in
+  // quartet. Genuinely off the wire now: `piles` carries one entry per
+  // POSITION in every mode, so its length is the hand count and therefore the
+  // trick width, with no mode test at all.
+  //
+  // The old form was `game.dummy ? 3 : 2` under a comment claiming it came off
+  // the wire, and quartet is what proved it did not. Slicing a four-card
+  // history into pairs silently produced half-tricks: the completed-trick hold
+  // showed two of the four cards, the Last trick panel was wrong, and every
+  // trick's parity value was computed for the wrong trick NUMBER -- all of it
+  // rendering perfectly, which is why `screens.mjs` had to catch it rather
+  // than anything throwing.
+  const w = game.piles?.length || (game.dummy ? 3 : 2);
   const done = Math.floor(h.length / w);
   const out = [];
   for (let n = 1; n <= done; n++) {
@@ -1535,6 +1550,16 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
   const dummyIsMine = !!game?.dummy && game.dummy_seat === mySeat;
   const dummyToPlay = !!game?.dummy && game.to_play === DUMMY_POS && myTurn;
   const isSkat = game?.mode === "skat";
+  //: QUARTET: four hands, two players. `game.mine` is the SECOND hand this
+  //: player commands (position `mySeat + QUARTET_HANDS`) and is private to
+  //: them -- the mode's central information decision, since a finesse is a
+  //: guess about which of two hidden hands holds a card.
+  const isQuartet = game?.mode === "quartet";
+  const myOther = isQuartet && mySeat != null ? mySeat + QUARTET_HANDS : null;
+  //: Which of my two positions is on turn, if either. `to_play` is a POSITION
+  //: and `turn_seat` is the PLAYER, so a quartet player is told "your move"
+  //: on half the plies and has to be told WHICH HAND as well.
+  const qToPlay = isQuartet && myTurn && game?.phase === "play" ? game.to_play : null;
   const declSeat = game?.auction?.declarer;
   const iDeclare = game != null && mySeat != null && declSeat === mySeat;
   // Skat's post-auction prompts each belong to exactly one seat; the server
@@ -1941,6 +1966,13 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
   // Swap-phase selection (declarer only).
   const [swapTake, setSwapTake] = useState(null);
   const [swapGive, setSwapGive] = useState(null);
+  // QUARTET's commit phase: which of my two hands leads, and the one optional
+  // card swapped between them. `null` lead means nothing picked yet -- the go
+  // button stays disabled rather than defaulting, because which hand leads is
+  // a real decision and a silent default would make it look like it is not.
+  const [commitLead, setCommitLead] = useState(null);
+  const [commitTake, setCommitTake] = useState(null);
+  const [commitGive, setCommitGive] = useState(null);
   useEffect(() => { setSwapTake(null); setSwapGive(null); }, [game?.phase]);
   /* THE OPTIMISTIC CARD (see `doPlay`). Cleared by ANY authoritative change,
      which is what keeps it honest: the server's next state is the truth
@@ -2283,6 +2315,15 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
       const owner = players[seats[game.dummy_seat]];
       return owner ? `Dummy (${owner}'s)` : "Dummy";
     }
+    // QUARTET: four POSITIONS, two players. A position names the player whose
+    // side it is on, and the two hands they command are told apart by
+    // "opposite" rather than by number — the board already shows which is
+    // which by where it sits, and a bare "seat 2" means nothing to a player.
+    if (isQuartet) {
+      const who = players[seats[seat % QUARTET_HANDS]]
+        || (seat % QUARTET_HANDS === mySeat ? "You" : "Opponent");
+      return seat >= QUARTET_HANDS ? `${who} — opposite` : who;
+    }
     return players[seats[seat]] || (seat === mySeat ? "You" : "Opponent");
   };
   const opt = game.options || { bids: [], may_pass: false };
@@ -2361,7 +2402,12 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
      bug the `:has()` version was written to avoid: a phase-keyed budget
      shrank the cards for exactly that beat. `screens.mjs` asserts the class
      and the rendered child agree, so the two cannot drift. */
-  const AUCTION_PHASES = ["auction", "swap", "talon", "declare", "double", "kontra", "re"];
+  // Every phase whose middle renders `.dis-auction`. `commit` is quartet's
+  // stage-two declaration and belongs here for the same reason `swap` does --
+  // the rail keys on this to lay the board out, and a phase left off it lays
+  // out as if the trick were on the felt.
+  const AUCTION_PHASES = ["auction", "commit", "swap", "talon", "declare",
+                          "double", "kontra", "re"];
   const railKind = (game.phase === "over" && !heldTrick) ? "result"
     : AUCTION_PHASES.includes(game.phase) ? "auction"
       : "play";
@@ -2436,7 +2482,8 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
             divides by the number of CARD ROWS, and a dummy table has six
             where two seats have four. */}
         <div className={`dis-table ph-${game.phase} dis-rail-${railKind}`
-          + (game.dummy ? " dis-3seat" : "")}>
+          + (game.dummy ? " dis-3seat" : "")
+          + (isQuartet ? " dis-4seat" : "")}>
           {/* opponent */}
           <div className="dis-seat">
             <div className="dis-seatname">
@@ -2457,6 +2504,26 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
               {game.piles[oppSeat].map((p, i) => <Pile key={i} pile={p} />)}
             </div>
           </div>
+
+          {/* QUARTET: THE OPPONENT'S SECOND HAND, face down like their first.
+              Both of their hands are hidden, and that is the whole reason
+              this mode has finesses: a finesse is a guess about WHICH of two
+              hidden hands holds a card, so publishing either one would delete
+              it. All the board can show is the count, which is public in any
+              card game because both players can count. */}
+          {isQuartet && (
+            <div className="dis-seat dis-qopp">
+              <div className="dis-seatname">
+                <b>{nameOf(oppSeat + QUARTET_HANDS)}</b>
+                {game.to_play === oppSeat + QUARTET_HANDS && game.phase === "play"
+                  && <span className="muted">to play</span>}
+              </div>
+              <div className="dis-hand">
+                {Array.from({ length: game.hand_n?.[oppSeat + QUARTET_HANDS] ?? 0 },
+                  (_, i) => <Card key={i} c={null} />)}
+              </div>
+            </div>
+          )}
 
           {/* THE DUMMY — a third hand, face up, played by the declarer. It
               sits between the opponent and the trick because that is where it
@@ -2619,6 +2686,80 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
                       the absence of a Pass button says it already. */}
                 </>
               ) : <div className="muted">Waiting for {nameOf(game.auction.to_act)}…</div>}
+            </div>
+          ) : game.phase === "commit" ? (
+            /* QUARTET's stage two. The auction competes on level and
+               denomination; this is where the declarer DECLARES -- which of
+               their two hands leads, and the one card they may move between
+               them. Both are declarations rather than contests, which is why
+               they sit after the bidding rather than inside it.
+
+               Shipped to the declarer alone (`game.commit`), so the defender
+               gets the waiting line and learns only THAT a swap happened. */
+            <div className="dis-auction">
+              <div className="muted">Your call</div>
+              <ContractLine game={game} />
+              {game.commit ? (
+                <>
+                  <div className="muted dis-hint">
+                    You won the auction. Say which of your two hands leads
+                    trick 1 — <b>leading costs you the last card of every
+                    trick</b> — and you may move one card between them.
+                  </div>
+                  <div className="dis-actrow">
+                    {game.commit.leads.map((p) => (
+                      <button key={p}
+                        className={`btn dis-annbtn${commitLead === p ? " sel" : ""}`}
+                        aria-pressed={commitLead === p}
+                        onClick={() => setCommitLead(p)}>
+                        {p < QUARTET_HANDS ? "Your hand leads" : "Opposite leads"}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="muted" style={{ fontSize: "0.8rem" }}>
+                    Take one from the hand opposite…
+                  </div>
+                  <div className="dis-hand" style={{ justifyContent: "center" }}>
+                    {game.commit.take.map((c) => (
+                      <Card key={c} c={c} sel={commitTake === c}
+                        onClick={() => setCommitTake(commitTake === c ? null : c)} />
+                    ))}
+                  </div>
+                  {commitTake !== null && (
+                    <div className="muted" style={{ fontSize: "0.8rem" }}>
+                      …and send which of your own back?
+                    </div>
+                  )}
+                  {commitTake !== null && (
+                    <div className="dis-hand" style={{ justifyContent: "center" }}>
+                      {game.commit.give.map((c) => (
+                        <Card key={c} c={c} sel={commitGive === c}
+                          onClick={() => setCommitGive(commitGive === c ? null : c)} />
+                      ))}
+                    </div>
+                  )}
+                  <div className="dis-actrow">
+                    <button className="btn dis-gobtn"
+                      disabled={commitLead === null
+                        || (commitTake !== null && commitGive === null)}
+                      onClick={() => {
+                        doMove({
+                          kind: "commit", lead: commitLead,
+                          take: commitTake, give: commitTake === null ? null : commitGive,
+                        });
+                        setCommitLead(null); setCommitTake(null); setCommitGive(null);
+                      }}>
+                      {commitTake !== null && commitGive !== null
+                        ? <>Swap <CardName c={commitTake} /> for <CardName c={commitGive} /> and play</>
+                        : "Play it as dealt"}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="muted">
+                  {nameOf(game.auction.declarer)} is choosing which hand leads…
+                </div>
+              )}
             </div>
           ) : game.phase === "swap" ? (
             <div className="dis-auction">
@@ -3002,6 +3143,19 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
                     number arriving from nowhere. Every term is the result row's
                     own -- off the terms `_finish` scored with -- so the panel
                     cannot narrate an arithmetic the room did not apply. */}
+                {/* QUARTET: the declarer's total is TWO numbers added, and
+                    without this the panel prints a total the player cannot
+                    check against anything they watched happen. Tricks are
+                    what the felt showed; the keeps are the three cards their
+                    own hand was still holding when the ninth trick ended. */}
+                {res.mode === "quartet" && res.keeps && (
+                  <div className="muted" style={{ fontSize: "0.8rem" }}>
+                    <Pts>{scored(res.declarer_pts)}</Pts>{" is "}
+                    <Pts>{scored(res.trick_pts[res.declarer])}</Pts>{" from tricks"}
+                    {" plus "}<Pts>{scored(res.keeps[res.declarer])}</Pts>
+                    {" from the three cards kept in hand."}
+                  </div>
+                )}
                 <ResultMaths res={res} nameOf={nameOf} price={priceContract} />
                 {res.doubled && (
                   /* WHAT THE BET WAS WORTH, as the difference it made. This
@@ -3245,6 +3399,31 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
                 </div>
               </div>
             </>
+          )}
+
+          {/* QUARTET: THE HAND OPPOSITE YOU, which you also play. Face up to
+              you alone, and its cards take the same `play` affordance as your
+              own when it is that position's turn -- commanding two hands is
+              one uninterrupted gesture rather than a mode switch, the same
+              call dummy mode made.
+
+              It sits ABOVE your own hand, between you and the trick, because
+              that is the order it plays in relative to you half the time and
+              because the two rows read as one side of the table. */}
+          {isQuartet && (
+            <div className={`dis-seat dis-qmine${qToPlay === myOther ? " mine" : ""}`}>
+              <div className="dis-seatname">
+                <b>{nameOf(myOther)}</b>
+                {qToPlay === myOther && <span className="dis-yourturn">to play</span>}
+              </div>
+              <div className="dis-hand">
+                {(game.mine || []).map((c) => (
+                  <Card key={c} c={c}
+                    onClick={canPlay && qToPlay === myOther && legal.has(c)
+                      ? () => doPlay(c) : null} />
+                ))}
+              </div>
+            </div>
           )}
 
           {/* you */}

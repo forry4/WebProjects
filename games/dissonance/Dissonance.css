@@ -2076,6 +2076,37 @@
 .dis-dummy.mine { border-color: var(--accent); background: rgba(255, 255, 255, 0.04); }
 .dis-dummy .dis-seatname { opacity: 0.85; }
 
+/* ── QUARTET's two extra hands (2026-08-21) ────────────────────────────────
+   Four hands, two players: `.dis-qopp` is the opponent's second hand (face
+   down, like their first -- both of theirs are hidden, which is the whole
+   reason this mode has finesses) and `.dis-qmine` is the hand opposite YOU,
+   face up and clickable when it is that position's turn.
+
+   Dashed like the dummy seat and for the same reason -- the board's accent is
+   already the turn signal, so a second solid block would compete with it --
+   but the two are NOT the same seat: a dummy is contested between the players
+   every trick, while these belong to one player for the whole round. */
+.dis-qopp,
+.dis-qmine {
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 0.25rem 0.4rem;
+  background: rgba(255, 255, 255, 0.02);
+}
+.dis-qmine { border-color: var(--accent); background: rgba(255, 255, 255, 0.04); }
+.dis-qopp .dis-seatname,
+.dis-qmine .dis-seatname { opacity: 0.85; }
+
+/* FOUR HANDS BUT STILL FOUR CARD ROWS -- quartet deals no piles, so its four
+   hands occupy exactly the rows two seats' hands-plus-piles do and the card
+   size needs no change. What it DOES add is two more seat-name rows, which
+   the reserve has to pay for or the cards grow into them. */
+.dis-table.dis-4seat {
+  --dis-rows: 4;
+  --dis-reserve: 21rem;
+  --dis-reserve-in: 30rem;
+}
+
 /* ── the doubled bet (2026-08-11, re-homed 2026-08-12) ─────────────────────
    A full-screen ×2 flash announced the bet for a beat and was removed on
    request: it covered the board at the very moment the declarer wants to

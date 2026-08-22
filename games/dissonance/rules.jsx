@@ -336,6 +336,50 @@ export default function DissonanceRules() {
 				</p>
 			</RulesSection>
 
+			<RulesSection title="Quartet mode — you play the hand opposite you">
+				<p>
+					A <b>four-hand</b> game between two players, off the <b>full 52-card
+					deck</b>. You are dealt <b>twelve cards</b>, and so is the hand
+					<b> opposite you</b> — you play both, and only you can see either.
+					Your opponent has the same two, hidden from you. <b>Four cards sit
+					out</b> and nobody ever sees them; they are what stops the two of you
+					simply knowing each other's cards by subtraction.
+				</p>
+				<p>
+					Only <b>nine tricks</b> are played, of four cards each. So every hand
+					finishes still holding <b>three cards</b> — and the three left in
+					<i> your own</i> hand score their card value, on top of the tricks you
+					took. That total is what your contract is measured against.
+				</p>
+				<RulesDefs items={[
+					{ t: "Round the table", d: "Play goes leader, opponent, leader's other hand, opponent's other hand — so you place one card early and one LAST, with the whole trick already in front of you." },
+					{ t: "Leading costs you", d: "The side that leads gives up that last card. In a game where winning a trick can lose you points, the lead is as much a liability as an advantage." },
+					{ t: "Name a suit you hold", d: "You may only bid a suit you hold SIX or more of across your two hands. So every bid is a promise your opponent can count against. No-trump is always available." },
+					{ t: "Then say which hand leads", d: "Win the auction and you choose which of your two hands opens — and you may move one card between them." },
+					{ t: "Keep the middle cards", d: "9, 10, J and Q are worth +2 left in your hand at the end; 7, 8, K and A are worth −1. The cards that win tricks are not the cards worth keeping." },
+				]} />
+				<RulesTip>
+					<p>
+						<b>The endgame is a squeeze you can inflict.</b> Your three best
+						cards are worth +6 if you can hold on to them — but you must
+						follow suit, so an opponent who keeps leading the suits your
+						high cards live in can force them out of your hand one by one.
+						More than half the time, somebody has to give something up.
+					</p>
+					<p>
+						Your two hands want opposite things at the end. Your own hand is
+						hoarding; the hand opposite has nothing to protect, because its
+						last three cards score nothing — so spend it freely and attack
+						with it.
+					</p>
+				</RulesTip>
+				<p className="rl-note">
+					The searching tiers (Hard, Expert) do not play this mode — their
+					solver only understands two hands — so a Quartet game against the
+					computer is Easy or Normal.
+				</p>
+			</RulesSection>
+
 			<RulesSection title="Playing the cards">
 				<ul>
 					<li>You <b>must follow the suit that was led</b> if you can — and a face-up card on

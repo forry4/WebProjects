@@ -45,6 +45,13 @@ games/spender/ai/serving/leaf_model.npz
 
 # SQLite databases (contain user data)
 *.db
+# ...and the sidecars sqlite writes beside them. `*.db` alone let a
+# `users.db-journal` through, which `npm run screens` leaves behind every time
+# it boots a backend -- so a `git add -A` after running the gates would have
+# committed one.
+*.db-journal
+*.db-wal
+*.db-shm
 
 # Cython build artifacts — the hot-path module (valuation3) is compiled in the Docker build, never committed
 games/spender/ai/serving/valuation3.c

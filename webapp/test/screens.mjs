@@ -2726,6 +2726,162 @@ try {
 		await dctx.close();
 	}
 
+	// ── QUARTET, the fifth mode: four hands, two players ───────────────────────
+	// The Renaissance lesson a fourth time, and this mode has the most to prove
+	// of any of them. It deals FOUR hands off a 52-card deck, plays NINE tricks
+	// of four, adds a phase between the auction and trick 1, and ends with three
+	// cards still in every hand. None of that is covered by the Rust parity
+	// fixtures (two-seat), and `client_searchable` is false so no browser search
+	// touches it either -- what is here plus `test_quartet.py` is the coverage.
+	async function dissonanceQuartet(log) {
+		const ctx = await browser.newContext();
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
+		};
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "quartet-harness", name: "Quartet", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		await page.goto(`http://localhost:${PORT}/dissonance`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".dis", { timeout: 25_000 }).catch(() => {});
+		await page.getByRole("button", { name: /new game|create/i }).first()
+			.click({ timeout: 15_000 }).catch(() => {});
+		await page.waitForSelector(".cm-seg", { timeout: 15_000 }).catch(() => {});
+		for (const label of [/^VS AI$/, /^Easy$/, /^Quartet$/]) {
+			await page.locator(".cm-seg .cm-seg-btn", { hasText: label }).first()
+				.click({ timeout: 10_000 }).catch(() => {});
+		}
+		const picked = await page.evaluate(() =>
+			[...document.querySelectorAll(".cm-seg .cm-seg-btn.sel")].map((b) => b.textContent.trim()));
+		check("the create modal offers Quartet as a fifth mode",
+			picked.includes("Quartet"), JSON.stringify(picked));
+		await page.locator(".cm-create").first().click({ timeout: 15_000 }).catch(() => {});
+		const dealt = await page.waitForSelector(".dis-bidgrid button, .dis-qmine", { timeout: 25_000 })
+			.then(() => true).catch(() => false);
+		check("a quartet room deals", dealt);
+
+		// FOUR SEATS, and the redaction visible on the board: your own two hands
+		// face up, the opponent's two face down. Publishing either of theirs
+		// would delete the finesse, which is the mode's whole point, so this is
+		// a rules assertion as much as a rendering one.
+		const board = await page.evaluate(() => {
+			const seat = (sel) => {
+				const el = document.querySelector(sel);
+				if (!el) return null;
+				const r = el.getBoundingClientRect();
+				return {
+					visible: getComputedStyle(el).display !== "none" && r.height > 0,
+					name: el.querySelector(".dis-seatname")?.textContent || "",
+					faceUp: el.querySelectorAll(".dis-hand .dis-card:not(.back)").length,
+					backs: el.querySelectorAll(".dis-hand .dis-card.back").length,
+				};
+			};
+			return {
+				mine: seat(".dis-qmine"), opp: seat(".dis-qopp"),
+				seats: document.querySelectorAll(".dis-seat").length,
+				piles: document.querySelectorAll(".dis-pile").length,
+			};
+		});
+		check("the board draws four seats", board.seats === 4, JSON.stringify(board));
+		check("the hand opposite you is face up, and is yours to play",
+			!!board.mine && board.mine.visible && board.mine.faceUp === 12
+			&& board.mine.backs === 0, JSON.stringify(board.mine));
+		check("...and BOTH of the opponent's hands stay face down",
+			!!board.opp && board.opp.backs === 12 && board.opp.faceUp === 0,
+			JSON.stringify(board.opp));
+		check("quartet deals no piles", board.piles === 0, JSON.stringify(board));
+
+		// Drive: auction -> the COMMIT phase -> double -> tricks. A phase with
+		// no handler on the client is exactly where a room stalls forever, and
+		// commit is the one phase no other mode has.
+		let sawCommit = false;
+		let widest = 0;
+		// SAMPLED DURING PLAY, not read at the end: the loop is long enough to
+		// finish the round, and once the result panel is up `.dis-trickinfo` is
+		// gone -- so reading it afterwards measures nothing and reports "".
+		//
+		// AND IT IS READ THROUGH `evaluate`, NOT `locator.textContent()`, which
+		// is what hung this block for 24 minutes. A Playwright locator
+		// AUTO-WAITS for its element: on a selector matching nothing,
+		// `.textContent()` blocks for the full 30s default before rejecting,
+		// and `.catch()` does not skip the wait -- it only swallows the result.
+		// Inside a loop that runs long after the round has ended, that is 30s
+		// an iteration. `evaluate` reads the DOM as it is right now and returns
+		// immediately. (The `.count() > 0` guards below are safe for the same
+		// reason -- `count()` does not auto-wait.)
+		let trickLine = "";
+		for (let i = 0; i < 160; i++) {
+			const snap = await page.evaluate(() => ({
+				width: document.querySelectorAll(".dis-trick .dis-tp").length,
+				info: document.querySelector(".dis-trickinfo")?.textContent || "",
+			}));
+			widest = Math.max(widest, snap.width);
+			trickLine = snap.info || trickLine;
+			if (await page.locator(".dis-bidgrid button").count() > 0) {
+				await disBidCheaply(page);
+				await sleep(200);
+				continue;
+			}
+			// The commit panel: pick which hand leads, then confirm.
+			const lead = page.getByRole("button", { name: /leads$/ }).first();
+			if (await lead.count() > 0) {
+				sawCommit = true;
+				await lead.click({ timeout: 5_000 }).catch(() => {});
+				await page.getByRole("button", { name: /^Play it as dealt$/ }).first()
+					.click({ timeout: 5_000 }).catch(() => {});
+				await sleep(200);
+				continue;
+			}
+			const stand = page.getByRole("button", { name: /^Let it stand$/ }).first();
+			if (await stand.count() > 0) {
+				await stand.click({ timeout: 5_000 }).catch(() => {});
+				await sleep(150);
+				continue;
+			}
+			const card = page.locator(".dis-card.play").first();
+			if (await card.count() > 0) {
+				await card.click({ timeout: 5_000 }).catch(() => {});
+				await sleep(120);
+				continue;
+			}
+			await sleep(150);
+		}
+		check("the commit phase is reachable and answerable in the browser", sawCommit);
+		check("a trick in a quartet room is four cards wide", widest >= 4,
+			`widest trick seen: ${widest}`);
+		check("the trick line counts to the mode's own length -- nine, not thirteen",
+			/of 9\b/.test(trickLine), JSON.stringify(trickLine));
+
+		// THE FULL DECK REACHED THE BROWSER. Quartet deals all 52 -- the 2, 3
+		// and 4 live at ids 40..51, appended so nothing older moved -- and a
+		// client still decoding on the old block boundaries would draw them
+		// with a blank glyph and an undefined rank rather than throwing. The
+		// same failure the wide deck's 5s and 6s were guarded against.
+		const ranks = await page.evaluate(() => {
+			const seen = new Set();
+			for (const el of document.querySelectorAll(".dis-card .dis-r"))
+				seen.add(el.textContent.trim());
+			return [...seen];
+		});
+		const ALL = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"];
+		check("the full deck's low ranks render as themselves",
+			ranks.some((r) => ["2", "3", "4"].includes(r)), JSON.stringify(ranks));
+		check("...and no card renders with an unknown rank",
+			ranks.length > 0 && ranks.every((r) => ALL.includes(r)), JSON.stringify(ranks));
+
+		// A QUARTET ROOM HAS NO TALON -- its four out-cards are pure secrecy and
+		// nobody is ever shown them. `shown` is an empty array, which is TRUTHY,
+		// and that is how dummy mode once rendered a heading over nothing.
+		check("no talon panel in a room that has no talon",
+			await page.locator(".dis-p-talon").count() === 0);
+
+		check("no page errors creating and playing a quartet room",
+			errors.length === 0, errors[0]?.slice(0, 160) || "");
+		await ctx.close();
+	}
+
 	// ── Dissonance's client-searched tiers, in the browser ──────────────────────
 	// Dissonance is the only game here whose CARD PLAY runs client-side, and the
 	// whole path is invisible to Python: a module Worker loads wasm-pack glue, the
@@ -4187,9 +4343,13 @@ try {
 	// comments in those blocks were written against.
 	const laneA = [offlineSpender, offlineCoc, offlineDuel, offlineDissonance,
 		dissonanceSkat, dissonanceHard, dissonanceBeat];
+	// `dissonanceQuartet` is lane B: it plays a whole game but arms NO worker
+	// (`client_searchable` is false for four hands), and it asserts settled
+	// geometry rather than elapsed time -- both of which are what lane B is for.
 	const laneB = [routeMounts, shellNav, authScreen, spenderPlayTurn, spenderWaitingRoom,
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, dmAdventures,
-		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, lastDifficulty];
+		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, lastDifficulty,
+		dissonanceQuartet];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant
 	// writing it — it then ran because it was simply the next statement. Now it has

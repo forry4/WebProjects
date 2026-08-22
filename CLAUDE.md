@@ -15,7 +15,7 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
 | [`games/wherewolf/CLAUDE.md`](games/wherewolf/CLAUDE.md) | WW roles, redaction matrix, night conductor |
 | [`games/spender_duel/CLAUDE.md`](games/spender_duel/CLAUDE.md) | Duel engine, hidden info, and the current coherent/minimax search |
 | [`games/dontminion/CLAUDE.md`](games/dontminion/CLAUDE.md) | Dontminion (Dominion) frame-stack engine, the frozen effects API, multi-bot server, decision-prompt frontend |
-| [`games/dissonance/CLAUDE.md`](games/dissonance/CLAUDE.md) | Dissonance — parity trick-taking rules, the Rust reference + parity gate, auction/scoring calibration, the three modes (classic / skat / minor), and the browser-served Hard tier |
+| [`games/dissonance/CLAUDE.md`](games/dissonance/CLAUDE.md) | Dissonance — parity trick-taking rules, the Rust reference + parity gate, auction/scoring calibration, the five modes (classic / skat / minor / dummy / quartet), and the browser-served Hard tier |
 | [`shared/CLAUDE.md`](shared/CLAUDE.md) | Shared frontend kits + URL routing |
 | [`books/CLAUDE.md`](books/CLAUDE.md) | The Books feature |
 | [`docs/ai-research-log.md`](docs/ai-research-log.md) | **AI campaign history, dated sessions, rejected-experiment postmortems.** When something here says "see the research log," that's the blow-by-blow + "do not relitigate" detail. |
@@ -87,13 +87,16 @@ games/
                        #   migration gate. EXPANSIONS.md is the phase roadmap + debt ledger
   dissonance/          # Dissonance — 2p parity trick-taking. engine.py is a PORT of
                        #   rust-cores/dissonance-core (the solver-validated reference);
-                       #   tests/test_rust_parity.py is the drift gate. FOUR modes
+                       #   tests/test_rust_parity.py is the drift gate. FIVE modes
                        #   over the shared card play, picked per room
-                       #   (`mode: classic|skat|minor|dummy` — minor re-prices
-                       #   even tricks to +1; skat scores the CARDS captured,
-                       #   9/10/J/Q +2 and 7/8/K/A −1; dummy deals a THIRD hand
-                       #   whoever leads plays, 3 seats x 13 cards off a WIDE
-                       #   40-card deck, 13 tricks of three) — see its CLAUDE.md
+                       #   (`mode: classic|skat|minor|dummy|quartet` — minor
+                       #   re-prices even tricks to +1; skat scores the CARDS
+                       #   captured, 9/10/J/Q +2 and 7/8/K/A −1; dummy deals a
+                       #   THIRD hand whoever leads plays, 3 seats x 13 cards off
+                       #   a WIDE 40-card deck, 13 tricks of three; QUARTET deals
+                       #   FOUR hands off the full 52, two per player, 9 tricks
+                       #   of four, and scores the three cards each own hand is
+                       #   left holding) — see its CLAUDE.md
 books/                 # Books feature (wired into the app, not a sub-app)
 shared/                # theme.js (baseCss), lobby.jsx, splendor.jsx, router.js — cross-game frontend kits
                        #   + AuthScreen.jsx / HomeScreen.jsx — site-SHELL screens, here for the

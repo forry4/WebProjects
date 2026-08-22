@@ -513,6 +513,180 @@ trick really reaches three cards, and that **a 5 or a 6 renders as itself** —
 a client still decoding ids as `suit*8 + rank` would draw the eight new cards
 with a blank glyph and an undefined rank rather than throwing.
 
+## QUARTET mode — four hands, two players, and a second currency (2026-08-21)
+
+The fifth mode, and the first four-hand one. Seats 0 and 1 are the players'
+OWN hands, 2 and 3 the hands OPPOSITE them, so a player commands `p` and
+`p + 2` and **`side_of` is a plain `pos % 2`** — nothing is contested the way
+`DUMMY_COMMAND` contests dummy's third hand.
+
+**The shape.** TWELVE cards a hand, FOUR out, **NINE tricks of four**, no
+piles. Every hand therefore ends holding three it never played, and an OWN
+hand's three score their card value into the total the contract is bid
+against. Classic's auction plus a backing rule, plus one new phase.
+
+**EVERY NUMBER IN THAT SENTENCE WAS MEASURED BEFORE THE MODE WAS WRITTEN**
+(`tools/quartet_agency.py`, `quartet_keeps.py`, `quartet_auction.py`,
+`quartet_ladder.py`). The order the findings arrived in matters, because two of
+them overturned the one before:
+
+* **The pile split was the wrong question.** The probe was built to fit it, and
+  every 13/10 arm starved the dummy seats regardless — 2.59 legal cards at 4+3
+  piles and only **3.08 with no piles at all**, against the 2.89 that sent
+  dummy mode back to be re-dealt. Burial moves a seat by 0.5; its CARD COUNT
+  moves it far more. A 10-card hand playing ten tricks is down to one forced
+  card at trick 10 while a 13-card hand still holds four.
+* **…so the deal wanted to be four EQUAL hands, and that arm is dead on an axis
+  the agency probe cannot see.** Four hands of 13 is all 52 cards with NOTHING
+  out — and with nothing out the two players PARTITION the deck, so each knows
+  the other's holding exactly by complement. Measured as bits of uncertainty
+  about which cards the opponent holds: **0.0, against classic's 14.7.** The
+  finesse survives (23.3 bits remain about how their cards are SPLIT between
+  their two hands, which is the only thing a finesse asks) but every statement
+  a player could make about their own holding is already known — so a backed
+  bid conveys nothing and the auction has no content.
+  **An out-pile is not a talon to cut a prize from. It is the game's entire
+  permanent hidden-information budget.**
+* **12/12/12/12, four out, NINE tricks is the deal.** 4.31 choices a decision
+  and 16% forced, both better than classic's 4.02 / 22%; 14.3 bits of secrecy,
+  within half a bit of classic's 14.7; and three cards kept a hand, which the
+  ten-trick version would have cut to two. Nine reading better than ten is not
+  a rounding artefact — a round's last trick is its most constrained, so
+  stopping a trick earlier drops the worst ply from every hand.
+
+**THE KEEPS ARE THE SECOND CURRENCY, and they are a decision rather than a
+formality — measured, because the failure mode was real.** The best three cards
+in a twelve-card hand are worth **+5.49** with a ceiling of +6 that 80% of
+hands can reach, so if a player could simply keep their best three then everyone
+scores +6 every round, the variance is zero and the mechanic is decoration.
+What stops that is follow-suit: greedy protection reaches **+4.41** against a
+random +0.91, so it costs 1.08 points and **denies the ceiling in 55.6% of
+rounds**. Both policies are non-attacking, so that is a FLOOR — an opponent who
+leads the suits your +2 cards live in drives it further, and that is the
+mechanic's interactive half.
+
+* **Only an OWN hand's three score.** The best six across a player's two hands
+  is +11.64 against a random +1.84 — a 9.8-point skill band against a trick
+  range of −5..+8, i.e. three quarters of the round decided off the table. One
+  hand's three is 4.6, about a third.
+* **The dummies still keep three and they score nothing.** Dealing them nine so
+  they play out exactly (12/9/12/9) was measured and is worse — 2.88 choices,
+  24% forced, dummy mode's failure mark. The dead keeps are better read as an
+  ASYMMETRY than a wart: an own hand is under squeeze pressure and hoards,
+  while a dummy has nothing to protect and spends freely to attack.
+* **The keeps do NOT enter `pts`.** `pts` stays the TRICK total in every mode,
+  so "pts sums to the pool over a completed round" holds unconditionally and
+  every existing test asserts it flat rather than behind a mode test. `_finish`
+  adds the two together once, where the contract is settled (`keeps_for`).
+
+**THE BACKED BID — the substitute for bridge's partner conventions, which a
+two-player game cannot have.** A denomination may only be named by a bidder
+holding **`QUARTET_BACKING` = 6** or more of it across their two hands, so every
+bid is a PROVABLE statement and the opponent can count against it: the
+information is enforced by legality rather than agreed between partners.
+No-trump is always legal, which stops a hand being unbiddable and makes an NT
+bid usefully ambiguous (real strength, or no suit at all) rather than a tell.
+
+Six is a two-sided fit over 20k deals, and it is exactly the mean suit length
+across a player's 24 cards, so the rule states in one sentence:
+
+| K | mean legal suits | none | exactly 1 | 2+ | proves |
+|---|---|---|---|---|---|
+| 5 | 3.33 | 0.0% | 0.0% | 100% | 0.47 b |
+| **6** | **2.50** | **0.0%** | **1.9%** | **98%** | **0.81 b** |
+| 7 | 1.49 | 6.4% | 38.1% | 56% | 1.17 b |
+| 8 | 0.66 | 44.8% | 44.0% | 11% | 1.53 b |
+
+Too low and every denomination is legal, so the bid proves nothing; too high
+and the bidder had no choice, so it proves a lot and decides nothing. Raise it
+to 7 if bids measure uninformative in play — it is one constant and
+`quartet_auction.py` re-fits it.
+
+**AND THE BID LIST IS PRIVATE NOW, WHICH IT NEVER HAD TO BE BEFORE.**
+`view_for` shipped `auction_options` to BOTH seats, harmless while legality
+depended only on public state (the standing bid, the spent denominations).
+Under backing it depends on the bidder's 24 private cards, so **the defender
+could read straight off their own pad which suits their opponent holds six
+of** — the exact information a bid is supposed to cost something to reveal.
+The list goes only to the seat on turn; nobody can bid out of turn, and the
+frontend already gates the pad on `myTurn` with a `{bids: []}` fallback, so no
+expand/contract window was needed. Found by reading a real `created` payload,
+not by a test, which is why there is now a test.
+
+**THE COMMIT PHASE — stage two of a two-stage auction.** Stage one competes on
+level and denomination; `commit` is where the declarer DECLARES two things, and
+both are declarations rather than contests, which is why they sit after the
+bidding rather than inside it:
+
+* **which of their two hands leads.** The only decision in the auction that
+  needs two hands to exist. Play goes round the table, so the leading side
+  plays FIRST and THIRD while the other plays SECOND and FOURTH — and fourth is
+  the informed seat, with the whole trick already down. **Leading costs
+  position**, which in a game where winning a trick can lose you points is a
+  genuine liability rather than the plain advantage it is elsewhere. Whichever
+  of a player's seats wins a trick leads the next, so this sets the parity the
+  round re-phases around.
+* **one optional card swapped between their own two hands.** The declarer's
+  prize, and it replaces the talon — quartet's four out-cards are pure secrecy
+  that nobody ever sees, so the prize has to come from somewhere else. Worth
+  something real because the two hands sit in different seats. Both-or-neither:
+  a lone `take` is refused rather than treated as a half-swap.
+
+**THE LADDER IS FITTED AND ITS PEAK IS INTERIOR** (`tools/quartet_ladder.py`).
+Settles 1..10 with the mode at **6** and **78% made** (classic 82%, dummy 74%),
+busiest rung 27% — inside the "no level above 40%" constraint. Forced-level EV
+climbs +6.81 at the floor to **+27.41 at level 8** and falls away to +1.45 at
+the ceiling, so there is a real punishment for overbidding. **Dummy mode's first
+ladder failed exactly this check** and settled 100% of contracts on the top
+rung. `MATCH_TARGET` is 140, bootstrapped to a median of 8 rounds (p10–p90
+5–11), which is classic's profile to the round.
+
+* **Watch the sign when re-tuning `_QUARTET_LEVEL_NEEDS`**: a threshold is the
+  strength a level DEMANDS, so RAISING it lowers the settled mode. The first
+  re-fit chased the EV peak upward and moved the mode the wrong way (6 → 5).
+* **Declarer EV is positive at every rung and that is not a defect** — this is
+  a symmetric zero-sum game, both seats have EV 0 by construction, and the
+  column only says what winning the auction is worth in that regime.
+
+**THE MIRROR MUST READ 0.0000 AND TWICE IT DID NOT.** `_split` puts a whole
+round on the winner and zero on the loser, so **a score row is not zero-sum**:
+the first paired arena scored the same seat in both seatings (+16.41) and the
+second added two score rows instead of differencing them (+15.75, which is just
+the mean absolute transfer). Both looked like a strong policy. The signed
+difference, averaged over both seatings, is the only correct pairing — and the
+bot's real margin over random-legal is **+27.37 a round**.
+
+**THE FULL DECK — 52 cards, and the 2/3/4 are ids 40..51.** The deck has now
+been widened twice and the rule that made both safe is APPENDING: block A (the
+5 and 6) at 32..39, block B (the 2, 3 and 4) at 40..51, so no id that ever
+shipped changed meaning. The obvious generalisation — one contiguous
+`NCARD + suit * 5 + k` — would have renumbered the 5 and the 6 into the 2 and
+the 3, and **`deal_is_current` could NOT have caught it**: a renumbered dummy
+save still holds forty distinct ids and still counts right against `deck_size`,
+so every card would silently have changed rank. The invariant the blocks buy,
+which every deck function leans on: **a deck of N cards is exactly `range(N)`
+AND exactly the top N/4 ranks**, true at 32, 40 and 52.
+
+**HARD AND EXPERT DO NOT RUN HERE**, enforced the same two ways dummy is: the
+Rust core is two-seat to its bones, `client_searchable("quartet")` is False, and
+`/catalog`'s `searchable_modes` keeps the create modal from offering a tier that
+cannot run. A quartet round banks no DD review column for the same reason.
+
+**Coverage is Python-only plus one browser block, and that is the whole risk.**
+`tests/test_quartet.py` (32 tests) and two integration tests are what stand
+behind this; the parity fixtures are two-seat and never see it. The redaction
+test asserts against the whole SERIALIZED payload of a real mid-round game and
+was verified non-vacuous by injecting a leak into `view_for`.
+
+**THE RENDER GATE EARNED ITS KEEP HERE.** `trickList` sliced history into
+tricks with `const w = game.dummy ? 3 : 2` — under a comment claiming the width
+came off the wire, which it did not. Quartet's four-card tricks were sliced into
+pairs, so the completed-trick hold showed two of four cards, the Last trick
+panel was wrong and every trick's parity value was computed for the wrong trick
+NUMBER. All of it rendered perfectly and nothing threw; `npm run screens` is
+what caught it. The width is now `game.piles?.length`, which carries one entry
+per POSITION in every mode and needs no mode test at all.
+
 ## Must head the trick — MEASURED, THEN SHELVED THE SAME DAY (2026-08-10)
 
 **`MUST_HEAD` is off in every mode.** The implementation is kept whole and the
