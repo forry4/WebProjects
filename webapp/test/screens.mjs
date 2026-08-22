@@ -2798,6 +2798,7 @@ try {
 		// commit is the one phase no other mode has.
 		let sawCommit = false;
 		let widest = 0;
+		const pipOrders = new Set();
 		// SAMPLED DURING PLAY, not read at the end: the loop is long enough to
 		// finish the round, and once the result panel is up `.dis-trickinfo` is
 		// gone -- so reading it afterwards measures nothing and reports "".
@@ -2823,9 +2824,12 @@ try {
 			const snap = await page.evaluate(() => ({
 				width: document.querySelectorAll(".dis-trick .dis-tp").length,
 				info: document.querySelector(".dis-trickinfo")?.textContent || "",
+				pips: [...document.querySelectorAll(".dis-seatname .dis-qorder")]
+					.map((e) => e.textContent),
 			}));
 			widest = Math.max(widest, snap.width);
 			trickLine = snap.info || trickLine;
+			if (snap.pips && snap.pips.length === 4) pipOrders.add(snap.pips.join(""));
 			if (await page.locator(".dis-bidgrid button").count() > 0) {
 				await disBidCheaply(page);
 				await sleep(200);
@@ -2834,8 +2838,44 @@ try {
 			// The commit panel: pick which hand leads, then confirm.
 			const lead = page.getByRole("button", { name: /leads$/ }).first();
 			if (await lead.count() > 0) {
+				// THE SCREEN A PLAYER GOT STUCK ON. The two lead buttons were
+				// `btn dis-annbtn` with no `btn-ghost`, and `.btn` is
+				// `border: none` while `.dis-annbtn` only sets a border COLOUR
+				// -- so they rendered as bare accent text that did not read as
+				// buttons, with no selected state, while the go button stayed
+				// disabled until one was picked. Three things have to hold.
+				if (!sawCommit) {
+					const pre = await page.evaluate(() => {
+						const b = document.querySelector(".dis-auction .dis-annbtn");
+						const go = document.querySelector(".dis-gobtn");
+						return { ring: b ? getComputedStyle(b).boxShadow : "",
+							goDisabled: !!go?.disabled, goText: go?.textContent.trim() || "" };
+					});
+					check("the lead buttons are painted, not bare text",
+						/inset/.test(pre.ring), pre.ring.slice(0, 60));
+					check("...and the go button says what is missing until one is picked",
+						pre.goDisabled && /which hand leads/i.test(pre.goText),
+						JSON.stringify(pre));
+				}
 				sawCommit = true;
 				await lead.click({ timeout: 5_000 }).catch(() => {});
+				await sleep(200);
+				const post = await page.evaluate(() => {
+					const sel = document.querySelector(".dis-annbtn.sel");
+					const go = document.querySelector(".dis-gobtn");
+					return { selected: !!sel,
+						filled: sel ? getComputedStyle(sel).backgroundColor : "",
+						goDisabled: !!go?.disabled,
+						pips: [...document.querySelectorAll(".dis-seatname .dis-qorder")]
+							.map((e) => e.textContent) };
+				});
+				check("picking a hand visibly selects it and frees the go button",
+					post.selected && !post.goDisabled
+					&& !/rgba\(0, 0, 0, 0\)/.test(post.filled), JSON.stringify(post));
+				check("...and the four seats number themselves 1-4 in play order",
+					post.pips.length === 4
+					&& new Set(post.pips).size === 4
+					&& post.pips.slice().sort().join("") === "1234", JSON.stringify(post.pips));
 				await page.getByRole("button", { name: /^Play it as dealt$/ }).first()
 					.click({ timeout: 5_000 }).catch(() => {});
 				await sleep(200);
@@ -2856,6 +2896,13 @@ try {
 			await sleep(150);
 		}
 		check("the commit phase is reachable and answerable in the browser", sawCommit);
+		// THE NUMBERS HAVE TO FOLLOW THE LEAD. Whoever wins a trick leads the
+		// next one, so the 1..4 on the seats re-orders as the round goes -- a
+		// static numbering would be worse than none, since it would say the
+		// wrong thing for most of the round.
+		check("the play-order numbers re-order as the lead moves",
+			pipOrders.size > 1,
+			`orders seen: ${[...pipOrders].join("  ")}`);
 		check("a trick in a quartet room is four cards wide", widest >= 4,
 			`widest trick seen: ${widest}`);
 		check("the trick line counts to the mode's own length -- nine, not thirteen",

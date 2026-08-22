@@ -2148,6 +2148,29 @@
   background: rgba(255, 255, 255, 0.02);
 }
 
+/* THE PLAY-ORDER PIP -- which of the four seats plays first, second, third and
+   fourth in THIS trick. Small, round, and the same accent the board already
+   uses for "yours", because it is a positional fact rather than a warning.
+   It renders on all four seats and on each card in the trick, and it re-orders
+   every trick, since the winner leads the next one. */
+.dis-qorder {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 1.15rem; height: 1.15rem; padding: 0 0.25rem;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: 0.66rem; font-weight: 700; line-height: 1;
+  margin-inline: 0.3rem 0.1rem;
+}
+/* A SELECTED ANNOUNCEMENT BUTTON HAS TO LOOK SELECTED. `.dis-annbtn` is an
+   outline and nothing in the kit filled it in, so the quartet commit phase
+   drew two identical outlines and gave no sign which had been pressed -- the
+   screen a player got stuck on. Filled accent, matching the hover state, so
+   pressed and hovered agree. */
+.dis .dis-annbtn.sel {
+  background: var(--accent); color: var(--ink); border-color: var(--accent);
+}
+
 /* THE OPPONENT'S TWO HANDS ARE DRAWN SMALL, AND THAT IS THE WHOLE REASON THE
    BOARD FITS. Four twelve-card hands stacked at full size do not: measured at
    1440x900 the card had already been driven down to its 3.4rem floor and a

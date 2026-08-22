@@ -466,6 +466,17 @@ function lastTrick(game) {
   return all.length ? all[all.length - 1] : null;
 }
 
+/* WHERE THIS SEAT PLAYS IN THE TRICK, 1..4 (quartet only; `null` everywhere
+   else renders nothing). Four hands make the order genuinely hard to read --
+   two of them are yours and they are not adjacent -- and it CHANGES every
+   trick, because the winner leads the next one. A number on each seat is the
+   cheapest way to say it, and it beats any amount of prose about who follows
+   whom. */
+function OrderPip({ n }) {
+  if (!n) return null;
+  return <span className="dis-qorder" title={`plays ${n} of 4 this trick`}>{n}</span>;
+}
+
 function uid() { return Math.random().toString(36).slice(2, 10); }
 function roomCode() {
   return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[Math.floor(Math.random() * 26)]).join("");
@@ -1973,6 +1984,27 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
   const [commitLead, setCommitLead] = useState(null);
   const [commitTake, setCommitTake] = useState(null);
   const [commitGive, setCommitGive] = useState(null);
+
+  //: WHERE EACH SEAT SITS IN THIS TRICK, 1..4. Play goes round the table from
+  //: whoever leads (`engine.trick_order`), so a seat's number is just its
+  //: distance from the leader -- and because the winner of a trick leads the
+  //: next one, the four numbers RE-ORDER every trick. That is the single
+  //: hardest thing to see on a four-hand board: with two seats "they go, then
+  //: you" needs no explanation, with four it does.
+  //:
+  //: During the COMMIT phase it previews the choice being made rather than the
+  //: standing one, so picking a leading hand renumbers the board live.
+  //:
+  //: DECLARED HERE, BELOW `commitLead`, AND THAT PLACEMENT IS THE WHOLE POINT.
+  //: It first sat with the other quartet derivations 400 lines up, which reads
+  //: `commitLead` before its `const` -- a temporal dead zone throw that blanked
+  //: the whole app with "Cannot access before initialization". A `const` is not
+  //: hoisted the way a function is.
+  const qLead = !isQuartet ? null
+    : game?.phase === "commit" ? commitLead
+      : game?.phase === "play" ? game.leader : null;
+  const orderOf = (pos) => (qLead === null || qLead === undefined ? null
+    : ((pos - qLead + 4) % 4) + 1);
   useEffect(() => { setSwapTake(null); setSwapGive(null); }, [game?.phase]);
   /* THE OPTIMISTIC CARD (see `doPlay`). Cleared by ANY authoritative change,
      which is what keeps it honest: the server's next state is the truth
@@ -2488,6 +2520,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
           <div className={`dis-seat${isQuartet ? " dis-qtheirs" : ""}`}>
             <div className="dis-seatname">
               <b>{nameOf(oppSeat)}</b>
+              <OrderPip n={orderOf(oppSeat)} />
               <span>{game.pts[oppSeat] >= 0 ? "+" : ""}{game.pts[oppSeat]} pts</span>
             </div>
             <div className="dis-hand">
@@ -2515,6 +2548,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
             <div className="dis-seat dis-qopp">
               <div className="dis-seatname">
                 <b>{nameOf(oppSeat + QUARTET_HANDS)}</b>
+                <OrderPip n={orderOf(oppSeat + QUARTET_HANDS)} />
                 {game.to_play === oppSeat + QUARTET_HANDS && game.phase === "play"
                   && <span className="muted">to play</span>}
               </div>
@@ -2706,15 +2740,32 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
                     trick 1 — <b>leading costs you the last card of every
                     trick</b> — and you may move one card between them.
                   </div>
+                  {/* `btn-ghost` IS WHAT PAINTS THE BORDER. `.btn` is
+                      `border: none` and `.dis-annbtn` only sets a border
+                      COLOUR, so without it these rendered as bare accent text
+                      -- reported from a real game as "I'm stuck here": they did
+                      not read as buttons at all, and the go button below stays
+                      disabled until one is chosen. */}
                   <div className="dis-actrow">
                     {game.commit.leads.map((p) => (
                       <button key={p}
-                        className={`btn dis-annbtn${commitLead === p ? " sel" : ""}`}
+                        className={`btn btn-ghost dis-annbtn${commitLead === p ? " sel" : ""}`}
                         aria-pressed={commitLead === p}
                         onClick={() => setCommitLead(p)}>
                         {p < QUARTET_HANDS ? "Your hand leads" : "Opposite leads"}
                       </button>
                     ))}
+                  </div>
+                  {/* The consequence of that choice, spelled out and LIVE --
+                      the numbered badges on the four seats re-order as soon as
+                      a lead is picked, so the trade (the lead gives up the last
+                      card of the trick) can be read off the board itself
+                      rather than taken on trust from the sentence above. */}
+                  <div className="muted" style={{ fontSize: "0.78rem" }}>
+                    {commitLead === null
+                      ? "Pick one — the seats will number themselves 1-4 in play order."
+                      : <>Play goes <b>1 → 2 → 3 → 4</b> round the table, and your
+                        side takes seats <b>1</b> and <b>3</b>.</>}
                   </div>
                   <div className="muted" style={{ fontSize: "0.8rem" }}>
                     Take one from the hand opposite…
@@ -2749,9 +2800,11 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
                         });
                         setCommitLead(null); setCommitTake(null); setCommitGive(null);
                       }}>
-                      {commitTake !== null && commitGive !== null
-                        ? <>Swap <CardName c={commitTake} /> for <CardName c={commitGive} /> and play</>
-                        : "Play it as dealt"}
+                      {commitLead === null
+                        ? "Pick which hand leads first"
+                        : commitTake !== null && commitGive !== null
+                          ? <>Swap <CardName c={commitTake} /> for <CardName c={commitGive} /> and play</>
+                          : "Play it as dealt"}
                     </button>
                   </div>
                 </>
@@ -3355,7 +3408,12 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
                     : trickCards.map((t, i) => (
                       <div key={i} className={`dis-tp${t.won ? " won" : ""}`}>
                         <Card c={t.c} />
-                        <div className="muted" style={{ fontSize: "0.72rem" }}>{nameOf(t.seat)}</div>
+                        <div className="muted" style={{ fontSize: "0.72rem" }}>
+                          {/* The same 1..4 the seats wear, so a card on the
+                              felt can be traced back to the hand it came from
+                              without counting round the table. */}
+                          {isQuartet && <OrderPip n={i + 1} />}{nameOf(t.seat)}
+                        </div>
                       </div>
                     ))}
                   {/* IN THE ROW, not positioned over it: the pill is the last
@@ -3414,6 +3472,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
             <div className={`dis-seat dis-qmine${qToPlay === myOther ? " mine" : ""}`}>
               <div className="dis-seatname">
                 <b>{nameOf(myOther)}</b>
+                <OrderPip n={orderOf(myOther)} />
                 {qToPlay === myOther && <span className="dis-yourturn">to play</span>}
               </div>
               <div className="dis-hand">
@@ -3457,6 +3516,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
             </div>
             <div className="dis-seatname">
               <b>{nameOf(mySeat)}</b>
+              <OrderPip n={orderOf(mySeat)} />
               <span>{game.pts[mySeat] >= 0 ? "+" : ""}{game.pts[mySeat]} pts</span>
             </div>
           </div>
