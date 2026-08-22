@@ -1487,6 +1487,13 @@ async def catalog():
         "tricks_by_mode": {m: engine.layout_for(m)[3] for m in engine.MODES},
         "searchable_modes": [m for m in engine.MODES
                              if engine.client_searchable(m)],
+        # QUARTET (2026-08-21): four hands, two players, and a BACKED bid -- a
+        # denomination may only be named by a bidder holding this many of it
+        # across their two hands. Served so the create modal and the rules
+        # panel state the real number rather than a hardcoded 6, and so the
+        # bid pad can say WHY a suit is greyed out.
+        "quartet_backing": engine.QUARTET_BACKING,
+        "quartet_hands": engine.QUARTET_HANDS,
         "pools": {m: engine.pool_for(m) for m in engine.MODES},
         "max_levels": {m: engine.max_level_for(m) for m in engine.MODES},
         "minor_null_make": engine.MINOR_NULL_MAKE,

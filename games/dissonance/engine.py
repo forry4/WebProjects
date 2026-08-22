@@ -3540,7 +3540,18 @@ def view_for(g: dict, seat: int) -> dict:
         "plays": [list(p) for p in (g.get("plays") or [])],
         "tricks": ntricks_in(g),
         "legal": legal_moves(g, seat) if g["phase"] == "play" else [],
-        "options": auction_options(g) if g["phase"] == "auction" else None,
+        # THE BID LIST GOES ONLY TO THE SEAT ON TURN, and quartet is why.
+        # `auction_options` is built for `to_act`, so shipping it to both seats
+        # was harmless while legality depended only on public state (the
+        # standing bid and the spent denominations). Under quartet's BACKED
+        # bid it depends on the bidder's 24 private cards: the defender could
+        # read straight off the pad which suits their opponent holds six of,
+        # which is precisely the information the bid is supposed to cost
+        # something to reveal. Nobody can bid out of turn anyway, so the
+        # opponent's copy was never load-bearing.
+        "options": (auction_options(g)
+                    if g["phase"] == "auction" and seat == g["auction"]["to_act"]
+                    else None),
         "swap": swap_options(g) if g["phase"] == "swap" and seat == decl else None,
         # Skat's post-auction prompts, each to exactly one seat.
         "talon": talon_options(g) if g["phase"] == "talon" and seat == decl else None,

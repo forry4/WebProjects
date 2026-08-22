@@ -259,6 +259,11 @@ def _drive(g, pick_auction):
     phase = g["phase"]
     if phase == "auction":
         return pid, pick_auction(g)
+    if phase == "commit":
+        # QUARTET's stage two: lead from the declarer's own hand, no swap.
+        return pid, {"kind": "commit", "lead": g["auction"]["declarer"]}
+    if phase == "double":
+        return pid, {"kind": "double", "on": False}
     if phase == "swap":
         return pid, {"kind": "swap", "take": None}
     if phase == "talon":
@@ -333,6 +338,110 @@ def test_a_skat_room_plays_from_create_to_a_scored_result():
 
     assert room["status"] == "over"
     assert "error" not in wa.types() and "error" not in wb.types()
+
+
+#: Bid AROUND THE SETTLED MODE (6) rather than the floor. Not cosmetic: a
+#: level-1 quartet contract pays about 7 against a match target of 140, so a
+#: floor-bidding driver needs 40+ rounds to decide a match and the test reads
+#: as a stall in a phase no handler advances -- which is the failure this file
+#: is for and would then be indistinguishable from a real one.
+_QUARTET_TEST_LEVEL = 6
+
+
+def _quartet_auction_move(g):
+    """Open near the settled mode in a denomination this seat can BACK, then
+    pass -- quartet's gate means the opener cannot simply name a suit."""
+    bids = E.auction_options(g)["bids"]
+    if not bids or g["auction"]["level"] > 0:
+        return {"kind": "pass"}
+    at = [b for b in bids if b[0] == _QUARTET_TEST_LEVEL]
+    lvl, den = min(at) if at else max(bids)
+    return {"kind": "bid", "level": lvl, "denom": den}
+
+
+def test_a_quartet_room_plays_from_create_to_a_scored_result():
+    """FOUR HANDS through the real WS handlers. A mode that deals a different
+    number of hands, plays a different number of tricks and adds a phase
+    (`commit`) is exactly the shape that stalls in a phase no handler
+    advances -- which is what this file exists to catch."""
+    wa, wb = _FakeWS(), _FakeWS()
+    assert run(m._handle_create(wa, "Q", "alice",
+                                {"name": "Alice", "mode": "quartet"})) is True
+    assert run(m._handle_join(wb, "Q", "bob", {"name": "Bob"})) is True
+    run(m._handle_start(wa, "Q", "alice"))
+
+    room = m.ROOMS["Q"]
+    g = room["game"]
+    assert room["mode"] == "quartet" and g["mode"] == "quartet"
+    assert [len(h) for h in g["hands"]] == [12] * 4
+    assert len(g["out"]) == 4
+
+    rounds = 0
+    while not E.is_over(g):
+        rounds += 1
+        assert rounds < 40, "the match never reached its target"
+        guard = 0
+        while g["phase"] != "over":
+            guard += 1
+            assert guard < 300, f"the room stalled in {g['phase']}"
+            pid, move = _drive(g, _quartet_auction_move)
+            run(m._handle_move(wa if pid == "alice" else wb, "Q", pid,
+                               {"move": move}))
+        # Nine tricks, four cards each, three left in every hand -- and the
+        # TRICK pool conserved at +3 with the keeps deliberately outside it.
+        assert g["trick"] == 9
+        assert [len(h) for h in g["hands"]] == [3] * 4
+        assert sum(g["pts"]) == E.pool_for("quartet") == 3
+        res = g["result"]
+        assert res["mode"] == "quartet"
+        assert res["declarer_pts"] == (res["trick_pts"][res["declarer"]]
+                                       + res["keeps"][res["declarer"]])
+        if not E.is_over(g):
+            run(m._handle_move(wb, "Q", "bob",
+                               {"move": {"kind": "next_round",
+                                         "round": res["round"]}}))
+
+    assert room["status"] == "over"
+    assert "error" not in wa.types() and "error" not in wb.types()
+
+
+def test_a_vs_bot_quartet_room_is_creatable_and_the_bot_commits(monkeypatch):
+    """The bot has to answer a NEW prompt (`commit`), and one that stalls there
+    leaves the human with no way forward. Also pins that a quartet room is
+    never armed for the browser search core, which is two-seat to its bones --
+    an armed client would answer with a card for the wrong hand."""
+    monkeypatch.setattr(m, "BOT_FLOOR_SECONDS", 0.0)
+    ws = _FakeWS()
+    # A vs-AI room is dealt at CREATE -- starting it again is an error, and
+    # `types()` below would report it.
+    assert run(m._handle_create(ws, "QB", "alice",
+                                {"name": "Alice", "vs_ai": True,
+                                 "ai_difficulty": "normal",
+                                 "mode": "quartet"})) is True
+    room = m.ROOMS["QB"]
+    g = room["game"]
+    assert not E.client_searchable("quartet")
+
+    guard = 0
+    while g["phase"] != "over":
+        guard += 1
+        assert guard < 400, f"the room stalled in {g['phase']}"
+        pid = E.turn_pid(g)
+        if pid != "alice":
+            run(m._schedule_bot_turn("QB"))
+            continue
+        seat = E.seat_of(g, pid)
+        if g["phase"] == "auction":
+            move = _quartet_auction_move(g)
+        elif g["phase"] == "commit":
+            move = {"kind": "commit", "lead": g["auction"]["declarer"]}
+        elif g["phase"] == "double":
+            move = {"kind": "double", "on": False}
+        else:
+            move = {"kind": "play", "card": E.legal_moves(g, seat)[0]}
+        run(m._handle_move(ws, "QB", "alice", {"move": move}))
+    assert g["result"]["mode"] == "quartet"
+    assert "error" not in ws.types()
 
 
 def test_a_vs_bot_skat_room_is_creatable_and_the_bot_takes_every_phase(monkeypatch):
