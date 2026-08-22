@@ -2793,6 +2793,41 @@ try {
 			JSON.stringify(board.opp));
 		check("quartet deals no piles", board.piles === 0, JSON.stringify(board));
 
+		// ── SORTED BY SUIT, AND FANNED ONLY AS MUCH AS THE ROW NEEDS ─────────
+		// Card ids stopped being sortable when the deck grew: the base 32 are
+		// `suit * 8 + rank`, but the wide deck's 5s and 6s sit at 32..39 and the
+		// full deck's 2/3/4 at 40..51, appended so nothing older moved. Sorted
+		// by id a quartet hand reads 7..A of every suit, THEN the 5s and 6s of
+		// every suit, then the 2s/3s/4s -- four suits interleaved three times.
+		const hand = await page.evaluate(() => {
+			const seat = document.querySelector(".dis-qmine");
+			const cards = [...seat.querySelectorAll(".dis-hand .dis-card")];
+			const suits = cards.map((c) => c.querySelector(".dis-s")?.textContent?.trim() || "?");
+			const r = cards.map((c) => c.getBoundingClientRect());
+			const cw = r[0]?.width || 0;
+			const steps = r.slice(0, -1).map((x, i) => r[i + 1].left - x.left);
+			return { n: cards.length, suits,
+				rows: new Set(r.map((x) => Math.round(x.top))).size,
+				strip: steps.length && cw
+					? Math.round(100 * (steps.reduce((a, b) => a + b, 0) / steps.length) / cw)
+					: null };
+		});
+		// Each suit must appear as ONE contiguous run -- that is what "sorted by
+		// suit" means, and it does not depend on which suit order is chosen.
+		const runs = hand.suits.filter((s, i) => s !== hand.suits[i - 1]);
+		check("a hand is sorted into suits", runs.length === new Set(runs).size,
+			JSON.stringify(hand.suits));
+		// A WRAPPED HAND IS THE FAILURE THIS GUARDS. It is invisible in a
+		// screenshot -- it just looks like a fan -- and it doubles the seat's
+		// height, which is what pushed a player's own hand off the screen.
+		check("...and it lays out on a single row", hand.rows === 1,
+			JSON.stringify({ rows: hand.rows, n: hand.n }));
+		// ...without burying the cards to do it. The fan is solved from the row
+		// space, so it is only ever as much overlap as the row actually needs.
+		check("...without overlapping more than it has to",
+			hand.strip !== null && hand.strip >= 35,
+			`visible strip ${hand.strip}% of a card`);
+
 		// Drive: auction -> the COMMIT phase -> double -> tricks. A phase with
 		// no handler on the client is exactly where a room stalls forever, and
 		// commit is the one phase no other mode has.
@@ -2889,7 +2924,20 @@ try {
 			}
 			const card = page.locator(".dis-card.play").first();
 			if (await card.count() > 0) {
-				await card.click({ timeout: 5_000 }).catch(() => {});
+				// CLICK THE VISIBLE STRIP, NOT THE CENTRE. A fanned hand lays each
+				// card partly under the one before it -- that is the point of a
+				// fan -- so with twelve cards the covered part reaches past the
+				// middle and the centre belongs to the neighbour. Playwright
+				// clicks centres by default and waits out its actionability
+				// timeout when the point is covered, so the whole board read as
+				// unclickable and no trick ever formed.
+				// A human is unaffected: they tap what they can SEE, and the
+				// visible strip is exactly the part that belongs to that card.
+				const b = await card.boundingBox().catch(() => null);
+				await card.click({
+					timeout: 5_000,
+					...(b ? { position: { x: Math.max(2, b.width - 6), y: b.height / 2 } } : {}),
+				}).catch(() => {});
 				await sleep(120);
 				continue;
 			}

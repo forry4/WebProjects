@@ -221,15 +221,26 @@
      measured as twelve cards escaping their seat at 390x844. 55% keeps the row
      whole; the visible strip is still ~17px on a 38px card, which is a card you
      can read the corner of, and the last card is whole either way. */
-  .dis .dis-table.dis-4seat .dis-seat .dis-hand > * + * {
-    margin-left: calc(var(--dis-cw) * -0.55);
+  .dis .dis-table.dis-4seat .dis-seat .dis-hand > :first-child:nth-last-child(n+8):nth-last-child(-n+10) ~ * {
+    margin-left: min(0px, calc((var(--dis-rowspace) - 10 * var(--dis-cw)
+      - 9 * var(--dis-gap)) / 9));
+  }
+  .dis .dis-table.dis-4seat .dis-seat .dis-hand > :first-child:nth-last-child(n+11) ~ * {
+    margin-left: min(0px, calc((var(--dis-rowspace) - 12 * var(--dis-cw)
+      - 11 * var(--dis-gap)) / 11));
   }
   /* ...and the two hidden hands keep their own, scaled to the smaller card they
      are drawn at. Same specificity as the rule above and later in the block, so
      it wins for those two seats. */
-  .dis .dis-table.dis-4seat .dis-qtheirs .dis-hand > * + *,
-  .dis .dis-table.dis-4seat .dis-qopp .dis-hand > * + * {
-    margin-left: calc(var(--dis-cw) * 0.6 * -0.55);
+  .dis .dis-table.dis-4seat .dis-qtheirs .dis-hand > :first-child:nth-last-child(n+8):nth-last-child(-n+10) ~ *,
+  .dis .dis-table.dis-4seat .dis-qopp .dis-hand > :first-child:nth-last-child(n+8):nth-last-child(-n+10) ~ * {
+    margin-left: min(0px, calc((var(--dis-rowspace) - 10 * var(--dis-cw) * 0.6
+      - 9 * var(--dis-gap)) / 9));
+  }
+  .dis .dis-table.dis-4seat .dis-qtheirs .dis-hand > :first-child:nth-last-child(n+11) ~ *,
+  .dis .dis-table.dis-4seat .dis-qopp .dis-hand > :first-child:nth-last-child(n+11) ~ * {
+    margin-left: min(0px, calc((var(--dis-rowspace) - 12 * var(--dis-cw) * 0.6
+      - 11 * var(--dis-gap)) / 11));
   }
   .dis .dis-seat .dis-hand > * + * { margin-left: calc(var(--dis-cw, 42px) * -0.42); }
   /* THE FAN PAINTS BACKWARDS, and this is the half that makes it readable.
@@ -757,6 +768,12 @@
      190px cards on a 2560x1600 display is a different design from the same
      strip beside 60px cards on a laptop. */
   --dis-rail: 17rem;
+  /* HOW WIDE A HAND'S ROW ACTUALLY IS -- the same width the card budget above
+     divides by `--dis-slots`, kept as its own token so the FAN can be solved
+     from it instead of guessed. Unrailed the seats get the whole table; the
+     railed rule below subtracts the column they do not get. The 1.2rem is the
+     seat's own padding, which the row is laid out inside. */
+  --dis-rowspace: calc(100cqw - 2rem);
   /* THE PHONE/SHORT-WINDOW BUDGET (the `100dvh` formula below). 22rem, not
      the old 27: the board is not pinned to the viewport at this tier, the
      page scrolls, and the extra 5rem was reserving space for a one-screen fit
@@ -999,6 +1016,14 @@
    for an element that is not there would re-create the empty flank this is
    here to remove. */
 @media (min-width: 1200px) and (min-height: 600px) {
+  /* THE RAIL TAKES A WHOLE COLUMN, so a hand's row is that much narrower --
+     the same subtraction `--dis-cw`'s width branch makes.
+     IT BELONGS IN THIS BLOCK AND NOT THE 761px ONE, which is where it first
+     went: the rail GRID is created here, at 1200px, so subtracting its width
+     at 820 charged the row for a column that was not there and the fan solved
+     to a 15% visible strip -- cards almost entirely buried, on the one
+     viewport with room to spare. */
+  .dis-game .dis-table { --dis-rowspace: calc(100cqw - var(--dis-rail) - 2.5rem); }
   .dis-game .dis-main.dis-has-match {
     grid-template-columns: minmax(15rem, 17rem) minmax(0, 1fr) minmax(15rem, 17rem);
     grid-template-rows: minmax(0, 1fr);
@@ -2186,11 +2211,65 @@
 
    It also reads better: the two hands you command are now the visually
    dominant things on the felt, which is what the mode is about. */
-/* THE FAN, at every width rather than only on a phone. `.dis .dis-seat` in the
-   phone block does this for every mode; quartet needs it on the desktop board
-   too, because 12 cards is nearly twice the 7 that block was written for. */
-.dis-4seat .dis-seat .dis-hand > * + * {
-  margin-left: calc(var(--dis-cw) * -0.42);
+/* THE FAN TUCKS THE RIGHT WAY ALL TWELVE CARDS DEEP. The phone block's ladder
+   runs `nth-child(1..7)` at z-index 8..2 under a note that says in as many
+   words: "A hand is at most 7 cards in every mode; an eighth would fall to the
+   base z-index 1 and tuck the wrong way." Quartet deals TWELVE, so cards 8..12
+   all sat at 1 and painted in DOM order -- the fan reversed direction halfway
+   along the hand, and the visible strip of those cards moved from the right
+   edge to the left.
+   It was not only ugly. A card whose visible part is not where the layout says
+   it is cannot be clicked there either: the render gate drove a whole board it
+   could not play a single card from, and reported it as "no trick was ever
+   four cards wide".
+   Declared in the BASE rules, not the phone block, because quartet fans at
+   every width. */
+.dis-4seat .dis-seat .dis-hand > * { position: relative; }
+.dis-4seat .dis-seat .dis-hand > :nth-child(1) { z-index: 13; }
+.dis-4seat .dis-seat .dis-hand > :nth-child(2) { z-index: 12; }
+.dis-4seat .dis-seat .dis-hand > :nth-child(3) { z-index: 11; }
+.dis-4seat .dis-seat .dis-hand > :nth-child(4) { z-index: 10; }
+.dis-4seat .dis-seat .dis-hand > :nth-child(5) { z-index: 9; }
+.dis-4seat .dis-seat .dis-hand > :nth-child(6) { z-index: 8; }
+.dis-4seat .dis-seat .dis-hand > :nth-child(7) { z-index: 7; }
+.dis-4seat .dis-seat .dis-hand > :nth-child(8) { z-index: 6; }
+.dis-4seat .dis-seat .dis-hand > :nth-child(9) { z-index: 5; }
+.dis-4seat .dis-seat .dis-hand > :nth-child(10) { z-index: 4; }
+.dis-4seat .dis-seat .dis-hand > :nth-child(11) { z-index: 3; }
+.dis-4seat .dis-seat .dis-hand > :nth-child(12) { z-index: 2; }
+
+/* THE FAN, at every width rather than only on a phone -- `.dis .dis-seat` in
+   the phone block does this for every mode, and quartet needs it on the
+   desktop board too because 12 cards is nearly twice the 7 that block was
+   written for.
+   AND IT IS TIERED BY HOW MANY CARDS ARE ACTUALLY IN THE HAND. A flat overlap
+   is only right at the moment of the deal: a quartet hand runs 12 cards down
+   to the 3 it keeps, and a 3-card hand crushed by a 12-card hand's fan is
+   overlapped for no reason at all -- there is a whole row of space beside it.
+   `:first-child:nth-last-child(n+N) ~ *` is how CSS counts siblings: it reads
+   "every card after the first, when the hand holds at least N". Below 8 there
+   is no fan at all, because 7 is what every other mode deals and the row
+   budget has always fitted that whole.
+   THE OVERLAP IS SOLVED, NOT PICKED, and that is the second half. A row of `n`
+   cards needs `(n-1) x (cw + gap + margin) + cw` to fit `--dis-rowspace`, so
+   the margin that just fits is
+   `(rowspace - n x cw - (n-1) x gap) / (n-1)` -- and `min()` with 0 means it
+   is only ever an OVERLAP, never a gap: where there is room the cards simply
+   sit side by side.
+   A FIXED FRACTION CANNOT WORK HERE, which is what three attempts at one
+   showed. The row space is not proportional to the card: the card bottoms out
+   at a 3.4rem floor while the box keeps shrinking, and the railed layout gives
+   a whole column to the rail -- so the tightest case is not the smallest
+   screen but a NARROW DESKTOP. Measured: the hand box is 514px at 1440, 662 at
+   1024 (unrailed, so it gets the lot) and only 354 at 1280. A 0.5 fraction fits
+   the first two and wrapped the third. */
+.dis-4seat .dis-seat .dis-hand > :first-child:nth-last-child(n+8):nth-last-child(-n+10) ~ * {
+  margin-left: min(0px, calc((var(--dis-rowspace) - 10 * var(--dis-cw)
+    - 9 * var(--dis-gap)) / 9));
+}
+.dis-4seat .dis-seat .dis-hand > :first-child:nth-last-child(n+11) ~ * {
+  margin-left: min(0px, calc((var(--dis-rowspace) - 12 * var(--dis-cw)
+    - 11 * var(--dis-gap)) / 11));
 }
 .dis-4seat .dis-qtheirs .dis-hand .dis-card,
 .dis-4seat .dis-qopp .dis-hand .dis-card {
@@ -2198,11 +2277,19 @@
   width: var(--cw);
   height: calc(var(--cw) * 1.4);
 }
-.dis-4seat .dis-qtheirs .dis-hand > * + *,
-.dis-4seat .dis-qopp .dis-hand > * + * {
-  /* 42% of the SMALLER card, not of `--dis-cw` -- these are drawn at 0.6, and
-     overlapping them by a full-size card's 42% would bury them entirely. */
-  margin-left: calc(var(--dis-cw) * 0.6 * -0.42);
+/* The two hidden hands take the same tiers, scaled to the smaller card they
+   are drawn at -- overlapping a 0.6 card by a full-size card's fraction would
+   bury it entirely. Listed after the generic rule above and at equal
+   specificity, which is what lets them win for these two seats. */
+.dis-4seat .dis-qtheirs .dis-hand > :first-child:nth-last-child(n+8):nth-last-child(-n+10) ~ *,
+.dis-4seat .dis-qopp .dis-hand > :first-child:nth-last-child(n+8):nth-last-child(-n+10) ~ * {
+  margin-left: min(0px, calc((var(--dis-rowspace) - 10 * var(--dis-cw) * 0.6
+    - 9 * var(--dis-gap)) / 9));
+}
+.dis-4seat .dis-qtheirs .dis-hand > :first-child:nth-last-child(n+11) ~ *,
+.dis-4seat .dis-qopp .dis-hand > :first-child:nth-last-child(n+11) ~ * {
+  margin-left: min(0px, calc((var(--dis-rowspace) - 12 * var(--dis-cw) * 0.6
+    - 11 * var(--dis-gap)) / 11));
 }
 /* ...and the row they sit in stops reserving a FULL card's height, which is
    the half that actually gives the space back -- `min-height` on `.dis-hand`

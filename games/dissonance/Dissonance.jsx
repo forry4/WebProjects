@@ -344,6 +344,16 @@ const rankOf = (c) => (
     : c < NCARD_WIDE ? ((c - NCARD) % NEXTRA_WIDE) + WIDE_OFFSET
       : (c - NCARD_WIDE) % NEXTRA_FULL);
 const isRed = (c) => suitOf(c) === 1 || suitOf(c) === 2;
+/* SORT A HAND BY SUIT, THEN BY RANK. Card ids stopped being sortable the moment
+   the deck grew: the base 32 are `suit * 8 + rank`, so id order IS suit order
+   for them -- but the wide deck's 5s and 6s live at 32..39 and the full deck's
+   2/3/4 at 40..51, appended so nothing older moved. Sorted by id, a quartet
+   hand therefore reads 7..A of every suit, THEN the 5s and 6s of every suit,
+   then the 2s, 3s and 4s: four suits interleaved three times over.
+   This is a no-op for the 32-card modes (their id order already equals this
+   one), so it is applied to every hand rather than gated on the mode. */
+const bySuit = (a, b) => suitOf(a) - suitOf(b) || rankOf(a) - rankOf(b);
+const sortHand = (cards) => [...(cards || [])].sort(bySuit);
 const cardName = (c) => RANKS[rankOf(c)] + SUIT_GLYPH[suitOf(c)];
 // Trick NUMBER t (1-based): even ones pay `even` (+2 classic, +1 in minor
 // mode — the view ships `even_val`), odd ones cost 1. PARITY MODES ONLY.
@@ -2527,7 +2537,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
               {/* Open: the declarer bought a multiplier by playing face up, so
                   their real cards are on the table from trick 1. */}
               {game.opp_hand
-                ? game.opp_hand.map((c) => <Card key={c} c={c} />)
+                ? sortHand(game.opp_hand).map((c) => <Card key={c} c={c} />)
                 : Array.from({ length: game.opp_hand_n }, (_, i) => <Card key={i} c={null} />)}
             </div>
             {game.opp_hand && (
@@ -2574,7 +2584,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
                 {dummyToPlay && <span className="dis-yourturn">to play</span>}
               </div>
               <div className="dis-hand">
-                {game.dummy.map((c) => (
+                {sortHand(game.dummy).map((c) => (
                   <Card key={c} c={c}
                     onClick={canPlay && dummyToPlay && legal.has(c) ? () => doPlay(c) : null} />
                 ))}
@@ -3476,7 +3486,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
                 {qToPlay === myOther && <span className="dis-yourturn">to play</span>}
               </div>
               <div className="dis-hand">
-                {(game.mine || []).map((c) => (
+                {sortHand(game.mine).map((c) => (
                   <Card key={c} c={c}
                     onClick={canPlay && qToPlay === myOther && legal.has(c)
                       ? () => doPlay(c) : null} />
@@ -3503,7 +3513,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
             <div className="dis-hand">
               {/* `pendingPlay` is filtered out here and drawn into the trick
                   instead — the optimistic half of a play. See `doPlay`. */}
-              {(game.hand || []).filter((c) => c !== optimisticCard).map((c) => (
+              {sortHand(game.hand).filter((c) => c !== optimisticCard).map((c) => (
                 <Card key={c} c={c}
                   sel={(game.phase === "swap" || game.phase === "talon") && swapGive === c}
                   onClick={
