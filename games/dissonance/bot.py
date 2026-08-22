@@ -105,6 +105,92 @@ def _want_win(g: dict, seat: int) -> bool:
     return True
 
 
+#: How much a +2 card sitting in an OWN hand is worth defending, as a multiple
+#: of its face value, before and after the hand gets short.
+#:
+#: THE KEEPS ARE THE MODE'S SECOND CURRENCY and a policy that ignores them
+#: throws away a measured 3.5 points a round (`tools/quartet_keeps.py`: random
+#: play keeps +0.91, greedy protection +4.41). But protecting from trick 1
+#: is wrong -- a twelve-card hand has nine cards it must spend and only three
+#: it keeps, so early on almost nothing is at risk and the cost of ducking a
+#: trick you wanted is real. The pressure ramps as the hand approaches the
+#: three it will end with.
+_QUARTET_KEEP_EARLY = 0.45
+_QUARTET_KEEP_LATE = 1.0
+#: Cards left in hand at or below which a keeper is treated as fully at risk.
+_QUARTET_KEEP_SHORT = 5
+
+
+def _quartet_keep_cost(g: dict, c: int, pos: int) -> float:
+    """What spending `c` out of position `pos` costs in KEEP value.
+
+    Zero out of a dummy (positions 2 and 3), whose three kept cards score
+    nothing -- which is the asymmetry the mode is built on and the bot has to
+    know: an own hand hoards, a dummy spends freely to attack.
+    """
+    if pos >= E.QUARTET_HANDS:
+        return 0.0
+    v = E.card_points(c)
+    if v <= 0:
+        return 0.0
+    left = len(g["hands"][pos])
+    ramp = (_QUARTET_KEEP_LATE if left <= _QUARTET_KEEP_SHORT
+            else _QUARTET_KEEP_EARLY)
+    return v * ramp
+
+
+def _quartet_score(g: dict, c: int, seat: int, r: float) -> float:
+    """QUARTET's card policy. Four hands, parity tricks, and a second currency.
+
+    Three things the two-seat parity branch below cannot express, and each is a
+    real losing move if left out:
+
+    * **The trick must be FOLDED, not compared against `led`.** With four cards
+      down, the card to beat is whichever is currently winning -- against `led`
+      alone the bot reads a ruffed trick as still open and throws good cards
+      after it.
+    * **DO NOT OVERTAKE YOUR OWN SIDE.** A player holds two of the four hands,
+      so on half the plies the trick is already theirs; beating your own card
+      wins nothing and spends a better one. Compared on SIDES via `side_of`,
+      the same fix dummy mode needed.
+    * **A 9/10/J/Q left in an own hand scores +2.** So spending one has an
+      opportunity cost the parity branch knows nothing about, and an A/K is a
+      LIABILITY to keep (-1) that the bot should be happy to dump.
+    """
+    pos = E.to_play(g)
+    trump = g["trump"]
+    led = g["led"]
+    want = _want_win(g, seat)
+    keep = _quartet_keep_cost(g, c, pos)
+    # Shedding a card that would COST points to keep is a small free win --
+    # the aces and kings, which are also this game's best trick-winners, so
+    # the two pulls genuinely compete rather than always agreeing.
+    dump = 0.35 * max(0, -E.card_points(c))
+    if led is None:
+        trumpish = 1.0 if E.esuit(c, trump) == E.trump_class(trump) else 0.0
+        base = (1.0 + r + trumpish) if want else (1.0 + (1.0 - r) - trumpish)
+        return base - keep + dump
+    plays = g.get("plays") or [[g["leader"], led]]
+    best_pos, best_card = plays[0]
+    for p, card in plays[1:]:
+        if E.beats(best_card, card, trump):
+            best_pos, best_card = p, card
+    ours = E.side_of(g, best_pos) == E.side_of(g, pos)
+    wins = E.beats(best_card, c, trump)
+    last = len(plays) + 1 >= E.trick_size(g)
+    if ours:
+        # Already ours. Overtaking buys nothing; if the trick is still open the
+        # opponent may yet take it, but answering that with a better card is
+        # what "do not overtake your own side" exists to stop.
+        return 2.2 + (1.0 - r) - keep + dump - (0.8 if wins else 0.0)
+    if want:
+        # Cheapest card that actually takes it, else get out of the way.
+        return (3.0 - r - keep + dump) if wins else (1.0 - r + dump)
+    # An odd trick we do not want: duck, and dump a liability while we are here.
+    # Winning it anyway is the worst outcome, so it is scored below everything.
+    return (0.4 - r - keep) if wins else (3.0 + dump - 0.3 * r)
+
+
 def policy_score(g: dict, c: int, seat: int | None = None) -> float:
     """Higher is more attractive for the player to move.
 
@@ -128,6 +214,8 @@ def policy_score(g: dict, c: int, seat: int | None = None) -> float:
     r = (E.rank(c) - _lo) / float(_hi - _lo)
     led = g["led"]
     trump = g["trump"]
+    if E.is_quartet(E.mode_of(g)):
+        return _quartet_score(g, c, seat, r)
     if E.uses_card_points(E.mode_of(g)):
         if led is not None:
             # THE TRICK SO FAR, folded the same way the engine folds it, so a
@@ -289,6 +377,13 @@ def hand_strength(g: dict, seat: int, denom: int) -> float:
         cards = cards + visible(E.DUMMY_POS)
         unknown += sum(1 for i, p in enumerate(g["piles"][E.DUMMY_POS])
                        if len(p) == 2 and i != 1)
+    if E.is_quartet(E.mode_of(g)):
+        # BOTH HANDS THIS PLAYER COMMANDS. Unlike dummy mode's third hand this
+        # one is PRIVATE, so it is the player's own information rather than
+        # something read off the table -- and it is the whole reason a quartet
+        # auction can be a judgement at all: 24 cards is half the deck, against
+        # the 11 nameable cards a classic seat bids on.
+        cards = cards + visible(seat + E.QUARTET_HANDS)
     mode = E.mode_of(g)
     curve = _SKAT_RANK_VALUE if E.uses_card_points(mode) else _RANK_VALUE
     mean = _unknown_rank_value(curve, mode)
@@ -308,6 +403,14 @@ def hand_strength(g: dict, seat: int, denom: int) -> float:
         # No-trump rewards balance: penalise a long suit that would be trump.
         longest = max(sum(1 for c in cards if E.suit(c) == s) for s in range(4))
         total -= max(0, longest - 5) * 0.8
+    if E.is_quartet(E.mode_of(g)):
+        # THE KEEPS ARE PART OF THE CONTRACT, so a hand that can protect three
+        # +2 cards is worth more than the same hand in trick terms alone.
+        # Valued at what the OWN hand's best three are worth -- the ceiling,
+        # not the achieved figure, because `_level_for`'s thresholds are
+        # calibrated against whatever scale this returns.
+        own = sorted((E.card_points(c) for c in g["hands"][seat]), reverse=True)
+        total += sum(own[:3])
     return total
 
 
@@ -363,6 +466,28 @@ _DUMMY_LEVEL_NEEDS = ((10, 30.6), (9, 29.8), (8, 29.0), (7, 28.1),
                       (2, 23.0))
 
 
+#: QUARTET's strength -> level map, FITTED 2026-08-21 (`tools/quartet_ladder.py`
+#: for the profile, and a 6000-hand sweep for the quantiles it is placed on).
+#:
+#: Best-denomination strength runs mean 21.84, sd 3.10, p50 21.9 -- a much
+#: tighter distribution than the other modes' because a quartet seat rates
+#: TWENTY-FOUR cards rather than eleven, so the sampling noise that widens a
+#: classic hand's estimate mostly cancels. The rungs are therefore packed ~2.0
+#: apart rather than classic's 2.0-2.5 over a much wider spread.
+#:
+#: The profile it buys, 400 rounds of self-play: settles 1..10 with the MODE AT
+#: 6, 75% made, and the busiest rung holding 27% -- inside the "no level above
+#: 40%" constraint the classic campaign works to. Against classic's 82% made
+#: and dummy's 74%.
+#:
+#: WATCH THE SIGN when re-tuning: a threshold is the strength a level DEMANDS,
+#: so RAISING it lowers the settled mode. The first re-fit here pushed every
+#: rung up to chase the forced-EV peak at level 8 and moved the mode the wrong
+#: way (6 -> 5).
+_QUARTET_LEVEL_NEEDS = ((10, 29.4), (9, 27.7), (8, 26.0), (7, 24.4),
+                        (6, 22.4), (5, 20.4), (4, 18.6), (3, 16.6), (2, 14.8))
+
+
 def _level_for(strength: float, mode: str = "classic") -> int:
     """Map a strength estimate onto a contract level.
 
@@ -370,7 +495,9 @@ def _level_for(strength: float, mode: str = "classic") -> int:
     even tricks pay half, and skat's run on the card-scoring currency (pool
     ~13, so the whole map sits higher and reaches deeper into the ladder).
     """
-    if mode == E.DUMMY:
+    if mode == E.QUARTET:
+        needs = _QUARTET_LEVEL_NEEDS
+    elif mode == E.DUMMY:
         needs = _DUMMY_LEVEL_NEEDS
     elif mode == "skat":
         needs = _SKAT_LEVEL_NEEDS
@@ -894,6 +1021,8 @@ def act(g: dict, seat: int, rng=None):
             return ("move", {"kind": "pass"} if b.get("pass")
                     else {"kind": "bid", "value": b["value"]})
         return ("bid", choose_bid(g, seat, rng))
+    if phase == "commit":
+        return ("move", {"kind": "commit", **choose_commit(g, seat)})
     if phase == "swap":
         return ("swap", choose_swap(g, seat))
     if phase == "talon":
@@ -916,6 +1045,50 @@ def act(g: dict, seat: int, rng=None):
     if phase == "play":
         return ("play", choose_card(g, seat))
     return (None, None)
+
+
+def choose_commit(g: dict, seat: int) -> dict:
+    """QUARTET's stage-two declaration: which hand leads, and the one swap.
+
+    THE SWAP IS THE EASY HALF and it falls straight out of the scoring. Only an
+    own hand's kept cards score, so the right trade is to pull a +2 card out of
+    the dummy and push a liability (an A or K, worth -1 to keep) the other way.
+    Taken only when it strictly improves the own hand's keep ceiling, so the
+    bot never spends its one swap on a wash.
+
+    WHICH HAND LEADS defaults to the DUMMY, and the reason is the asymmetry the
+    mode is built on: leading gives the opponent the informed last seat
+    (`trick_order`), so the hand that leads is the one that would rather act on
+    less information -- and that is the dummy, which has no keeps to protect
+    and can spend freely. Overridden when the OWN hand is meaningfully longer
+    in trump, because drawing trumps from the hand that holds them is worth
+    more than the seat it costs.
+    """
+    decl = g["auction"]["declarer"]
+    dummy = decl + E.QUARTET_HANDS
+    hand, dhand = g["hands"][decl], g["hands"][dummy]
+
+    def keep_ceiling(cards):
+        return sum(sorted((E.card_points(c) for c in cards), reverse=True)[:3])
+
+    take = give = None
+    best = keep_ceiling(hand)
+    for t in dhand:
+        for gv in hand:
+            after = keep_ceiling([c for c in hand if c != gv] + [t])
+            if after > best:
+                best, take, give = after, t, gv
+    trump = g["auction"]["denom"]
+    lead = dummy
+    if trump < E.NOTRUMP:
+        mine = sum(1 for c in hand if E.suit(c) == trump)
+        theirs = sum(1 for c in dhand if E.suit(c) == trump)
+        if mine >= theirs + 2:
+            lead = decl
+    out = {"lead": lead}
+    if take is not None:
+        out["take"], out["give"] = take, give
+    return out
 
 
 def cross_fit() -> float:

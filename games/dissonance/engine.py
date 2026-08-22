@@ -186,6 +186,12 @@ PARITY_MAX_LEVEL = 10
 #: trick-value change cannot silently strand the ladder above the game.
 MINOR_MAX_LEVEL = 6
 
+#: QUARTET's ladder top. Its declarer scores on a WIDER scale than the other
+#: parity modes -- nine tricks pay -5..+8 and an own hand's three kept cards
+#: add 0..+6 on top -- so the ceiling is higher than classic's even though it
+#: plays four fewer tricks. FITTED, not guessed: see `tools/quartet_ladder.py`.
+QUARTET_MAX_LEVEL = 12
+
 #: What the Null consolation pays in minor mode. 6: exactly a made level-1
 #: contract's CEILING under the overtrick bonus (1 + (max_pts - 1) x 1 =
 #: max_pts), so ducking to Null is never worth more than the cheapest contract
@@ -209,7 +215,8 @@ MAX_RAISE = 2
 #:
 #: `None` means "no cap"; `raise_cap_for` turns that into the mode's own
 #: ceiling so legality arithmetic and the wire both stay plain numbers.
-RAISE_CAP = {"classic": None, "minor": MAX_RAISE, "dummy": MAX_RAISE}
+RAISE_CAP = {"classic": None, "minor": MAX_RAISE, "dummy": MAX_RAISE,
+             "quartet": MAX_RAISE}
 
 #: WHICH DENOMINATION RULE the classic-shape auction runs (2026-08-13, the
 #: experiments stacked on the jump bonus):
@@ -234,7 +241,8 @@ RAISE_CAP = {"classic": None, "minor": MAX_RAISE, "dummy": MAX_RAISE}
 #: SHIPPED: "used" in every mode -- the original per-player forever-ban. The
 #: other two arms are MEASUREMENT ONLY (`DIS_DENOM_RULE` in the arena); the
 #: 2026-08-13 runs are recorded below and neither was adopted.
-DENOM_RULE = {"classic": "used", "minor": "used", "dummy": "used"}
+DENOM_RULE = {"classic": "used", "minor": "used", "dummy": "used",
+              "quartet": "used"}
 
 
 def denom_rule_for(mode: str) -> str:
@@ -254,7 +262,8 @@ def denom_rule_for(mode: str) -> str:
 #: rather than a free option, so the pass has real competition. Both seats
 #: passing throws the hand in and redeals, exactly as skat does -- which is
 #: why `passes` and `_redeal` already exist and need no new machinery.
-OPENER_MAY_PASS = {"classic": False, "minor": False, "dummy": False}
+OPENER_MAY_PASS = {"classic": False, "minor": False, "dummy": False,
+                   "quartet": False}
 
 
 def opener_may_pass(mode: str) -> bool:
@@ -290,7 +299,8 @@ def raise_cap_for(mode: str) -> int:
 #: it, every consumer (the result panel's maths line, the Hard pricing, the DD
 #: resolver) reads it with no new term, and Null still overrides a set (the
 #: bonus is a set price, and a declarer who ducks out owes none of it).
-JUMP_SET_BONUS = {"classic": 6, "skat": 0, "minor": 0, "dummy": 0}
+JUMP_SET_BONUS = {"classic": 6, "skat": 0, "minor": 0, "dummy": 0,
+                  "quartet": 0}
 
 #: ...and WHETHER THE DOUBLE MULTIPLIES IT. True is the shipped rule (the bonus
 #: rides inside `set_base`, so a Double doubles it with everything else); False
@@ -305,7 +315,8 @@ JUMP_SET_BONUS = {"classic": 6, "skat": 0, "minor": 0, "dummy": 0}
 #: Rust change. Measured on 380 self-play rounds it moves the doubled set's
 #: median 55 -> 50, its p90 76 -> 66, its worst observed round 98 -> 86, and the
 #: declarer's EV +7.57 -> +9.56 a round holding every decision fixed.
-JUMP_DOUBLED = {"classic": True, "skat": True, "minor": True, "dummy": True}
+JUMP_DOUBLED = {"classic": True, "skat": True, "minor": True, "dummy": True,
+                "quartet": True}
 
 #: Set-score multiplier per point the declarer finished short.
 #:
@@ -501,7 +512,7 @@ DOUBLE_JUMP_MULT = {"classic": 2}
 #:    12 against Null's flat 12, and a skat stake of 6 from 6 to 15 against 20.
 #:    The cliff is narrowed, not removed, and the measurement behind it was taken
 #:    on flat payouts -- so it is the number most worth re-running in `skatlab`.
-OVER_BONUS = {"classic": 1, "skat": 1, "minor": 1, "dummy": 1}
+OVER_BONUS = {"classic": 1, "skat": 1, "minor": 1, "dummy": 1, "quartet": 1}
 
 #: THE FLAT STAKE (shipped 2026-08-11, classic only) -- +10 on every made
 #: contract's base, +10 to the defender's base when it is missed (never on
@@ -525,7 +536,8 @@ OVER_BONUS = {"classic": 1, "skat": 1, "minor": 1, "dummy": 1}
 #: needs its own calibrated dose, if any), dummy's is unmeasured, and skat's
 #: branch never reads these. The auction lab overrides via DIS_FLAT_MAKE /
 #: DIS_FLAT_SET when it needs a different arm.
-FLAT_MAKE_BONUS = {"classic": 4, "skat": 0, "minor": 0, "dummy": 0}
+FLAT_MAKE_BONUS = {"classic": 4, "skat": 0, "minor": 0, "dummy": 0,
+                   "quartet": 0}
 #: THE LINEAR MAKE TERM -- `make = L^2 + LINEAR x L + flat`. 0 as shipped, so
 #: the made base is unchanged; it exists because the re-pricing campaign wants
 #: it at 1 and a knob that has to be introduced at ship time is a knob that gets
@@ -533,16 +545,19 @@ FLAT_MAKE_BONUS = {"classic": 4, "skat": 0, "minor": 0, "dummy": 0}
 #: in EV terms is a mild HIGH-contract subsidy -- the opposite tilt to the flat
 #: bonus and the overtrick rate. Measured to lengthen the auction (one-bid rate
 #: 33% -> 25%). See CLAUDE.md for why it has not shipped.
-LINEAR_MAKE_BONUS = {"classic": 0, "skat": 0, "minor": 0, "dummy": 0}
+LINEAR_MAKE_BONUS = {"classic": 0, "skat": 0, "minor": 0, "dummy": 0,
+                     "quartet": 0}
 #: What one level of the contract adds to the SET base -- 1 everywhere, which is
 #: what was implicit before this was a constant. The campaign wants 2 in classic.
-SET_LEVEL_RATE = {"classic": 2, "skat": 1, "minor": 1, "dummy": 1}
+SET_LEVEL_RATE = {"classic": 2, "skat": 1, "minor": 1, "dummy": 1,
+                  "quartet": 1}
 #: ...and the level the make bonus starts applying at (1 = every made
 #: contract). Gating it off the floor was the differentiation experiment; it
 #: measured indistinguishable from ungated, because a weak hand's 1-open is a
 #: surrender, not a value bid -- no make-side price reaches it.
 FLAT_MAKE_MIN_LEVEL = 1
-FLAT_SET_PENALTY = {"classic": 2, "skat": 0, "minor": 0, "dummy": 0}
+FLAT_SET_PENALTY = {"classic": 2, "skat": 0, "minor": 0, "dummy": 0,
+                    "quartet": 0}
 
 #: Denominations are RANKED by index (C < D < H < S < NT < Null), so an
 #: overtake may also stand at the SAME level in a higher-ranked denomination.
@@ -596,7 +611,7 @@ N_SHOWN = 3
 # Nothing below touches the deck, the piles, the talon, follow-suit or the
 # parity. Only the phase machine between the deal and trick 1 changes.
 
-MODES = ("classic", "skat", "minor", "dummy")
+MODES = ("classic", "skat", "minor", "dummy", "quartet")
 DEFAULT_MODE = "classic"
 
 # --- dummy mode ------------------------------------------------------------
@@ -645,6 +660,58 @@ DUMMY = "dummy"
 #: `turn_seat` maps the dummy's back to the declarer, who actually acts.
 DUMMY_POS = 2
 
+#: QUARTET (2026-08-21) -- the FIFTH mode, and the only four-hand one. Two
+#: players, four hands: seats 0 and 1 are the players' own hands, 2 and 3 the
+#: hands OPPOSITE them, so a player commands positions `p` and `p + 2` and
+#: `side_of` is a plain `pos % 2`.
+#:
+#: The deal is twelve a hand, FOUR out, and NINE tricks of four -- so every
+#: hand ends holding three it never played, and an own hand's three score
+#: their card value into the total the contract is bid against. Fitted in
+#: `tools/quartet_agency.py` (choice), `tools/quartet_keeps.py` (the keeps)
+#: and `tools/quartet_auction.py` (the backing threshold); the short version:
+#:
+#:   * four EQUAL hands out of 52 leave nothing out, and with nothing out the
+#:     two players partition the deck and each knows the other's holding
+#:     exactly. Measured at 0.0 bits against classic's 14.7 -- so the out-pile
+#:     is not a talon to cut a prize from, it is the whole hidden-information
+#:     budget, and twelve-card hands are what buy it back (14.3 bits).
+#:   * NINE tricks rather than ten, which reads BETTER on choice (4.31 against
+#:     4.13) and is not a rounding artefact: a round's last trick is its most
+#:     constrained, so stopping earlier drops the worst ply from every hand.
+#:     It also keeps three cards a hand rather than two.
+#:   * NO PILES. The keeps have to be a decision, and a pile buries cards the
+#:     deal picked rather than the player.
+QUARTET = "quartet"
+
+#: How many hands one player commands. Both of a quartet player's, one
+#: everywhere else -- and it is what `side_of` inverts.
+QUARTET_HANDS = 2
+
+#: Cards a hand must hold in a suit, across BOTH the player's hands, before
+#: they may name it. THE BACKED BID (2026-08-21) and the mode's whole answer to
+#: "how do you infer anything from an auction with no partner": a bid is a
+#: PROVABLE statement about the bidder's holding, enforced by legality rather
+#: than agreed by convention, so the opponent can count against it.
+#:
+#: SIX, fitted in `tools/quartet_auction.py` over 20k deals. Six is exactly the
+#: mean suit length across a player's 24 cards, so the rule states in one
+#: sentence -- name a suit you are long in -- and the fit is two-sided:
+#:
+#:     K   mean legal suits   none   exactly 1   2+     proves
+#:     5              3.33    0.0%        0.0%   100%   0.47 b
+#:     6              2.50    0.0%        1.9%    98%   0.81 b
+#:     7              1.49    6.4%       38.1%    56%   1.17 b
+#:     8              0.66   44.8%       44.0%    11%   1.53 b
+#:
+#: Too low and every denomination is legal, so the bid proves nothing; too high
+#: and the bidder had no choice, so it proves a lot and decides nothing. Six
+#: never leaves a hand with zero legal suits and keeps a real choice 98% of the
+#: time, while excluding 1.5 suits on average. Raise it to 7 if bids measure
+#: uninformative in play -- it is this constant and nothing else, and the tool
+#: re-fits it.
+QUARTET_BACKING = 6
+
 #: (hands dealt, cards in hand, cards out of play, tricks, piles) per mode.
 #:
 #: THE PILE COUNT IS A DIAL, and it is the one that decides how much CHOICE a
@@ -659,7 +726,7 @@ DUMMY_POS = 2
 #: rails. Three thirteens is 39 cards, which is what the wide deck is for; ONE
 #: card sits out (dummy has no talon, so the out-pile is only the round-end
 #: reveal and its size is free).
-_LAYOUT = {DUMMY: (3, 7, 1, 13, 3)}
+_LAYOUT = {DUMMY: (3, 7, 1, 13, 3), QUARTET: (4, 12, 4, 9, 0)}
 _LAYOUT_DEFAULT = (2, 7, N_OUT, NTRICKS, 3)
 
 
@@ -669,6 +736,11 @@ def layout_for(mode: str):
 
 def has_dummy(mode: str) -> bool:
     return mode == DUMMY
+
+
+def is_quartet(mode: str) -> bool:
+    """Four hands, two players, `side_of` a plain `pos % 2`."""
+    return mode == QUARTET
 
 
 def n_hands(g: dict) -> int:
@@ -693,7 +765,7 @@ def client_searchable(mode: str) -> bool:
     `/catalog`) to stop offering the tiers at all -- a tier that cannot run is
     worse than one that is not on the menu.
     """
-    return not has_dummy(mode)
+    return not (has_dummy(mode) or is_quartet(mode))
 
 #: What an EVEN-numbered trick pays its winner, per mode. Odd tricks are -1
 #: in the parity modes.
@@ -719,7 +791,8 @@ def client_searchable(mode: str) -> bool:
 #: read the field is refused per-decision by the worker (and the ready
 #: handshake), so a minor room degrades to the server bot rather than being
 #: searched under classic values.
-EVEN_TRICK_VALUE = {"classic": 2, "skat": 2, "minor": 1, "dummy": 2}
+EVEN_TRICK_VALUE = {"classic": 2, "skat": 2, "minor": 1, "dummy": 2,
+                    "quartet": 2}
 
 
 def even_value(mode: str) -> int:
@@ -812,6 +885,40 @@ def card_pool_for(mode: str) -> int:
     return sum(card_points(c) for c in range(deck_size(mode)))
 
 
+def keeps_for(g: dict) -> list[int]:
+    """QUARTET: what each player's OWN hand is still holding, in card points.
+
+    Nine tricks off twelve-card hands leave three in every hand, and an own
+    hand's three score their card value into the total the contract is judged
+    against. So a 9/10/J/Q is +2 sitting in your hand at the end AND your best
+    mid-strength winner, and every ply asks which you want it to be.
+
+    ONLY THE OWN HANDS (positions 0 and 1) SCORE, and the magnitude is why.
+    Measured over 40k deals (`tools/quartet_keeps.py`): the best SIX across a
+    player's two hands is +11.64 against a random +1.84 -- a 9.8-point skill
+    band against a trick range of -5..+8, i.e. three quarters of the round
+    decided off the table. One hand's three is a 4.6-point band, about a third:
+    a second currency rather than the main one.
+
+    The dummy still keeps three and they score nothing. Dealing it nine cards
+    so it plays out exactly was measured and is worse (2.88 choices, 24%
+    forced -- dummy mode's 2.89 failure mark), and the dead keeps are better
+    read as an ASYMMETRY than a wart: an own hand is under squeeze pressure and
+    hoards, while a dummy has nothing to protect and can spend freely to
+    attack. The two hands a player commands want opposite things at the end.
+
+    NOT FOLDED INTO `pts`, deliberately. `pts` stays the TRICK total in every
+    mode, so "pts sums to the pool over a completed round" holds
+    unconditionally and every existing pool-conservation test keeps asserting
+    it flat rather than behind a mode test. `_finish` adds the two together
+    once, where the contract is settled.
+    """
+    if not is_quartet(mode_of(g)):
+        return [0, 0]
+    return [sum(card_points(c) for c in g["hands"][p])
+            for p in range(QUARTET_HANDS)]
+
+
 def uses_card_points(mode: str) -> bool:
     """Does this mode score captured cards rather than the trick parity?
 
@@ -874,7 +981,8 @@ def uses_card_points(mode: str) -> bool:
 #: different things, and everything downstream DERIVES from this dict -- the
 #: bot's extraction lead self-disables, and the client-AI wire requirement
 #: drops back a rung -- so flipping it is genuinely the only edit.
-MUST_HEAD = {"classic": False, "skat": False, "minor": False, "dummy": False}
+MUST_HEAD = {"classic": False, "skat": False, "minor": False, "dummy": False,
+             "quartet": False}
 
 #: MUST YOU FOLLOW SUIT? True everywhere by default.
 #:
@@ -905,7 +1013,18 @@ MUST_HEAD = {"classic": False, "skat": False, "minor": False, "dummy": False}
 #: CARDS and the other two seats choose those. What does move is trump: ruffs
 #: run 0.37 -> 0.57 a trick, so which suit you name matters more, which is
 #: the auction's side of the same brief.
-FOLLOW_SUIT = {"classic": True, "skat": True, "minor": True, "dummy": False}
+FOLLOW_SUIT = {"classic": True, "skat": True, "minor": True, "dummy": False,
+               # QUARTET FOLLOWS SUIT, unlike the other multi-hand mode, and
+               # the reason dummy dropped it does not apply here. Dummy's
+               # followers had nothing to decide (2.27 legal cards against a
+               # leader's 4.11); quartet's do, because the same brain plays two
+               # of the four cards in every trick and the second of them lands
+               # LAST, with the whole trick visible. Measured at 4.31 choices
+               # and 16% forced WITH follow-suit, both better than classic.
+               # Follow-suit is also what makes the keeps a decision at all --
+               # it is the only thing that can drag a +2 card out of a hand
+               # against its owner's will (`tools/quartet_keeps.py`).
+               "quartet": True}
 
 
 def follows_suit(mode: str) -> bool:
@@ -924,14 +1043,27 @@ def played_pool(g: dict) -> int:
 
 
 def pool_for(mode: str):
-    """Both players' totals over a completed round: six evens minus seven odds.
+    """Both players' TRICK totals over a completed round.
+
+    DERIVED FROM THE TRICK COUNT, not the literal 6-and-7 this was written as:
+    quartet plays NINE tricks (four even, five odd) and reads +3 where the
+    thirteen-trick modes read +5. Deriving it was the whole fix -- the old form
+    silently returned a thirteen-trick answer for a nine-trick mode, and every
+    pool-conservation test would have failed pointing at the card play.
 
     PARITY MODES ONLY. Skat scores captured cards (2026-08-09), so its pool is
     a property of the DEAL (`played_pool`), not the mode -- None here, so a
-    caller that assumed a constant fails loudly rather than reading 5."""
+    caller that assumed a constant fails loudly rather than reading 5.
+
+    NOTE FOR QUARTET: this is the TRICK pool and stays exactly that. The three
+    cards each hand keeps are scored separately (`keeps_for`) and deliberately
+    do NOT enter `pts`, so "pts sums to the pool over a completed round" holds
+    unconditionally in every mode -- see `_finish`."""
     if uses_card_points(mode):
         return None
-    return 6 * even_value(mode) - 7
+    n = layout_for(mode)[3]
+    evens = n // 2
+    return evens * even_value(mode) - (n - evens)
 
 
 def max_level_for(mode: str) -> int:
@@ -945,6 +1077,8 @@ def max_level_for(mode: str) -> int:
     product cap two rungs under theirs."""
     if mode == "minor":
         return MINOR_MAX_LEVEL
+    if mode == QUARTET:
+        return QUARTET_MAX_LEVEL
     if uses_card_points(mode):
         return MAX_LEVEL
     return PARITY_MAX_LEVEL
@@ -1000,7 +1134,13 @@ def max_level_for(mode: str) -> int:
 #: classic's ~6.2 at 100; 400 would now buy nearly twelve, which is a different
 #: and much longer game than the other three modes offer. Measured in
 #: tools/dummy_calibration.py.
-MATCH_TARGET = {"classic": 200, "skat": 100, "minor": 25, "dummy": 200}
+#: QUARTET at 140, fitted 2026-08-21 the same way classic's 200 was: bootstrap
+#: matches off 500 recorded self-play rounds under the shipped ladder. Its mean
+#: absolute round transfer is 29.1 against classic's ~41, so the same match
+#: LENGTH costs a smaller number -- 140 buys a median of 8 rounds, p10-p90
+#: 5-11, which is classic's profile to the round.
+MATCH_TARGET = {"classic": 200, "skat": 100, "minor": 25, "dummy": 200,
+                "quartet": 140}
 
 #: value = base x level. Indexed by denomination (clubs..no-trump).
 #:
@@ -1161,7 +1301,7 @@ def card_of(s: int, r: int) -> int:
 #: Ranks per suit each mode deals. The DEFAULT is the base deck; a mode is
 #: listed here only if it deals wider. `deck_size` and `rank_offset` both
 #: derive from this, so widening a mode is one row.
-_NRANKS_FOR = {DUMMY: NRANK + NEXTRA_WIDE}
+_NRANKS_FOR = {DUMMY: NRANK + NEXTRA_WIDE, QUARTET: NRANKS}
 _NRANKS_DEFAULT = NRANK
 
 
@@ -1311,11 +1451,17 @@ def new_game(seats, rng=None, opener: int = 0, mode: str = DEFAULT_MODE,
         # prize is the third hand rather than a look at the out-pile. Empty
         # rather than absent, so every reader (`view_for`, the reveal, the
         # wire) keeps working without a mode test.
-        "shown": [] if has_dummy(mode) else out[:N_SHOWN],
+        # NO TALON IN DUMMY OR QUARTET. Dummy's declarer wins the third hand
+        # instead; quartet's four out-cards are pure secrecy that nobody ever
+        # sees, and its prize is the commit-phase swap between the declarer's
+        # own two hands. Empty rather than absent, so every reader (`view_for`,
+        # the reveal, the wire) keeps working with no mode test.
+        "shown": [] if (has_dummy(mode) or is_quartet(mode)) else out[:N_SHOWN],
         # ...and this is the historical record: the three cards the declarer was
         # actually shown, never rewritten. Only the round-end reveal reads it,
         # and it exists because `shown` cannot answer that question after a swap.
-        "shown_at_deal": [] if has_dummy(mode) else list(out[:N_SHOWN]),
+        "shown_at_deal": ([] if (has_dummy(mode) or is_quartet(mode))
+                          else list(out[:N_SHOWN])),
         # None until the swap phase resolves; then True/False. WHICH cards
         # moved stays hidden -- the defender learns only that a swap happened.
         "swapped": None,
@@ -1416,6 +1562,36 @@ def mode_of(g: dict) -> str:
 # --- auction ---------------------------------------------------------------
 
 
+def backed_denoms(g: dict, seat: int) -> list[int]:
+    """The denominations `seat` can BACK -- quartet's legality gate.
+
+    A player may only name a suit they hold `QUARTET_BACKING` or more of across
+    their two hands, so every bid is a provable statement about their holding
+    and the opponent can count against it. This is the substitute for bridge's
+    partner conventions, which a two-player game cannot have: the information
+    is enforced by legality rather than agreed between partners.
+
+    NO-TRUMP IS ALWAYS LEGAL and that is load-bearing twice over. It is what
+    stops a hand being unbiddable (measured: at six, 0.0% of hands can back no
+    suit, but the escape hatch must exist for the tail anyway), and it makes an
+    NT bid usefully AMBIGUOUS rather than a tell -- real strength, or no suit
+    at all, and the opponent has to price both.
+
+    Every other mode returns every denomination, so the caller needs no mode
+    test and a non-quartet room bids exactly as it always did.
+    """
+    if not is_quartet(mode_of(g)):
+        return list(range(NOTRUMP + 1))
+    held = [0] * NSUIT
+    for pos in (seat, seat + QUARTET_HANDS):
+        for c in g["hands"][pos]:
+            held[suit(c)] += 1
+        for pile in g["piles"][pos]:
+            for c in pile:
+                held[suit(c)] += 1
+    return [d for d in range(NSUIT) if held[d] >= QUARTET_BACKING] + [NOTRUMP]
+
+
 def auction_options(g: dict) -> dict:
     """Everything the player to act may legally do, for the client to render.
 
@@ -1444,6 +1620,11 @@ def auction_options(g: dict) -> dict:
     # Which denominations this seat may name -- see DENOM_RULE. "own" forbids
     # only the seat's OWN previous bid's denomination; "standing" forbids the
     # standing bid's; "used" is the per-player forever-ban.
+    # QUARTET: a bid must be BACKED, and the gate composes with the
+    # no-repeat rule below rather than replacing it -- a seat must both hold
+    # the suit and not have spent it. Every other mode gets the full list, so
+    # this intersection is a no-op there.
+    backed = set(backed_denoms(g, me))
     rule = denom_rule_for(mode_of(g))
     if rule == "own":
         mine = a.get("last", [-1, -1])[me]
@@ -1452,6 +1633,7 @@ def auction_options(g: dict) -> dict:
         free = [d for d in range(NOTRUMP + 1) if d != a["denom"]]
     else:
         free = [d for d in range(NOTRUMP + 1) if not (a["used"][me] >> d) & 1]
+    free = [d for d in free if d in backed]
     bids: list[list[int]] = []
     if a["level"] == 0:
         # The opener must bid unless this mode lets it pass (OPENER_MAY_PASS,
@@ -1570,7 +1752,87 @@ def apply_pass(g: dict, seat: int, rng=None) -> None:
     # except in a dummy room, which has no talon at all (two out-cards, and
     # the prize is the third hand), so the defender's Double comes straight
     # after the auction.
+    # QUARTET goes to its own COMMIT phase -- the declaration half of a
+    # two-stage auction. Stage one competes on level and denomination; stage
+    # two is where the declarer says which of their two hands leads and may
+    # move one card between them. Both are declarations rather than contests,
+    # which is exactly why they sit after the bidding rather than inside it.
+    if is_quartet(mode_of(g)):
+        g["phase"] = "commit"
+        return
     g["phase"] = "double" if has_dummy(mode_of(g)) else "swap"
+
+
+def commit_options(g: dict) -> dict:
+    """QUARTET's stage-two declaration: which hand leads, and the one swap.
+
+    WHICH HAND LEADS IS A REAL DECISION, not a formality, and it is the only
+    one in the auction that needs two hands to exist. Play goes round the table
+    (`trick_order`), so the leading side plays FIRST and THIRD while the other
+    plays SECOND and FOURTH -- and fourth is the informed seat, with the whole
+    trick already down. Leading therefore costs position, which in a game where
+    winning a trick can lose you points is a genuine liability rather than the
+    plain advantage it is in most trick-takers. Whichever of a player's seats
+    wins a trick leads the next, so this sets the parity the whole round
+    re-phases around.
+
+    THE SWAP IS THE DECLARER'S PRIZE, and it replaces the talon classic cuts
+    from its out-pile. Quartet's four out-cards are pure secrecy -- nobody ever
+    sees them -- so the prize has to come from somewhere else, and moving one
+    card between your own two hands is the thematically exact one: you have
+    bought the right to reorganise your own side. It is worth something real
+    because the two hands sit in different seats, so an ace is worth different
+    amounts in each. The defender learns only THAT a swap happened.
+    """
+    if g["phase"] != "commit":
+        return {"leads": [], "take": [], "give": [], "may_stand": False}
+    decl = g["auction"]["declarer"]
+    return {
+        # The two POSITIONS this player commands, either of which may lead.
+        "leads": [decl, decl + QUARTET_HANDS],
+        # A card to bring out of the dummy...
+        "take": sorted(g["hands"][decl + QUARTET_HANDS]),
+        # ...in exchange for one out of the hand. Both or neither.
+        "give": sorted(g["hands"][decl]),
+        "may_stand": True,
+    }
+
+
+def apply_commit(g: dict, seat: int, lead: int, take=None, give=None) -> None:
+    """Name the leading hand and optionally swap one card between your own two.
+
+    `lead` is a POSITION and must be one this player commands. `take`/`give`
+    are both-or-neither: a lone one is a mistake, not a half-swap, so it is
+    refused rather than silently ignored.
+    """
+    if g["phase"] != "commit":
+        raise ValueError("not the commit phase")
+    decl = g["auction"]["declarer"]
+    if seat != decl:
+        raise ValueError("only the declarer commits")
+    opts = commit_options(g)
+    lead = int(lead)
+    if lead not in opts["leads"]:
+        raise ValueError("you do not command that hand")
+    if (take is None) != (give is None):
+        raise ValueError("a swap moves one card each way")
+    if take is not None:
+        take, give = int(take), int(give)
+        dummy = decl + QUARTET_HANDS
+        if take not in g["hands"][dummy]:
+            raise ValueError("that card is not in your second hand")
+        if give not in g["hands"][decl]:
+            raise ValueError("that card is not in your hand")
+        g["hands"][dummy].remove(take)
+        g["hands"][decl].remove(give)
+        g["hands"][decl] = sorted(g["hands"][decl] + [take])
+        g["hands"][dummy] = sorted(g["hands"][dummy] + [give])
+        g["swap_take"], g["swap_give"] = take, give
+    # The defender learns THAT a swap happened, never which cards -- the same
+    # bluffable signal classic's talon discard carries.
+    g["swapped"] = take is not None
+    g["commit_lead"] = lead
+    g["phase"] = "double"
 
 
 def _redeal(g: dict, rng=None) -> None:
@@ -1877,6 +2139,11 @@ def _start_play(g: dict) -> None:
     # shape of the tier: lead low, drop the dummy's +2 on it, and dare the
     # defender to take a trick they do not want.
     g["leader"] = a["declarer"]
+    # QUARTET: the declarer named which of their two hands leads in the commit
+    # phase, so honour it. `.get` with the declarer as the fallback keeps a
+    # round saved mid-flight (or any other mode) on the original rule.
+    if is_quartet(mode_of(g)):
+        g["leader"] = g.get("commit_lead", a["declarer"])
     # Snapshotted in EVERY mode since the round-review modal (2026-08-11): the
     # banked position is what lets a finished round be laid out face up. The DD
     # column is still two-seat only -- the solver cannot price three hands --
@@ -1957,12 +2224,20 @@ def playable(g: dict, seat: int) -> list[int]:
 
 
 def trick_size(g: dict) -> int:
-    """Cards in a completed trick: three once there is a dummy."""
-    return 3 if has_dummy(mode_of(g)) else 2
+    """Cards in a completed trick: two normally, three with a dummy, four in
+    quartet. It is the hand count, so `layout_for` already knows it."""
+    return layout_for(mode_of(g))[0]
 
 
 def trick_order(g: dict) -> list[int]:
     """The POSITIONS that play this trick, in order.
+
+    QUARTET GOES ROUND THE TABLE from whoever leads, so the order alternates
+    A, B, A, B -- a player places one card early and one LAST, with the whole
+    trick in front of them. That alternation is the mode's central tension and
+    it is expressed here and nowhere else: the side that leads gives up the
+    informed seat, which in a game where winning a trick can cost you points
+    makes the lead a genuine liability.
 
     THE DUMMY IS ALWAYS SECOND AND NEVER LEADS -- a trick it takes passes the
     lead to the declarer (see `apply_play`). So the third card is always the
@@ -1970,17 +2245,21 @@ def trick_order(g: dict) -> list[int]:
     decision a human one on every trick.
     """
     lead = g["leader"]
+    if is_quartet(mode_of(g)):
+        n = trick_size(g)
+        return [(lead + i) % n for i in range(n)]
     if has_dummy(mode_of(g)):
         return [lead, DUMMY_POS, 1 - lead]
     return [lead, 1 - lead]
 
 
 def to_play(g: dict) -> int:
-    """The POSITION whose card comes next -- 0, 1, or the dummy's 2.
+    """The POSITION whose card comes next -- 0 or 1, the dummy's 2, or any of
+    quartet's four.
 
     NOT necessarily a player: `playing_seat` is who actually acts.
     """
-    if has_dummy(mode_of(g)):
+    if has_dummy(mode_of(g)) or is_quartet(mode_of(g)):
         order = trick_order(g)
         return order[min(len(g.get("plays") or []), len(order) - 1)]
     return g["leader"] if g["led"] is None else 1 - g["leader"]
@@ -2020,6 +2299,13 @@ def side_of(g: dict, pos: int) -> int:
     who leads next are all derived from this, so flipping `DUMMY_COMMAND`
     moves all three together and nothing else in the engine mentions it.
     """
+    if is_quartet(mode_of(g)):
+        # Seats 0 and 1 are the players' own hands, 2 and 3 the hands opposite
+        # them -- so a player commands `p` and `p + 2` and this is the whole
+        # rule. Nothing in quartet contests a hand the way `DUMMY_COMMAND`
+        # contests dummy mode's third one: both of a player's hands are theirs
+        # for the whole round.
+        return pos % QUARTET_HANDS
     if pos == DUMMY_POS and has_dummy(mode_of(g)):
         if DUMMY_COMMAND == "leader":
             return g["leader"]
@@ -2140,7 +2426,12 @@ def apply_play(g: dict, seat: int, c: int) -> None:
     # THE DUMMY NEVER LEADS: a trick it takes hands the lead to the declarer,
     # which is what keeps it second in every trick and the third card always a
     # real player's. `side_of` is that mapping and already knows it.
-    g["leader"] = winner if win_pos == DUMMY_POS else win_pos
+    # WHOEVER WON LEADS NEXT -- the winning POSITION, so in quartet the lead can
+    # sit in either of a player's two hands and the A,B,A,B order re-phases
+    # around it. The dummy is the one exception: it never leads, so a trick it
+    # takes hands the lead to the player it scored for.
+    g["leader"] = (winner if (win_pos == DUMMY_POS and has_dummy(mode_of(g)))
+                   else win_pos)
     g["led"] = None
     g["plays"] = []
     if g["trick"] >= ntricks_in(g) or _score_is_settled(g):
@@ -2879,7 +3170,11 @@ def _finish(g: dict) -> None:
         return
     a = g["auction"]
     decl = a["declarer"]
-    dpts = g["pts"][decl]
+    # THE KEEPS ARE PART OF THE TOTAL THE CONTRACT IS JUDGED AGAINST (quartet;
+    # [0, 0] everywhere else, so this line is the whole of the mode's scoring
+    # difference). `pts` itself is left as the trick total -- see `keeps_for`.
+    keeps = keeps_for(g)
+    dpts = g["pts"][decl] + keeps[decl]
     # NULL IS CHECKED FIRST AND WINS. Taking no +2 trick is only reachable with
     # a non-positive total, so it can never coincide with a made contract -- it
     # always replaces being set, which is exactly the escape hatch it is for.
@@ -2944,6 +3239,11 @@ def _finish(g: dict) -> None:
         "short_rate": payoff_terms(g)["short"],
         "ramp": payoff_terms(g).get("ramp", 0),
         "declarer_pts": dpts,
+        # Both halves of that total, so the result panel can show the sum it
+        # actually is rather than a number the player cannot check. Zero in
+        # every mode but quartet.
+        "keeps": keeps,
+        "trick_pts": list(g["pts"]),
         "declarer_etricks": g["etricks"][decl],
         "made": made,
         "short": short,
@@ -3091,7 +3391,22 @@ def view_for(g: dict, seat: int) -> dict:
         "seats": g["seats"],
         "you": seat,
         "hand": sorted(g["hands"][seat]),
+        # QUARTET: THE SECOND HAND THIS PLAYER COMMANDS (position `seat + 2`),
+        # and it goes to THEM ALONE. Private, unlike dummy mode's third hand,
+        # and that is the mode's central information decision rather than an
+        # oversight: a finesse is a guess about WHICH of two hidden hands holds
+        # a card, so a player needs two hidden hands to finesse against. Making
+        # both dummies public would leave one hidden hand and no finesse.
+        # None outside quartet, which is how the board knows to render two
+        # hands for this player rather than one.
+        "mine": (sorted(g["hands"][seat + QUARTET_HANDS])
+                 if is_quartet(mode_of(g)) else None),
         "opp_hand_n": len(g["hands"][opp]),
+        # How many cards every POSITION still holds. Wholly public in any card
+        # game -- both players can count -- and quartet needs it per position
+        # rather than per player, because the two hands a player commands
+        # empty independently and the board draws all four.
+        "hand_n": [len(h) for h in g["hands"]],
         "piles": [_pile_view(g, q, seat) for q in range(n_hands(g))],
         # THE DUMMY, wholly public from the deal -- its hand to both players,
         # since shared information advantages neither bidder and turns the
@@ -3190,7 +3505,17 @@ def view_for(g: dict, seat: int) -> dict:
         "history": [list(h) for h in g["history"]],
         "result": g["result"],
         # The out-of-play cards stay secret until the round is done.
+        # The out-pile, revealed at the round end. QUARTET'S FOUR ARE PURE
+        # SECRECY -- no talon is ever cut from them and nobody sees them
+        # before this -- and they are what stops the two players partitioning
+        # the deck: with nothing out, each would know the other's whole
+        # holding by complement (measured at 0.0 bits against classic's 14.7).
         "out": list(g["out"]) if over else None,
+        # QUARTET at the round end: every hand face up, so a player can check
+        # the keeps that were just scored against them. Strictly after the
+        # round is over, like `out`.
+        "hands_open": ([sorted(h) for h in g["hands"]]
+                       if over and is_quartet(mode_of(g)) else None),
         # `shown` is the out-of-play set the client searcher reads (see
         # `apply_swap`); `shown_at_deal` is what the declarer was actually shown,
         # which only the round-end reveal wants. Same redaction for both.
@@ -3220,6 +3545,18 @@ def view_for(g: dict, seat: int) -> dict:
         # Skat's post-auction prompts, each to exactly one seat.
         "talon": talon_options(g) if g["phase"] == "talon" and seat == decl else None,
         "declare": declare_options(g) if g["phase"] == "declare" and seat == decl else None,
+        # Quartet's stage-two declaration -- which of the declarer's two hands
+        # leads, and the one swap between them. To the declarer alone.
+        "commit": (commit_options(g)
+                   if g["phase"] == "commit" and seat == decl else None),
+        # Which POSITION leads trick 1, once committed. Public -- the defender
+        # is entitled to know which of the declarer's hands opens, and the
+        # board has to point at it.
+        "commit_lead": g.get("commit_lead"),
+        # QUARTET's second currency: what each player's OWN hand is still
+        # holding, in card points. Only once the round is over -- during play
+        # it would leak the contents of both hands.
+        "keeps": keeps_for(g) if over else None,
     }
     return v
 
@@ -3266,7 +3603,7 @@ def turn_seat(g) -> int | None:
         return None
     if g["phase"] == "auction":
         return g["auction"]["to_act"]
-    if g["phase"] in ("swap", "talon", "declare", "re"):
+    if g["phase"] in ("swap", "talon", "declare", "re", "commit"):
         return g["auction"]["declarer"]
     # Both of these belong to the DEFENDER: classic's Double and skat's Kontra
     # are the same decision under two names.
@@ -3342,6 +3679,9 @@ def apply_move(g, pid, move: dict, rng=None) -> None:
     elif kind == "declare":
         apply_declare(g, seat, int(move["denom"]), int(move.get("level") or 0),
                       move.get("sharp"), move.get("open"))
+    elif kind == "commit":
+        apply_commit(g, seat, int(move["lead"]),
+                     move.get("take"), move.get("give"))
     elif kind == "double":
         apply_double(g, seat, bool(move.get("on")))
     elif kind == "kontra":
