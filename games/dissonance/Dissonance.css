@@ -196,6 +196,41 @@
      ~10px wider than the box and the hand WRAPPED, which on a phone is three
      cards on a second line rather than a fan. */
   .dis .dis-table { --dis-slots: 4.7; }
+  /* A QUARTET SEAT MUST NOT BE SQUASHED. The phone table is a flex column and
+     a seat's default `flex-shrink: 1` lets the result panel compress it: at
+     the round end, measured at 390x844, all four seats collapsed to 15-25px
+     while the three kept cards -- 63px tall -- carried on drawing straight
+     through the bottom of their own box.
+     `.dis-game .dis-table > .dis-seat` already does this on the DESKTOP board;
+     there is no phone equivalent, and quartet is the mode that needs one
+     because it has four seats to squash instead of two. Scoped to `.dis-4seat`
+     rather than fixed globally: the other modes may well have the same latent
+     behaviour at the round end, but changing their layout is a measurement
+     nobody has taken. */
+  /* REVERTED `min-height: fit-content` here: it let the seats grow enough to
+     cover one another, and a covered card stops being clickable -- the whole
+     board went dead and the render gate sat out a 5s actionability timeout on
+     every attempt. `flex` alone is what stays. */
+  .dis .dis-table.dis-4seat > .dis-seat { flex: 0 0 auto; }
+  /* QUARTET FANS HARDER ON A PHONE, and the four extra classes are deliberate:
+     this block sits BEFORE the base rules, so a base-specificity override here
+     would lose to the `.dis-4seat` fan further down the file.
+     Twelve cards across a phone's hand box is the tightest row on any board in
+     this game. At the shared 42% they came out just wider than the box, wrapped
+     to a second line, and the second line drew straight OUTSIDE the seat --
+     measured as twelve cards escaping their seat at 390x844. 55% keeps the row
+     whole; the visible strip is still ~17px on a 38px card, which is a card you
+     can read the corner of, and the last card is whole either way. */
+  .dis .dis-table.dis-4seat .dis-seat .dis-hand > * + * {
+    margin-left: calc(var(--dis-cw) * -0.55);
+  }
+  /* ...and the two hidden hands keep their own, scaled to the smaller card they
+     are drawn at. Same specificity as the rule above and later in the block, so
+     it wins for those two seats. */
+  .dis .dis-table.dis-4seat .dis-qtheirs .dis-hand > * + *,
+  .dis .dis-table.dis-4seat .dis-qopp .dis-hand > * + * {
+    margin-left: calc(var(--dis-cw) * 0.6 * -0.55);
+  }
   .dis .dis-seat .dis-hand > * + * { margin-left: calc(var(--dis-cw, 42px) * -0.42); }
   /* THE FAN PAINTS BACKWARDS, and this is the half that makes it readable.
      Flex paints later children on top, so each card covered the one before
@@ -311,7 +346,9 @@
      Both the base `min-height` and the auction pin have to go, or the taller
      of them wins and the overflow comes back. */
   .dis .dis-table.dis-3seat,
-  .dis .dis-table.dis-3seat.ph-auction { height: auto; min-height: 0; }
+  .dis .dis-table.dis-3seat.ph-auction,
+  .dis .dis-table.dis-4seat,
+  .dis .dis-table.dis-4seat.ph-auction { height: auto; min-height: 0; }
   /* THE AUCTION TABLE IS A MINIMUM, NOT A PIN (2026-08-13). It used to be a
      hard `height: calc(100dvh - var(--dis-hdr))`, which is only safe while
      something inside is allowed to give — and once the bidding box stopped
@@ -921,6 +958,14 @@
      same `dis-rail-*` class the auction/result rail rules below use. */
   .dis-game .dis-table.dis-rail-play { --dis-rows: 5; --dis-reserve-in: 17.5rem; }
   .dis-game .dis-table.dis-3seat.dis-rail-play { --dis-reserve-in: 28.5rem; }
+  /* QUARTET NEEDS ITS OWN, and the absence of one is what put a player's own
+     hand off the bottom of the screen at every desktop size. `.dis-rail-play`
+     above is a THREE-class selector, so a two-class `.dis-table.dis-4seat`
+     could never win against it -- the four-seat board silently charged the
+     TWO-seat budget (two hands plus two pile rows) while rendering four full
+     hand rows. Measured at 1440x900 before the fix: the fourth seat ran
+     y=810..1040 against a 900px viewport. */
+  .dis-game .dis-table.dis-4seat.dis-rail-play { --dis-reserve-in: 28.5rem; }
   /* Spread whatever slack is left the way a table does — opponent at the far
      side, your hand nearest you — instead of packing everything to the top. */
   .dis-game .dis-table { justify-content: space-between; }
@@ -1059,6 +1104,11 @@
   .dis-game .dis-table.dis-3seat.dis-rail-result {
     grid-template-rows: repeat(3, auto);
   }
+  /* One row per SEAT -- four of them here. */
+  .dis-game .dis-table.dis-4seat.dis-rail-auction,
+  .dis-game .dis-table.dis-4seat.dis-rail-result {
+    grid-template-rows: repeat(4, auto);
+  }
   .dis-game .dis-table.dis-rail-auction > .dis-seat,
   .dis-game .dis-table.dis-rail-result > .dis-seat { grid-column: 1; }
   .dis-game .dis-table > .dis-auction,
@@ -1185,6 +1235,10 @@
   }
   .dis-game .dis-table.dis-3seat.dis-rail-play {
     grid-template-rows: repeat(4, auto);
+  }
+  /* Four seats plus the trick. */
+  .dis-game .dis-table.dis-4seat.dis-rail-play {
+    grid-template-rows: repeat(5, auto);
   }
   .dis-game .dis-table.dis-rail-play > .dis-seat,
   .dis-game .dis-table.dis-rail-play > .dis-trick { grid-column: 1; }
@@ -2093,6 +2147,47 @@
   padding: 0.25rem 0.4rem;
   background: rgba(255, 255, 255, 0.02);
 }
+
+/* THE OPPONENT'S TWO HANDS ARE DRAWN SMALL, AND THAT IS THE WHOLE REASON THE
+   BOARD FITS. Four twelve-card hands stacked at full size do not: measured at
+   1440x900 the card had already been driven down to its 3.4rem floor and a
+   player's own hand STILL rendered below the bottom of the screen.
+
+   Shrinking every card further was the wrong lever. A face-down hand carries
+   exactly one piece of information -- how many cards are left -- and spending
+   a full card row on twelve backs to say "12" is the space that was missing.
+   So the two hidden hands render as a tight fan at 60% and the two the player
+   actually reads (their own hand, and the hand opposite them) keep full size.
+   That takes the board from four full rows to two, which is what a 2-seat
+   table already budgets for.
+
+   It also reads better: the two hands you command are now the visually
+   dominant things on the felt, which is what the mode is about. */
+/* THE FAN, at every width rather than only on a phone. `.dis .dis-seat` in the
+   phone block does this for every mode; quartet needs it on the desktop board
+   too, because 12 cards is nearly twice the 7 that block was written for. */
+.dis-4seat .dis-seat .dis-hand > * + * {
+  margin-left: calc(var(--dis-cw) * -0.42);
+}
+.dis-4seat .dis-qtheirs .dis-hand .dis-card,
+.dis-4seat .dis-qopp .dis-hand .dis-card {
+  --cw: calc(var(--dis-cw) * 0.6);
+  width: var(--cw);
+  height: calc(var(--cw) * 1.4);
+}
+.dis-4seat .dis-qtheirs .dis-hand > * + *,
+.dis-4seat .dis-qopp .dis-hand > * + * {
+  /* 42% of the SMALLER card, not of `--dis-cw` -- these are drawn at 0.6, and
+     overlapping them by a full-size card's 42% would bury them entirely. */
+  margin-left: calc(var(--dis-cw) * 0.6 * -0.42);
+}
+/* ...and the row they sit in stops reserving a FULL card's height, which is
+   the half that actually gives the space back -- `min-height` on `.dis-hand`
+   is what the height budget spends, not the cards themselves. */
+.dis-4seat .dis-qtheirs .dis-hand,
+.dis-4seat .dis-qopp .dis-hand {
+  min-height: calc(var(--dis-cw) * 0.6 * 1.4 + 2px);
+}
 .dis-qmine { border-color: var(--accent); background: rgba(255, 255, 255, 0.04); }
 .dis-qopp .dis-seatname,
 .dis-qmine .dis-seatname { opacity: 0.85; }
@@ -2102,9 +2197,32 @@
    size needs no change. What it DOES add is two more seat-name rows, which
    the reserve has to pay for or the cards grow into them. */
 .dis-table.dis-4seat {
+  /* TWELVE CARDS TO A HAND, NOT SEVEN, AND THEY MUST BE FANNED -- together
+     these decide whether the board fits at all. `--dis-slots` is how many
+     card-widths the row budget divides into; every other mode deals 7 in hand
+     and quartet deals 12.
+     Left at 7 the card was sized for a 7-card row, the hand WRAPPED to a
+     second line, and every seat came out twice as tall as the height budget
+     expected -- which put a player's own hand off the bottom of the screen at
+     every desktop size while the cards themselves looked perfectly reasonable.
+     Measured at 1440x900: card 98px inside a 228px seat, i.e. two card rows
+     where the budget assumed one.
+     A flat 12 is not enough either, and that is the second half. The card has
+     a 3.4rem FLOOR, and 12 unfanned cards at that floor need 653px against a
+     hand box measured at 514 -- so at any realistic width the row still wraps.
+     Fanned at 42% (the overlap the phone board already uses) a row is
+     `cw + 11 x (cw x 0.58 + gap)`, so the slot count is `1 + 11 x 0.58 = 7.38`
+     -- plus the same sliver of margin the phone's 7-card pair carries, and for
+     the same reason: the slot term divides the TABLE's width while the row is
+     laid out inside the narrower hand box. */
+  --dis-slots: 7.6;
+  /* FOUR FULL HAND ROWS. Quartet deals no piles, so `--dis-rows` counts only
+     the four hands -- but four SEATS means four name rows and four gaps, which
+     is furniture the reserve has to pay for, and it is why this is not simply
+     the two-seat budget with the same row count. */
   --dis-rows: 4;
-  --dis-reserve: 21rem;
-  --dis-reserve-in: 30rem;
+  --dis-reserve: 24rem;
+  --dis-reserve-in: 33rem;
 }
 
 /* ── the doubled bet (2026-08-11, re-homed 2026-08-12) ─────────────────────
@@ -2317,14 +2435,26 @@
   .dis-game .dis-table.dis-3seat:is(.dis-rail-play, .dis-rail-auction, .dis-rail-result) {
     --dis-vden: 10.52; --dis-reserve-in: 9.3rem;
   }
+  /* Quartet: four hand rows plus the trick is five card rows, against the
+     three-seat board's seven -- but four name rows and four gaps against its
+     three. Sized by MEASUREMENT at six viewports, not by scaling the ratio. */
+  .dis-game .dis-table.dis-4seat:is(.dis-rail-play, .dis-rail-auction, .dis-rail-result) {
+    --dis-vden: 9.1; --dis-reserve-in: 9.3rem;
+  }
 }
 @media (min-width: 1800px) and (min-height: 1200px) {
   .dis-game .dis-table.dis-3seat:is(.dis-rail-play, .dis-rail-auction, .dis-rail-result) {
     --dis-reserve-in: 9.9rem;
   }
+  .dis-game .dis-table.dis-4seat:is(.dis-rail-play, .dis-rail-auction, .dis-rail-result) {
+    --dis-reserve-in: 9.9rem;
+  }
 }
 @media (min-width: 2200px) and (min-height: 1400px) {
   .dis-game .dis-table.dis-3seat:is(.dis-rail-play, .dis-rail-auction, .dis-rail-result) {
+    --dis-reserve-in: 10.3rem;
+  }
+  .dis-game .dis-table.dis-4seat:is(.dis-rail-play, .dis-rail-auction, .dis-rail-result) {
     --dis-reserve-in: 10.3rem;
   }
 }

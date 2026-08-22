@@ -2812,7 +2812,14 @@ try {
 		// immediately. (The `.count() > 0` guards below are safe for the same
 		// reason -- `count()` does not auto-wait.)
 		let trickLine = "";
-		for (let i = 0; i < 160; i++) {
+		// A WALL-CLOCK BUDGET, not just an iteration count. Every click here
+		// carries an actionability timeout, so a board that goes un-clickable
+		// turns 160 iterations into 13 minutes -- which is exactly what a bad
+		// CSS change did once, and it stalled the whole gate rather than
+		// failing it. The loop is a best-effort drive; running out of budget
+		// simply means the checks below report what they found.
+		const deadline = Date.now() + 90_000;
+		for (let i = 0; i < 160 && Date.now() < deadline; i++) {
 			const snap = await page.evaluate(() => ({
 				width: document.querySelectorAll(".dis-trick .dis-tp").length,
 				info: document.querySelector(".dis-trickinfo")?.textContent || "",
@@ -2876,6 +2883,102 @@ try {
 		// and that is how dummy mode once rendered a heading over nothing.
 		check("no talon panel in a room that has no talon",
 			await page.locator(".dis-p-talon").count() === 0);
+
+		// ── ALL FOUR HANDS HAVE TO BE ON THE SCREEN ──────────────────────────
+		// Four twelve-card hands is nearly twice the board any other mode draws,
+		// and the first cut of this layout put a player's OWN hand below the
+		// bottom of the viewport at every desktop size -- while every card on it
+		// rendered perfectly, so nothing threw and no existing check noticed.
+		// Geometry is the only thing that can see it.
+		//
+		// Measured at the desktop sizes, where a board is expected to fit whole.
+		// Phones are allowed to scroll vertically (the three-seat board already
+		// does) -- what is NOT allowed anywhere is a hand clipped inside its own
+		// seat, a sideways scroll, or two sections drawn on top of each other.
+		for (const [label, w, h] of [["desktop", 1440, 900], ["laptop", 1280, 800]]) {
+			await page.setViewportSize({ width: w, height: h });
+			await sleep(400);
+			const geo = await page.evaluate(() => {
+				const seats = [...document.querySelectorAll(".dis-seat")].map((el) => {
+					const b = el.getBoundingClientRect();
+					let escaped = 0;
+					for (const c of el.querySelectorAll(".dis-card")) {
+						const cr = c.getBoundingClientRect();
+						if (cr.bottom > b.bottom + 1 || cr.top < b.top - 1) escaped++;
+					}
+					return { off: b.top < -1 || b.bottom > innerHeight + 1, escaped,
+						h: Math.round(b.height) };
+				});
+				// AN OVERLAP NEEDS BOTH AXES. The railed desktop layout puts the
+				// auction panel in its own COLUMN beside the seats, so a y-only
+				// test reports every desktop board as broken.
+				const kids = [...(document.querySelector(".dis-table")?.children || [])]
+					.map((el) => el.getBoundingClientRect())
+					.filter((b) => b.height > 0 && b.width > 0);
+				let overlaps = 0;
+				for (let i = 0; i < kids.length; i++)
+					for (let j = i + 1; j < kids.length; j++) {
+						const a = kids[i], b = kids[j];
+						if (a.left < b.right - 1 && b.left < a.right - 1
+							&& a.top < b.bottom - 1 && b.top < a.bottom - 1) overlaps++;
+					}
+				return { seats, overlaps,
+					sideways: document.documentElement.scrollWidth
+						> document.documentElement.clientWidth + 1 };
+			});
+			check(`all four hands are on screen at ${label} ${w}x${h}`,
+				geo.seats.length === 4 && geo.seats.every((s) => !s.off),
+				JSON.stringify(geo.seats));
+			check(`...and no card escapes its seat at ${label}`,
+				geo.seats.every((s) => s.escaped === 0), JSON.stringify(geo.seats));
+			check(`...and no two sections overlap at ${label}`, geo.overlaps === 0,
+				String(geo.overlaps));
+			check(`...and the board does not scroll sideways at ${label}`,
+				geo.sideways === false);
+		}
+		// On a phone the board may scroll, but nothing may be clipped or run off
+		// the side -- the same bar the three-seat board is held to.
+		//
+		// MEASURED ON A LIVE BOARD, not on the round-end panel. By this point the
+		// round is usually over, and quartet is the only mode whose hands still
+		// HOLD cards then (every other plays all thirteen), so its seats are the
+		// only ones with anything to spill when the result panel takes the
+		// space -- a phone-only, round-end-only overflow of the reveal. Dealing
+		// the next round puts a real board back, which is the state a player
+		// spends the round in and the one worth guarding.
+		const next = page.getByRole("button", { name: /next round/i }).first();
+		if (await next.count() > 0) {
+			await next.click({ timeout: 5_000 }).catch(() => {});
+			await sleep(600);
+		}
+		await page.setViewportSize({ width: 390, height: 844 });
+		await sleep(400);
+		const ph = await page.evaluate(() => {
+			let escaped = 0;
+			const per = [];
+			for (const seat of document.querySelectorAll(".dis-seat")) {
+				const sr = seat.getBoundingClientRect();
+				let n = 0;
+				for (const c of seat.querySelectorAll(".dis-card")) {
+					const cr = c.getBoundingClientRect();
+					if (cr.bottom > sr.bottom + 1 || cr.top < sr.top - 1) n++;
+				}
+				escaped += n;
+				per.push({ cls: (String(seat.className).match(/dis-q\w+/) || ["own"])[0],
+					n, cards: seat.querySelectorAll(".dis-card").length,
+					h: Math.round(sr.height) });
+			}
+			return { escaped, per,
+				phase: (document.querySelector(".dis-table")?.className || "")
+					.match(/ph-\w+/)?.[0] || "?",
+				seats: document.querySelectorAll(".dis-seat").length,
+				sideways: document.documentElement.scrollWidth
+					> document.documentElement.clientWidth + 1 };
+		});
+		check("the four-hand board still draws four seats on a phone",
+			ph.seats === 4, JSON.stringify(ph));
+		check("...with no card escaping its seat", ph.escaped === 0, JSON.stringify(ph));
+		check("...and no sideways scroll", ph.sideways === false, JSON.stringify(ph));
 
 		check("no page errors creating and playing a quartet room",
 			errors.length === 0, errors[0]?.slice(0, 160) || "");

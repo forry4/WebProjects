@@ -2485,7 +2485,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
           + (game.dummy ? " dis-3seat" : "")
           + (isQuartet ? " dis-4seat" : "")}>
           {/* opponent */}
-          <div className="dis-seat">
+          <div className={`dis-seat${isQuartet ? " dis-qtheirs" : ""}`}>
             <div className="dis-seatname">
               <b>{nameOf(oppSeat)}</b>
               <span>{game.pts[oppSeat] >= 0 ? "+" : ""}{game.pts[oppSeat]} pts</span>
