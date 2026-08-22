@@ -50,15 +50,39 @@ one forced card at trick 10 while a 13-card hand still holds four, and the
 endgame gradient shows it: every 13/10 arm ends the round at 1.98-2.10 choices,
 every 13/13 arm at 2.84-2.98.
 
-SO THE FOUR-HAND DEAL WANTS TO BE 13/13/13/13, and the cost is that 52 cards in
-four equal hands leaves NOTHING OUT -- no six out-cards, and so no talon to cut
-a declarer's prize from. That is a product decision, not a measurement, and it
-is the one this file cannot make.
+SO THE FOUR-HAND DEAL WANTS TO BE 13/13/13/13 -- AND THAT ARM IS DEAD ON A
+DIFFERENT AXIS. Recorded because the reasoning above is sound and the arm still
+wins on agency; it loses the game somewhere this file cannot see.
 
-`13/13, dummy 7+3p` is the arm to beat: 4.21 / 18% beats classic on both, the
-dummy at 3.66 clears the failure threshold with room, and the player hand stays
-the freer of the two (4.76 vs 3.66) -- which is the asymmetry the layout is
-for. Your hand is where you choose; your dummy is where you discover.
+**52 cards in four equal hands leaves NOTHING OUT, and with nothing out the two
+players PARTITION the deck: each holds 24-26 cards and therefore knows the
+other's holding EXACTLY, by complement.** Measured as bits of uncertainty about
+which cards the opponent holds: 13/13 reads **0.0**, against classic's 14.7.
+The finesse survives (23.3 bits of uncertainty remain about how their cards are
+SPLIT between their two hands, which is the only thing a finesse asks), but
+every statement a player could make about their own holding is already known to
+the opponent -- so an auction built on backed bids has nothing to convey.
+
+An out-pile is not a talon to cut a prize from. It is the game's entire
+permanent hidden-information budget, and four hands cannot be equal AND leave
+one. The fix is one card a hand:
+
+    structure                        choices  forced      P      D   secrecy
+    13/13/13/13  0 out  10tr keep 3     4.52     15%   4.76   4.28     0.0 b
+    12/12/12/12  4 out  10tr keep 2     4.13     17%   4.33   3.93    14.3 b
+    12/12/12/12  4 out   9tr keep 3     4.31     16%   4.54   4.07    14.3 b
+    11/11/11/11  8 out  10tr keep 1     3.71     19%   3.89   3.53    22.5 b
+    13/10/13/10  6 out  10tr keep 3/0   3.93     22%   4.78   3.08    18.9 b
+
+**`12/12/12/12, four out, NINE tricks, three kept in every hand` is the deal.**
+4.31 choices and 16% forced beat classic's 4.02 / 22% on both, its 14.3 bits of
+secrecy land within half a bit of classic's 14.7, and it keeps three cards a
+hand -- the leftover the mode was designed around, which the 10-trick version
+would have cut to two. Nine tricks reads BETTER than ten, which is not a
+rounding artefact: the last trick of a round is its most constrained, so
+stopping a trick earlier removes the worst ply from every hand.
+
+The auction that sits on this deal is fitted in `quartet_auction.py`.
 
     PYTHONPATH=. python3 -m games.dissonance.tools.quartet_agency [rounds]
 """
@@ -81,10 +105,11 @@ class Layout:
     """A candidate deal. `hand` cards go straight to hand; `piles` 2-card piles
     sit on top of each other's bottoms, only the top playable."""
 
-    def __init__(self, name, p_hand, p_piles, d_hand, d_piles):
+    def __init__(self, name, p_hand, p_piles, d_hand, d_piles, ntricks=NTRICK):
         self.name = name
         self.p_hand, self.p_piles = p_hand, p_piles
         self.d_hand, self.d_piles = d_hand, d_piles
+        self.ntricks = ntricks
 
     def size(self, pos):
         h, p = ((self.p_hand, self.p_piles) if pos in PLAYER_POS
@@ -176,7 +201,7 @@ def one_round(layout, rng, trump):
     counts, forced, plies = [], 0, 0
     by_pos = defaultdict(list)
     by_trick = defaultdict(list)
-    for t in range(NTRICK):
+    for t in range(layout.ntricks):
         plays, led_suit = [], None
         for k in range(NSEAT):
             pos = (leader + k) % NSEAT
@@ -197,7 +222,7 @@ def one_round(layout, rng, trump):
     # every player seat must finish holding exactly its keep count
     for pos in range(NSEAT):
         left = len(seats[pos].hand) + sum(len(p) for p in seats[pos].piles)
-        assert left == layout.size(pos) - NTRICK, (pos, left)
+        assert left == layout.size(pos) - layout.ntricks, (pos, left)
     return counts, forced, plies, by_pos, by_trick
 
 
@@ -221,7 +246,7 @@ def measure(layout, rounds, seed=11, trump="sample"):
         "player": statistics.mean(by_pos[0] + by_pos[2]),
         "dummy": statistics.mean(by_pos[1] + by_pos[3]),
         "by_trick": [round(statistics.mean(by_trick[t]), 2)
-                     for t in range(NTRICK)],
+                     for t in sorted(by_trick)],
         "rails_p": layout.on_rails(0),
         "rails_d": layout.on_rails(1),
     }
