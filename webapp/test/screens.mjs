@@ -4633,15 +4633,25 @@ try {
 
 	// skat → Hard → beat stay contiguous and in order, preserving the adjacency the
 	// comments in those blocks were written against.
+	// `ragtagFight` is lane A, and LAST, for a reason that is not lane A's usual
+	// one: it arms no worker and measures no timing. It is here for BALANCE.
+	// Measured, the two lanes were A 117.9s / B 133.9s -- B was the wall clock
+	// even before this game existed, and its longest block (`dissonanceQuartet`,
+	// 34.5s) is also its latest, so it runs against lane A's heaviest tail.
+	// Adding a block to B made that worse and quartet began failing
+	// intermittently. Moved here the lanes read A 127.2 / B 124.6. It goes AFTER
+	// `dissonanceBeat` specifically so beat's dwell window is unchanged -- beat
+	// still runs at the same point in the run, with the same company, and the new
+	// work lands behind it.
 	const laneA = [offlineSpender, offlineCoc, offlineDuel, offlineDissonance,
-		dissonanceSkat, dissonanceHard, dissonanceBeat];
+		dissonanceSkat, dissonanceHard, dissonanceBeat, ragtagFight];
 	// `dissonanceQuartet` is lane B: it plays a whole game but arms NO worker
 	// (`client_searchable` is false for four hands), and it asserts settled
 	// geometry rather than elapsed time -- both of which are what lane B is for.
 	const laneB = [routeMounts, shellNav, authScreen, spenderPlayTurn, spenderWaitingRoom,
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, lastDifficulty,
-		dissonanceQuartet, ragtagFight];
+		dissonanceQuartet];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant
 	// writing it — it then ran because it was simply the next statement. Now it has
