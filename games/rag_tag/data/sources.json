@@ -1,0 +1,167 @@
+{
+  "_comment": [
+    "Every asset the transcription in boards.json and cards.json was read from.",
+    "All of these are served publicly by BoardGameArena's CDN and need no login;",
+    "tools/fetch_bga_assets.py re-downloads them so a correction can be checked against",
+    "the same pixels. The images themselves are NOT committed -- they are the publisher's",
+    "art. Only the mechanical transcription is."
+  ],
+  "base_url": "https://x.boardgamearena.net/data/themereleases/current/games/tagteam/current",
+  "rulebook": "https://gamers-hq.de/media/pdf/81/2d/2c/TT_Rules_01_EN_06may2025.pdf",
+  "gamehelp": "https://en.doc.boardgamearena.com/Gamehelptagteam",
+  "client_bundle": "https://x.boardgamearena.net/data/themereleases/current/games/tagteam/current/tagteam.js",
+  "client_css": "https://x.boardgamearena.net/data/themereleases/current/games/tagteam/current/tagteam.css",
+  "fighters": {
+    "GolemOfPrague": {
+      "board": "img/fighters/tt-fighter-GolemOfPrague.jpg",
+      "draft": "img/draft-cards/tt-draft-GolemOfPrague.jpg",
+      "cards": [
+        "img/cards/GolemOfPrague/tt-fighter-card-10.jpg",
+        "img/cards/GolemOfPrague/tt-fighter-card-11.jpg",
+        "img/cards/GolemOfPrague/tt-fighter-card-12.jpg",
+        "img/cards/GolemOfPrague/tt-fighter-card-13.jpg",
+        "img/cards/GolemOfPrague/tt-fighter-card-14.jpg",
+        "img/cards/GolemOfPrague/tt-fighter-card-15.jpg"
+      ]
+    },
+    "Mordred": {
+      "board": "img/fighters/tt-fighter-Mordred.jpg",
+      "draft": "img/draft-cards/tt-draft-Mordred.jpg",
+      "cards": [
+        "img/cards/Mordred/tt-fighter-card-20.jpg",
+        "img/cards/Mordred/tt-fighter-card-21.jpg",
+        "img/cards/Mordred/tt-fighter-card-22.jpg",
+        "img/cards/Mordred/tt-fighter-card-23.jpg",
+        "img/cards/Mordred/tt-fighter-card-24.jpg"
+      ]
+    },
+    "JoanOfArc": {
+      "board": "img/fighters/tt-fighter-JoanOfArc.jpg",
+      "draft": "img/draft-cards/tt-draft-JoanOfArc.jpg",
+      "cards": [
+        "img/cards/JoanOfArc/tt-fighter-card-30.jpg",
+        "img/cards/JoanOfArc/tt-fighter-card-31.jpg",
+        "img/cards/JoanOfArc/tt-fighter-card-32.jpg",
+        "img/cards/JoanOfArc/tt-fighter-card-33.jpg",
+        "img/cards/JoanOfArc/tt-fighter-card-34.jpg"
+      ]
+    },
+    "Mephistopheles": {
+      "board": "img/fighters/tt-fighter-Mephistopheles.jpg",
+      "draft": "img/draft-cards/tt-draft-Mephistopheles.jpg",
+      "cards": [
+        "img/cards/Mephistopheles/tt-fighter-card-40.jpg",
+        "img/cards/Mephistopheles/tt-fighter-card-41.jpg",
+        "img/cards/Mephistopheles/tt-fighter-card-42.jpg",
+        "img/cards/Mephistopheles/tt-fighter-card-43.jpg",
+        "img/cards/Mephistopheles/tt-fighter-card-44.jpg",
+        "img/cards/Mephistopheles/tt-fighter-card-45.jpg",
+        "img/cards/Mephistopheles/tt-fighter-card-46.jpg"
+      ]
+    },
+    "TheFeyFolk": {
+      "board": "img/fighters/tt-fighter-TheFeyFolk.jpg",
+      "draft": "img/draft-cards/tt-draft-TheFeyFolk.jpg",
+      "cards": [
+        "img/cards/TheFeyFolk/tt-fighter-card-50.jpg",
+        "img/cards/TheFeyFolk/tt-fighter-card-51.jpg",
+        "img/cards/TheFeyFolk/tt-fighter-card-52.jpg",
+        "img/cards/TheFeyFolk/tt-fighter-card-53.jpg",
+        "img/cards/TheFeyFolk/tt-fighter-card-54.jpg",
+        "img/cards/TheFeyFolk/tt-fighter-card-55.jpg",
+        "img/cards/TheFeyFolk/tt-fighter-card-56.jpg"
+      ]
+    },
+    "MamaBrijit": {
+      "board": "img/fighters/tt-fighter-MamaBrijit.jpg",
+      "draft": "img/draft-cards/tt-draft-MamaBrijit.jpg",
+      "cards": [
+        "img/cards/MamaBrijit/tt-fighter-card-60.jpg",
+        "img/cards/MamaBrijit/tt-fighter-card-61.jpg",
+        "img/cards/MamaBrijit/tt-fighter-card-62.jpg",
+        "img/cards/MamaBrijit/tt-fighter-card-63.jpg",
+        "img/cards/MamaBrijit/tt-fighter-card-64.jpg",
+        "img/cards/MamaBrijit/tt-fighter-card-65.jpg",
+        "img/cards/MamaBrijit/tt-fighter-card-66.jpg"
+      ]
+    },
+    "ChingShih": {
+      "board": "img/fighters/tt-fighter-ChingShih.jpg",
+      "draft": "img/draft-cards/tt-draft-ChingShih.jpg",
+      "cards": [
+        "img/cards/ChingShih/tt-fighter-card-70.jpg",
+        "img/cards/ChingShih/tt-fighter-card-71.jpg",
+        "img/cards/ChingShih/tt-fighter-card-72.jpg",
+        "img/cards/ChingShih/tt-fighter-card-73.jpg",
+        "img/cards/ChingShih/tt-fighter-card-74.jpg",
+        "img/cards/ChingShih/tt-fighter-card-75.jpg",
+        "img/cards/ChingShih/tt-fighter-card-76.jpg",
+        "img/cards/ChingShih/tt-fighter-card-77.jpg"
+      ]
+    },
+    "WongFeiHung": {
+      "board": "img/fighters/tt-fighter-WongFeiHung.jpg",
+      "draft": "img/draft-cards/tt-draft-WongFeiHung.jpg",
+      "cards": [
+        "img/cards/WongFeiHung/tt-fighter-card-80.jpg",
+        "img/cards/WongFeiHung/tt-fighter-card-81.jpg",
+        "img/cards/WongFeiHung/tt-fighter-card-82.jpg",
+        "img/cards/WongFeiHung/tt-fighter-card-83.jpg",
+        "img/cards/WongFeiHung/tt-fighter-card-84.jpg",
+        "img/cards/WongFeiHung/tt-fighter-card-85.jpg",
+        "img/cards/WongFeiHung/tt-fighter-card-86.jpg"
+      ]
+    },
+    "MiladyDeWinter": {
+      "board": "img/fighters/tt-fighter-MiladyDeWinter.jpg",
+      "draft": "img/draft-cards/tt-draft-MiladyDeWinter.jpg",
+      "cards": [
+        "img/cards/MiladyDeWinter/tt-fighter-card-90.jpg",
+        "img/cards/MiladyDeWinter/tt-fighter-card-91.jpg",
+        "img/cards/MiladyDeWinter/tt-fighter-card-92.jpg",
+        "img/cards/MiladyDeWinter/tt-fighter-card-93.jpg",
+        "img/cards/MiladyDeWinter/tt-fighter-card-94.jpg",
+        "img/cards/MiladyDeWinter/tt-fighter-card-95.jpg",
+        "img/cards/MiladyDeWinter/tt-fighter-card-96.jpg"
+      ]
+    },
+    "TheWildBunch": {
+      "board": "img/fighters/tt-fighter-TheWildBunch.jpg",
+      "draft": "img/draft-cards/tt-draft-TheWildBunch.jpg",
+      "cards": [
+        "img/cards/TheWildBunch/tt-fighter-card-100.jpg",
+        "img/cards/TheWildBunch/tt-fighter-card-101.jpg",
+        "img/cards/TheWildBunch/tt-fighter-card-102.jpg",
+        "img/cards/TheWildBunch/tt-fighter-card-103.jpg",
+        "img/cards/TheWildBunch/tt-fighter-card-104.jpg",
+        "img/cards/TheWildBunch/tt-fighter-card-105.jpg",
+        "img/cards/TheWildBunch/tt-fighter-card-106.jpg"
+      ]
+    },
+    "Shango": {
+      "board": "img/fighters/tt-fighter-Shango.jpg",
+      "draft": "img/draft-cards/tt-draft-Shango.jpg",
+      "cards": [
+        "img/cards/Shango/tt-fighter-card-110.jpg",
+        "img/cards/Shango/tt-fighter-card-111.jpg",
+        "img/cards/Shango/tt-fighter-card-112.jpg",
+        "img/cards/Shango/tt-fighter-card-113.jpg",
+        "img/cards/Shango/tt-fighter-card-114.jpg",
+        "img/cards/Shango/tt-fighter-card-115.jpg"
+      ]
+    },
+    "BodvarBjarki": {
+      "board": "img/fighters/tt-fighter-BodvarBjarki.jpg",
+      "draft": "img/draft-cards/tt-draft-BodvarBjarki.jpg",
+      "cards": [
+        "img/cards/BodvarBjarki/tt-fighter-card-120.jpg",
+        "img/cards/BodvarBjarki/tt-fighter-card-121.jpg",
+        "img/cards/BodvarBjarki/tt-fighter-card-122.jpg",
+        "img/cards/BodvarBjarki/tt-fighter-card-123.jpg",
+        "img/cards/BodvarBjarki/tt-fighter-card-124.jpg",
+        "img/cards/BodvarBjarki/tt-fighter-card-125.jpg"
+      ],
+      "board_back": "img/fighters/tt-fighter-BodvarBjarki-back.jpg"
+    }
+  }
+}
