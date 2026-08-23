@@ -894,6 +894,7 @@ def _declare(turn: Turn) -> None:
         for op in _ops_of(game, inst, f):
             if op["op"] == "cancel":
                 turn.cancelled[other_seat(seat)] = True
+                turn.note(kind="cancel", seat=seat, target=other_seat(seat))
 
     for seat in (0, 1):
         inst = turn.revealed[seat]
@@ -929,6 +930,19 @@ def _declare(turn: Turn) -> None:
     for name, hook_seat, hook_who in turn.post_declare:
         effects.FIGHTER_FX[name if name in effects.FIGHTER_FX
                            else "brijit_eternal_youth"](turn, hook_seat, hook_who, "late")
+
+    # Record what was thrown BEFORE the damage is queued, so the beat reads in
+    # causal order: cards, then Attacks and Blocks, then the HP that moved. The
+    # targets are stored as lists, not tuples -- beats are persisted, and a tuple
+    # comes back from JSON as a list, so storing tuples makes a reloaded game
+    # differ from a live one in a way nothing would notice until it mattered.
+    for block in turn.blocks:
+        turn.note(kind="block", seat=block["seat"], slot=block["source"][1],
+                  worked=bool(block["worked"]))
+    for atk in turn.attacks:
+        turn.note(kind="attack", seat=atk["seat"], slot=atk["source"][1],
+                  power=atk["power"], negated=bool(atk["negated"]),
+                  targets=[[t[0], t[1]] for t in atk["targets"]])
 
     # Surviving Attacks land. Several sources hitting one fighter is a single
     # Attack of their combined Power, which only shows in the log.
@@ -1012,8 +1026,12 @@ def _resolve_turn(game: dict, revealed: list, doubles=None) -> dict:
         again.cancelled = list(turn.cancelled)
         if not again.cancelled[seat]:
             f = fighter(game, seat, again.active[seat])
+            again.note(kind="again", seat=seat, slot=again.active[seat])
             _run_ops(again, seat, _ops_of(game, revealed[seat], f), "declare")
             for atk in again.attacks:
+                again.note(kind="attack", seat=atk["seat"], slot=atk["source"][1],
+                           power=atk["power"], negated=bool(atk["negated"]),
+                           targets=[[t[0], t[1]] for t in atk["targets"]])
                 if atk["power"] > 0:
                     for tgt in atk["targets"]:
                         again.add_hp(tgt, -atk["power"])

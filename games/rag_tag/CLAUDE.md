@@ -158,23 +158,70 @@ will auto-enrol Rag Tag the moment tiers land, which is exactly when
 
 ## The frontend
 
+Four files: `RagTag.jsx` (the screens), `art.jsx` (every drawn thing),
+`narrate.jsx` (beats → sentences), `RagTag.css`.
+
 `RagTag.jsx` renders cards from their **op lists**, not from text — the generated
 data is mechanics only, so the UI says what a card does in its own vocabulary and
-no second transcription lives in the frontend to drift.
+no second transcription lives in the frontend to drift. The one exception is
+`FX_TEXT` in `art.jsx`: the `fx` ops are the cards the op vocabulary cannot
+express, and rendering the literal op name put the word "Special" on the table.
+Its wording follows the fx docstrings in `effects.py`.
 
 **`you_owe` comes from the server.** A simultaneous game has no "your turn" to read
 off the phase; a client that re-derives it shows the wrong prompt the moment the two
 disagree, which the first draft of this file did.
 
+### THE FIGHT IS STEPPED BY HAND
 The FIGHT! step arrives as `beats` — one entry per turn with both revealed cards and
-every delta — and the ring plays them back with a dwell plus a Skip. Beats live in
-game state, so a reconnect mid-animation re-ships them, and they are **replaced each
-round, never appended**.
+every delta. It used to play itself at a fixed 900ms a turn, which meant the only
+thing worth watching was gone before it could be read. **Every turn now waits for a
+click** (Back / Next turn / To the end), and nothing here drives the server: the
+whole round is resolved and saved before the first card is shown, so stepping is
+pure replay and a reconnect just restarts it. Beats live in game state and are
+**replaced each round, never appended**.
+
+Two consequences worth knowing:
+* **The next prompt is held until the last turn is on screen** (`owes` returns null
+  while `!atEnd`). Otherwise the round's outcome arrives as a question before the
+  player has seen what happened.
+* **A beat is not always a turn.** Setup and instant-bonus beats carry no revealed
+  cards, and counting them made the stage read "Turn 1 of 1" over two empty card
+  slots before anything had been played. `isTurnBeat` is the test, in both
+  `RagTag.jsx` and `narrate.jsx`.
+
+### The log is history, the stage is the moment
+`narrate.jsx` turns a beat's events into sentences, and the SAME function feeds the
+ribbon under the cards and the battle log — so the two cannot disagree. The log
+shows the turns **already stepped past**, not the one on the stage; rendering both
+put the same four sentences on screen twice, ~700px apart, which three independent
+reviewers each called out. Finished rounds are archived as their NARRATED ROWS, not
+as beats, because the text depends on board state that has since moved on.
+
+### Everything visual is drawn in the bundle
+There is no licensed art in the repo (see *Where the data came from*), so `art.jsx`
+carries a hand-authored emblem and accent colour per fighter plus the mechanical
+icon set. Hand-drawn beats a hash — a hashed hue puts the pirate and the devil on
+neighbouring reds. No file is fetched, so nothing can 404 or need a cache-bust.
+
+### Two layout traps, both paid for twice
+* **`baseCss` is not optional.** Rag Tag shipped without it. The shared lobby kit is
+  written against the site theme tokens (`--surface`, `--border`, `--radius`), so
+  every `border: 1px solid var(--border)` in that kit was invalid at
+  computed-value time and resolved to `0px none`. The lobby still laid out, so it
+  read as a design choice rather than a missing import.
+* **`.app` is a COLUMN FLEX container**, and both `.rt-wrap` and the shared
+  `.lby-cols` carry `margin-inline: auto`. Auto margins beat `align-items: stretch`
+  on a flex item, so both shrink-wrapped to their content: the whole game rendered
+  in a ~430px strip on an 834px tablet, and the layout WIDTH CHANGED BETWEEN PHASES
+  because content was driving it. Any centred wrapper inside `.app` needs an
+  explicit `width: 100%`. Dontminion hit this and fixed it the same way;
+  **Spender Duel still has it** (`.duel-lobby-cols`, measured 851px of 1440).
 
 CSS is a real `.css` file imported `?inline` — never a JS template literal. The
 sheet must not set `display`/`grid-template-columns`/`gap` on `.rt-lobby-cols`: it
 is concatenated after the shared one, so a base rule there out-orders the shared
-media rules and pins a phone to three columns.
+media rules and pins a phone to three columns. Width and padding ARE fair game.
 
 ---
 
@@ -185,16 +232,18 @@ media rules and pins a phone to three columns.
 | File | Covers |
 |---|---|
 | `test_fighters` | the generated data: staleness, the closed op vocabulary, deck sizes, every track able to end a fighter |
-| `test_engine` | the rules, mostly by rigging an exact position and resolving ONE turn — a simultaneous game has no "make a move and see" |
+| `test_engine` | the rules, mostly by rigging an exact position and resolving ONE turn — a simultaneous game has no "make a move and see"; plus the beat NARRATION events (attack/block/cancel), which render as an empty log line rather than as any kind of failure |
 | `test_bot` | the soak: whole games over random teams, every fighter forced in, invariants, seat symmetry |
 | `test_server` | rooms, moves, the bot scheduler end to end |
 | `test_ws_auth` | seat identity binding |
 | `test_redaction` | the whole serialized payload of a REAL played game |
 | `test_persist` | compaction round trip, structural proof it did something, resume mid-fight and mid-build |
 
-Frontend: `webapp/test/screens.mjs` §`ragtagFight` (lane B) creates a vs-bot game
+Frontend: `webapp/test/screens.mjs` §`ragtagFight` (lane A) creates a vs-bot game
 and plays a full round in a browser. Mounting the route proves nothing about a
-simultaneous game; only playing one does.
+simultaneous game; only playing one does. It specifically asserts the two things a
+render test would miss: that the fight **does not advance on its own**, and that the
+next decision is **held back** until the last turn is on screen.
 
 **No `test_parity` yet** — it needs the BGA replay fixtures above. It is absent
 rather than skipped, because the repo's rule is that a test which cannot reach its
@@ -207,6 +256,9 @@ state must FAIL, not opt out.
 * The replay parity fixtures, and with them `tools/replay_bga.py` + `test_parity`.
 * Milady's two duplicated Intrigue tokens.
 * A bot with any strength at all, and the difficulty picker that comes with it.
+* The lobby empty states, the emoji Rules glyph and the History column width are
+  all the SHARED kit (`shared/lobby.jsx`), flagged repeatedly by the visual review
+  but owned by seven games — a change there is a seven-game change.
 * The 14 expansion fighters BGA also serves (Arthur's Legacy and one more) — the
   importer and the op vocabulary already handle their shape; only the transcription
   and their special rules are missing.

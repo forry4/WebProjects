@@ -533,3 +533,69 @@ def test_the_game_state_stays_json_safe():
     round_trip = json.loads(json.dumps(game))
     assert round_trip["winner"] == game["winner"]
     assert round_trip["fighters"] == game["fighters"]
+
+
+# ------------------------------------------------------- beat narration
+# The beat is what the client replays, and it used to carry only the DELTAS --
+# so the UI could say a fighter lost 3 HP but never that an Attack caused it,
+# who threw it, or that a Block is why nothing happened. A missing event here
+# renders as a silently empty log line rather than as any kind of failure,
+# which is exactly why it is asserted rather than eyeballed.
+
+def _events(game, kind):
+    return [e for e in game["beats"][-1]["events"] if e["kind"] == kind]
+
+
+def test_the_beat_records_the_attack_that_caused_the_damage():
+    game = rig(["golem", "joan"], ["shango", "mordred"], deck0=[11], deck1=[113])
+    f(game, 0, 0)["power"] = 4
+    set_hp(game, 1, 0, 10)
+    one_turn(game)
+
+    atks = _events(game, "attack")
+    assert len(atks) == 1, f"one Attack was thrown, beat recorded {len(atks)}"
+    assert atks[0]["seat"] == 0 and atks[0]["power"] == 4
+    assert atks[0]["negated"] is False
+    assert atks[0]["targets"] == [[1, 0]], "targets survive as lists, not tuples"
+
+    # And the HP event it explains is still there, AFTER it: the beat reads in
+    # causal order, so a client can narrate cause then effect without sorting.
+    kinds = [e["kind"] for e in game["beats"][-1]["events"]]
+    assert kinds.index("attack") < kinds.index("hp")
+
+
+def test_the_beat_records_a_block_and_marks_what_it_swallowed():
+    game = rig(["mordred", "joan"], ["shango", "golem"],
+               deck0=[23], deck1=[112])         # Cloak of Shadow vs Lightning Strike
+    f(game, 1, 0)["power"] = 4
+    set_hp(game, 0, 0, 10)
+    set_hp(game, 0, 1, 10)
+    one_turn(game)
+
+    blocks = _events(game, "block")
+    assert len(blocks) == 1 and blocks[0]["seat"] == 0
+    assert blocks[0]["worked"] is True, "it caught something and must say so"
+    atks = _events(game, "attack")
+    assert atks and all(a["negated"] for a in atks), (
+        "every arm of the Strike is recorded, and every one is marked negated -- "
+        "otherwise the log shows damage that never landed")
+
+
+def test_a_lonely_block_is_recorded_as_having_caught_nothing():
+    game = rig(["mordred", "joan"], ["shango", "golem"],
+               deck0=[23], deck1=[113])         # Cauterize throws nothing
+    set_hp(game, 0, 0, 10)
+    one_turn(game)
+    blocks = _events(game, "block")
+    assert len(blocks) == 1 and blocks[0]["worked"] is False
+
+
+def test_the_beat_records_a_cancel():
+    game = rig(["maman_brijit", "joan"], ["golem", "mordred"],
+               deck0=[65], deck1=[11])         # The Black Rooster vs Fist of Clay
+    f(game, 1, 0)["power"] = 4
+    set_hp(game, 0, 0, 10)
+    one_turn(game)
+    cancels = _events(game, "cancel")
+    assert len(cancels) == 1, "the card that contributed nothing must say why"
+    assert cancels[0]["seat"] == 0 and cancels[0]["target"] == 1

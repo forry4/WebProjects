@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { baseCss } from "../../shared/theme.js";
 import ragtagCssText from "./RagTag.css?inline";
 import RagTagRules from "./rules.jsx";
 import {
@@ -9,6 +10,8 @@ import {
   readLobbyCache, writeLobbyCache,
 } from "../../shared/lobby.jsx";
 import { buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
+import { Sigil, Icon, sigilOf, iconForOp, FX_TEXT } from "./art.jsx";
+import { narrateBeat, narrateRound } from "./narrate.jsx";
 
 /* Rag Tag — a two-player auto battler.
  *
@@ -28,11 +31,20 @@ const WS_BASE = WS_RAW.replace(/\/ws$/, "");
 const RT_WS = `${WS_BASE}/ragtag/ws`;
 const RT_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/ragtag");
 
+/* baseCss FIRST, and it is not optional: the shared lobby kit is written
+ * against the site theme tokens (--surface, --border, --radius, --text...).
+ * Without it every `border: 1px solid var(--border)` in that kit is invalid at
+ * computed-value time and silently resolves to `0px none` — the lobby still
+ * lays out, so it looks like a design choice rather than a missing import.
+ * Rag Tag shipped without it; the other five games all have it. */
 const ragtagStyles =
-  lobbyCss + gameMenuCss + createModalCss + lobbyCreateRowCss + rulesModalCss + ragtagCssText;
+  baseCss + lobbyCss + gameMenuCss + createModalCss + lobbyCreateRowCss
+  + rulesModalCss + ragtagCssText;
 
-//: How long one turn of the fight sits on screen before the next flips.
-const BEAT_MS = 900;
+/* There is deliberately NO dwell timer. The fight used to play itself at a
+ * fixed 900ms a turn, which meant the one thing worth watching — what the two
+ * cards did to each other — was gone before it could be read. Every turn now
+ * waits for a click, and the log keeps what has already gone past. */
 
 function timeAgo(ts) {
   if (!ts) return "";
@@ -114,7 +126,7 @@ function opWords(op) {
     case "spirit": return "+1 Spirit";
     case "if": return `If ${condWords(op.cond)}: ${op.then.map(opWords).join(", ")}`
       + (op.else ? ` — else ${op.else.map(opWords).join(", ")}` : "");
-    case "fx": return "Special";
+    case "fx": return FX_TEXT[op.name] || "Special";
     default: return op.op;
   }
 }
@@ -147,47 +159,11 @@ function cardText(card) {
   return [...main, ...bonus].join(" · ");
 }
 
-/* ── Board pieces ─────────────────────────────────────────────────────── */
-
-function FighterCard({ fid, state, board, active, struck }) {
-  if (!state || !board) return <div className="rt-fighter" />;
-  const track = trackFor(state, board);
-  const hpNow = spaceValue(track, state.hp);
-  const hpMax = Math.max(0, ...track.filter((s) => s.kind === "hp").map((s) => s.hp));
-  const ko = track.length && state.hp != null && track[state.hp]?.kind === "ko";
-  const chips = [];
-  for (const [name, n] of Object.entries(state.tokens || {})) {
-    if (name === "serpent_face") {
-      chips.push(<span className="rt-chip" key={name}>{n ? "black" : "white"} serpent</span>);
-      continue;
-    }
-    if (n > 0) chips.push(<span className="rt-chip" key={name}><b>{n}</b> {name}</span>);
-  }
-  if (state.planted > 0) chips.push(<span className="rt-chip" key="planted"><b>{state.planted}</b> planted</span>);
-  for (const [name, n] of Object.entries(state.tracks || {})) {
-    chips.push(
-      <span className="rt-chip" key={`t-${name}`}>
-        {name.replace(/_/g, " ")} <b>{name === "divine_voice" ? (n < 0 ? "halo" : n + 1) : n}</b>
-      </span>);
-  }
-  return (
-    <div className={`rt-fighter${active ? " rt-active" : ""}${ko ? " rt-ko" : ""}${struck ? " rt-struck" : ""}`}>
-      <div className="rt-fname">
-        {board.name}
-        {state.face === "berserker_bear" && <span className="rt-tag">BEAR</span>}
-        {state.character && <span className="rt-tag">{state.character}</span>}
-      </div>
-      <div className="rt-stats">
-        <span className="rt-hp">{ko ? "KO" : hpNow}<small>/{hpMax}</small></span>
-        <span className="rt-pw">{state.power}<small> pw</small></span>
-      </div>
-      <div className="rt-bar">
-        <span style={{ width: `${hpMax ? Math.max(0, Math.min(100, (hpNow / hpMax) * 100)) : 0}%` }} />
-      </div>
-      {chips.length > 0 && <div className="rt-chips">{chips}</div>}
-    </div>
-  );
-}
+/* ── Board pieces ───────────────────────────────────────────────────────
+ * There is no licensed art in this repo, so a fighter's identity is drawn:
+ * an emblem and an accent colour from art.jsx, applied as CSS custom
+ * properties so the whole board tints from one place.
+ */
 
 function trackFor(state, board) {
   if (state.face === "berserker_bear" && board.back) return board.back.hp_track || [];
@@ -198,17 +174,204 @@ function trackFor(state, board) {
   return board.hp_track || [];
 }
 
+/* The biggest number on a fighter's health track. The Fey Folk have no track of
+   their own -- they have three Characters -- so theirs is the best of the three,
+   which is what "how much can this survive" means for them. */
+/* A round's beats include ones that are not TURNS: the instant-bonus beat at
+   setup, and anything the engine records before the first card is flipped. They
+   carry no revealed cards. Counting them made the stage read "Turn 1 of 1"
+   before a single card had been played, over two empty card slots. */
+function isTurnBeat(beat) {
+  return !!beat && (beat.insts || []).some((x) => x != null);
+}
+
+function maxHpOf(board) {
+  if (!board) return null;
+  const tracks = board.characters ? board.characters.map((c) => c.hp_track)
+    : [board.hp_track, board.back && board.back.hp_track].filter(Boolean);
+  let best = 0;
+  for (const tr of tracks) {
+    for (const sp of tr || []) if (sp.kind === "hp" && sp.hp > best) best = sp.hp;
+  }
+  return best || null;
+}
+
 function spaceValue(track, idx) {
   if (!track || idx == null || !track[idx]) return 0;
   return track[idx].kind === "hp" ? track[idx].hp : 0;
 }
 
-function TeamSide({ label, mine, team, fighters, catalog, activeSlot, struckSlots }) {
+/* The health track.
+ *
+ * This was a row of one box per space, which is how the board is printed — and
+ * it did not survive contact with the roster. Health ranges from 3 (a Fey Folk
+ * Character) to 25 (the Golem), so the same component drew four fat slabs on one
+ * board and twenty-five hairlines on the next, side by side in the same panel,
+ * and the two could not be compared at a glance. Worse, colouring each space by
+ * what it does made a FULL health bar render as a red-amber-green ramp, which
+ * reads as a damaged bar or a rendering fault.
+ *
+ * So: one bar, filled in proportion, one colour chosen by how much health is
+ * left, and its LENGTH scaled to how tough this fighter is against the toughest
+ * in the game — otherwise a 5 HP fighter and a 25 HP fighter both draw a full
+ * bar and relative durability, the thing a 2v2 brawler is read on, is invisible.
+ *
+ * The special spaces (KO, Stop, revive, Spirit) were drawn on it as notches and
+ * that was WRONG, four review rounds running: they are per-fighter, so one bar
+ * came out striped while the three beside it were smooth, and every reader
+ * called it a rendering bug rather than information. A bar with no legend cannot
+ * carry them. The marker halting on a Stop already shows the player what a Stop
+ * does, at the moment it matters.
+ */
+function HealthTrack({ track, at, scale }) {
+  if (!track || track.length < 2 || at == null) return null;
+  const top = track.length - 1;
+  const pct = Math.max(0, Math.min(100, (at / top) * 100));
+  const hpMax = Math.max(0, ...track.filter((sp) => sp.kind === "hp").map((sp) => sp.hp));
+  const hpNow = spaceValue(track, at);
+  const frac = hpMax ? hpNow / hpMax : 0;
+  const tone = frac >= 0.6 ? "hi" : frac >= 0.3 ? "mid" : "lo";
+  // How long this fighter's bar is against the toughest fighter in the game.
+  // Without it a 5 HP fighter at full health and a 25 HP fighter at full health
+  // drew the identical full bar, so relative durability -- the thing a 2v2
+  // brawler is read on -- was invisible.
+  const cap = Math.max(18, Math.min(100, (hpMax / (scale || hpMax || 1)) * 100));
+
+  return (
+    <div className="rt-track" role="img" aria-label={`${hpNow} of ${hpMax} health`}>
+      <span className={`rt-track-cap rt-track-${tone}`} style={{ width: `${cap}%` }}>
+        <span className="rt-track-fill" style={{ width: `${pct}%` }} />
+      </span>
+    </div>
+  );
+}
+
+function FighterCard({ fid, state, board, active, fx, beatKey, scale }) {
+  if (!state || !board) return <div className="rt-fighter rt-fighter-ghost" />;
+  const sig = sigilOf(fid);
+  const track = trackFor(state, board);
+  const hpNow = spaceValue(track, state.hp);
+  const hpMax = Math.max(0, ...track.filter((s) => s.kind === "hp").map((s) => s.hp));
+  const here = track[state.hp];
+  const ko = !!here && here.kind === "ko";
+  const spirit = !!here && here.kind === "spirit";
+  // The Fey Folk with all three Characters gone have NO track at all: they are
+  // still in the fight, but they cannot lose or recover health. Without this
+  // they rendered as "0 /0" with the bar element missing entirely, still wearing
+  // the active glow, and with their Character tag silently replaced by the
+  // board's first trait -- three separate lies about the same fighter.
+  const spent = board.characters && !state.character;
+
+  const chips = [];
+  const tok = state.tokens || {};
+  for (const [name, n] of Object.entries(tok)) {
+    // `serpent` and `serpent_face` are ONE physical token and which way up it
+    // is, not two things to hold. Rendering both read as "1 serpent" beside
+    // "black serpent" on the same board.
+    if (name === "serpent_face") continue;
+    if (name === "serpent") {
+      if (n > 0) {
+        chips.push(
+          <span className="rt-chip" key={name}>
+            {tok.serpent_face ? "black" : "white"} serpent
+          </span>);
+      }
+      continue;
+    }
+    if (n > 0) {
+      chips.push(
+        <span className={`rt-chip${name === "aflame" ? " rt-chip-fire" : ""}`} key={name}>
+          {name === "aflame" && <Icon name="ignite" />}
+          {name.replace(/_/g, " ")} <b>{n}</b>
+        </span>);
+    }
+  }
+  if (state.planted > 0) {
+    chips.push(
+      <span className="rt-chip" key="planted">
+        <Icon name="plant_scheme" />planted <b>{state.planted}</b>
+      </span>);
+  }
+  // Name then value, everywhere, and never a chip whose whole message is that
+  // the player has none of something.
+  for (const [name, n] of Object.entries(state.tracks || {})) {
+    const shown = name === "divine_voice" ? (n < 0 ? "halo" : n + 1) : n;
+    if (shown === 0) continue;
+    chips.push(
+      <span className="rt-chip" key={`t-${name}`}>
+        {name.replace(/_/g, " ")} <b>{shown}</b>
+      </span>);
+  }
+
+  const cls = ["rt-fighter"];
+  if (active && !ko && !spirit && !spent) cls.push("rt-active");
+  if (ko || spirit || spent) cls.push("rt-ko");
+  if (fx?.hp < 0) cls.push("rt-struck");
+  if (fx?.hp > 0) cls.push("rt-mended");
+
+  return (
+    <div className={cls.join(" ")} style={{ "--f-ink": sig.ink, "--f-deep": sig.deep }}>
+      <div className="rt-fighter-glow" aria-hidden="true" />
+      <div className="rt-fhd">
+        <span className="rt-crest"><Sigil fid={fid} /></span>
+        <span className="rt-fname-wrap">
+          <span className="rt-fname">{board.name}</span>
+          <span className="rt-ftags">
+            {state.face === "berserker_bear"
+              ? <span className="rt-tag rt-tag-hot">Bear</span>
+              : spent
+                ? <span className="rt-tag rt-tag-cold">all Spirits</span>
+                : state.character
+                  ? <span className="rt-tag rt-cap">{state.character}</span>
+                  : (board.tags || []).slice(0, 1).map((t) => <span className="rt-tag" key={t}>{t}</span>)}
+          </span>
+        </span>
+      </div>
+
+      <div className="rt-stats">
+        <span className="rt-stat rt-hp">
+          <Icon name="hp" />
+          <b>{ko ? "KO" : spirit || spent ? "—" : hpNow}</b>
+          {!ko && !spirit && !spent && <small>{`/${hpMax}`}</small>}
+        </span>
+        <span className="rt-stat rt-pw">
+          <Icon name="power" /><b>{state.power}</b><small>Power</small>
+        </span>
+      </div>
+
+      {spent
+        ? <div className="rt-track rt-track-gone" role="img" aria-label="no health track" />
+        : <HealthTrack track={track} at={state.hp} scale={scale} />}
+      {/* Reserved so a chip appearing mid-round does not shift the whole
+          column below it. */}
+      <div className="rt-chips">{chips}</div>
+
+      {/* The number that floats off a fighter when they are hit. Keyed on the
+          beat so stepping back and forward replays it instead of showing a
+          stale one frozen at the end of its animation. */}
+      {!!fx?.hp && (
+        <span className={`rt-pop ${fx.hp < 0 ? "rt-pop-hit" : "rt-pop-heal"}`} key={`hp${beatKey}`}>
+          {fx.hp < 0 ? "" : "+"}{fx.hp}
+        </span>
+      )}
+      {!!fx?.power && (
+        <span className="rt-pop rt-pop-pw" key={`pw${beatKey}`}>
+          {fx.power > 0 ? "+" : ""}{fx.power} pw
+        </span>
+      )}
+      {(ko || spirit || spent) && (
+        <span className="rt-kostamp">{spent ? "Spent" : spirit ? "Spirit" : "KO"}</span>
+      )}
+    </div>
+  );
+}
+
+function TeamSide({ label, mine, team, fighters, catalog, activeSlot, fxSlots, beatKey, scale }) {
   return (
     <div className={`rt-side${mine ? " rt-mine" : ""}`}>
       <div className="rt-side-hd">
         <span className="rt-side-name">{label}</span>
-        <span>{mine ? "your team" : "their team"}</span>
+        <span className="rt-side-tag">{mine ? "your team" : "their team"}</span>
       </div>
       <div className="rt-fighters">
         {(team || []).map((fid, slot) => (
@@ -218,7 +381,9 @@ function TeamSide({ label, mine, team, fighters, catalog, activeSlot, struckSlot
             state={fighters?.[slot]}
             board={catalog?.fighters?.[fid]}
             active={activeSlot === slot}
-            struck={struckSlots?.has(slot)}
+            fx={fxSlots?.[slot]}
+            beatKey={beatKey}
+            scale={scale}
           />
         ))}
       </div>
@@ -226,30 +391,58 @@ function TeamSide({ label, mine, team, fighters, catalog, activeSlot, struckSlot
   );
 }
 
-function eventWords(ev, catalog, teams) {
-  const name = (seat, slot) => catalog?.fighters?.[teams?.[seat]?.[slot]]?.name || "?";
-  switch (ev.kind) {
-    case "hp": {
-      const down = ev.to < ev.from;
-      return <span className={down ? "rt-ev-hit" : "rt-ev-heal"}>
-        {name(ev.seat, ev.slot)} {down ? "▼" : "▲"}
-      </span>;
-    }
-    case "power":
-      return <span className="rt-ev-pw">{name(ev.seat, ev.slot)} power {ev.from}→{ev.to}</span>;
-    case "ko": return <span className="rt-ev-hit">{name(ev.seat, ev.slot)} is KO'd</span>;
-    case "transform": return <span>{name(ev.seat, ev.slot)} becomes the Bear</span>;
-    case "spirit": return <span>{ev.character} becomes a Spirit</span>;
-    case "poison": return <span className="rt-ev-hit">poison ({ev.damage})</span>;
-    case "execution": return <span className="rt-ev-hit">execution ({ev.damage})</span>;
-    case "scheme_reveal": return <span>Intrigue: {String(ev.effect).replace(/_/g, " ")}</span>;
-    case "token": return <span>{ev.token} token</span>;
-    case "track": return <span>{String(ev.track).replace(/_/g, " ")} {ev.from}→{ev.to}</span>;
-    case "revive": return <span className="rt-ev-heal">back from the dead</span>;
-    case "removed": return <span>a card leaves the game</span>;
-    case "instant_bonus": return <span>Instant Bonus</span>;
-    default: return null;
+/* A card as it sits in the ring.
+ *
+ * Rendered from the op list, so the picture and the words come from the same
+ * source and cannot drift. The emblem gets a proper ART WINDOW at the top rather
+ * than being blown up as a watermark behind the text: as a watermark it was
+ * clipped by whichever card edge it happened to reach, sat under the body copy
+ * greying it out mid-sentence, and landed differently on every card — three
+ * separate reviewers read it as a broken background image.
+ */
+function PlayCard({ card, catalog, flipKey, side }) {
+  const fid = card?.fighter;
+  const sig = sigilOf(fid);
+  const board = catalog?.fighters?.[fid];
+
+  if (!card) {
+    return (
+      <div className={`rt-card rt-card-empty rt-card-${side}`}>
+        <div className="rt-card-art rt-card-art-empty" />
+        <div className="rt-card-body">
+          <span className="rt-card-none">No card</span>
+        </div>
+      </div>
+    );
   }
+
+  const ops = card.ops || [];
+  const bonuses = ops.filter((op) => op.success);
+  return (
+    <div className={`rt-card rt-card-${side}`} key={flipKey}
+      style={{ "--f-ink": sig.ink, "--f-deep": sig.deep }}>
+      <div className="rt-card-art">
+        <Sigil fid={fid} />
+        {card.instant_bonus && <span className="rt-card-flag">instant bonus</span>}
+      </div>
+      <div className="rt-card-body">
+        <div className="rt-card-hd">
+          <span className="rt-card-name">{card.name}</span>
+          <span className="rt-card-by">{board?.name || ""}</span>
+        </div>
+        <ul className="rt-card-ops">
+          {ops.map((op, i2) => (
+            <li key={i2}><Icon name={iconForOp(op)} /><span>{opWords(op)}</span></li>
+          ))}
+          {bonuses.map((op, i2) => (
+            <li className="rt-card-bonus" key={`b${i2}`}>
+              <Icon name="fx" /><span>Success: {op.success.map(opWords).join(", ")}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
 }
 
 /* ── The component ───────────────────────────────────────────────────────── */
@@ -273,9 +466,10 @@ export default function RagTag({ myId, authUser, onExit }) {
   // Local build-step selection, before it is submitted.
   const [buildPick, setBuildPick] = useState(null);
   const [buildPos, setBuildPos] = useState(null);
-  // Playback cursor through this round's beats.
+  // Playback cursor through this round's beats, advanced by hand.
   const [beatIdx, setBeatIdx] = useState(0);
-  const [skipBeats, setSkipBeats] = useState(false);
+  // Rounds already fought, kept so the log is the whole fight and not just now.
+  const [pastRounds, setPastRounds] = useState([]);
 
   const [historyShown, historyMore] = useProgressiveList(history);
   const urlAttemptRef = useRef(null);
@@ -426,28 +620,158 @@ export default function RagTag({ myId, authUser, onExit }) {
 
   /* ── Beat playback ──
    * `beats` is replaced wholesale each round, so the cursor resets when the
-   * round does. Skip jumps to the end rather than cancelling: the final state is
-   * already applied server-side, the animation is only catching the eye up.
+   * round does. Nothing here drives the SERVER: the fight is already resolved
+   * and saved by the time the first card is shown, so stepping through it is
+   * pure replay and a reconnect mid-round simply starts the replay again.
+   *
+   * The prompt for the next decision is held back until the last turn is on
+   * screen. Otherwise the round's outcome arrives as a question before the
+   * player has seen what happened, which is the exact thing being fixed.
    */
   const beats = game?.beats || [];
-  useEffect(() => { setBeatIdx(0); setSkipBeats(false); }, [game?.round]);
+  const teams = game?.teams || [[], []];
+  const cards = catalog?.cards || {};
+  const instances = game?.instances || [];
+  const cardOf = useCallback(
+    (inst) => (inst == null ? null : cards[String(instances[inst]?.cid)] || null),
+    [cards, instances]);
+
+  useEffect(() => { setBeatIdx(0); }, [game?.round]);
+  useEffect(() => { setPastRounds([]); setBeatIdx(0); }, [roomId]);
+
+  /* The cursor walks the TURNS, not the beats. A round's beats also include
+     setup and instant-bonus entries with no revealed cards, and stepping onto
+     one showed the stage as "No card VS No card" -- an empty duel that the
+     player had to click past before the fight started. Those events are not
+     lost: they go straight into the log, which walks the full beat list. */
+  const turnBeats = useMemo(() => beats.filter(isTurnBeat), [beats]);
+  const lastIdx = Math.max(0, turnBeats.length - 1);
+  const shownBeat = turnBeats.length ? turnBeats[Math.min(beatIdx, lastIdx)] : null;
+  const atEnd = turnBeats.length === 0 || beatIdx >= lastIdx;
+
+  /* Where turn `n` sits in the full beat list, so the log can include whatever
+     preceded it. */
+  const beatPosOf = useCallback((n) => {
+    let seen = -1;
+    for (let k = 0; k < beats.length; k++) {
+      if (isTurnBeat(beats[k]) && ++seen === n) return k;
+    }
+    return beats.length - 1;
+  }, [beats]);
+
+  /* Everything narration cannot work out for itself. The track is looked up
+     live rather than captured, because it CHANGES: Bödvar flips onto a second
+     board and a Fey Folk Character brings their own. */
+  const narrCtx = useMemo(() => ({
+    name: (seat, slot) => catalog?.fighters?.[teams?.[seat]?.[slot]]?.name || "",
+    track: (seat, slot) => {
+      const st = game?.fighters?.[seat]?.[slot];
+      const bd = catalog?.fighters?.[teams?.[seat]?.[slot]];
+      return st && bd ? trackFor(st, bd) : [];
+    },
+    mine: (seat) => seat === mySeat,
+    cardName: (inst) => cardOf(inst)?.name || null,
+  }), [catalog, teams, game?.fighters, mySeat, cardOf]);
+
+  const beatLines = useMemo(() => narrateBeat(shownBeat, narrCtx), [shownBeat, narrCtx]);
+
+  /* The log shows the turns ALREADY STEPPED PAST, not the one on the stage.
+     Showing both put the same four sentences on screen twice, ~700px apart,
+     which every reviewer called out independently. The exception is the last
+     turn of the round: once there is nothing further to step to, the log takes
+     it as well, so a round is never left with its final turn unrecorded. */
+  const roundRows = useMemo(
+    () => narrateRound(beats,
+      over && atEnd ? beats.length - 1 : beatPosOf(beatIdx) - 1, narrCtx),
+    [beats, beatIdx, atEnd, over, beatPosOf, narrCtx]);
+  const fullRows = useMemo(() => narrateRound(beats, beats.length - 1, narrCtx), [beats, narrCtx]);
+
+  /* Finished rounds are kept as their NARRATED rows rather than as beats: the
+     text depends on board state that has since moved on, so re-narrating an old
+     round later would quietly retell it wrong. */
+  const carryRef = useRef({ round: null, rows: [] });
   useEffect(() => {
-    if (skipBeats) { setBeatIdx(beats.length); return undefined; }
-    if (beatIdx >= beats.length) return undefined;
-    const t = setTimeout(() => setBeatIdx((i) => i + 1), BEAT_MS);
-    return () => clearTimeout(t);
-  }, [beatIdx, beats.length, skipBeats]);
+    const prev = carryRef.current;
+    if (prev.round != null && prev.round !== game?.round && prev.rows.length) {
+      setPastRounds((old) => [...old, { round: prev.round, rows: prev.rows }]);
+    }
+    carryRef.current = { round: game?.round, rows: [] };
+  }, [game?.round]);
+  useEffect(() => {
+    if (carryRef.current.round === game?.round) carryRef.current.rows = fullRows;
+  }, [fullRows, game?.round]);
 
-  const shownBeat = beats[Math.min(beatIdx, beats.length - 1)] || null;
-  const animating = beatIdx < beats.length;
+  /* Which card each fighter opens with. "Who leads?" turns on exactly this and
+     used to render "leads the round" under BOTH options -- a template string
+     with the variable left out. */
+  /* The toughest fighter in the game, so every health bar can be drawn to the
+     same scale. Derived from the catalog rather than hardcoded so the next
+     expansion's fighters rescale the bars instead of overflowing them. */
+  const hpScale = useMemo(() => Math.max(1, ...Object.values(catalog?.fighters || {})
+    .map(maxHpOf).filter(Boolean)), [catalog]);
 
-  const struckSlots = useMemo(() => {
-    const out = { 0: new Set(), 1: new Set() };
-    for (const ev of shownBeat?.events || []) {
-      if (ev.kind === "hp" && ev.to < ev.from) out[ev.seat].add(ev.slot);
+  const startingCards = useMemo(() => {
+    const out = {};
+    for (const c of Object.values(catalog?.cards || {})) {
+      if (c.starting && !out[c.fighter]) out[c.fighter] = c;
     }
     return out;
-  }, [shownBeat]);
+  }, [catalog]);
+
+  const logRef = useRef(null);
+  useEffect(() => {
+    const el = logRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [roundRows.length, pastRounds.length]);
+
+  /* What each fighter should show for THIS beat: the number that floats off
+     them, and whether the board shakes. Summed per fighter, because two
+     sources hitting one marker is one movement. */
+  const fxSlots = useMemo(() => {
+    const out = { 0: {}, 1: {} };
+    for (const ev of shownBeat?.events || []) {
+      const bucket = out[ev.seat];
+      if (!bucket || ev.slot == null) continue;
+      const cur = bucket[ev.slot] || {};
+      if (ev.kind === "hp") {
+        const st = game?.fighters?.[ev.seat]?.[ev.slot];
+        const bd = catalog?.fighters?.[teams?.[ev.seat]?.[ev.slot]];
+        const tr = st && bd ? trackFor(st, bd) : [];
+        const a = tr[ev.from], b = tr[ev.to];
+        const d = a && b && a.kind === "hp" && b.kind === "hp"
+          ? b.hp - a.hp : ev.to - ev.from;
+        bucket[ev.slot] = { ...cur, hp: (cur.hp || 0) + d };
+      } else if (ev.kind === "power") {
+        bucket[ev.slot] = { ...cur, power: (cur.power || 0) + (ev.to - ev.from) };
+      }
+    }
+    return out;
+  }, [shownBeat, catalog, teams, game?.fighters]);
+
+  /* What the round actually cost, totalled across every turn in it. The fight
+     used to just stop -- the only sign it had ended was a button going grey. */
+  const roundTally = useMemo(() => {
+    const byWho = new Map();
+    for (const beat of beats) {
+      for (const ev of beat.events || []) {
+        if (ev.kind !== "hp" || ev.slot == null) continue;
+        const bd = catalog?.fighters?.[teams?.[ev.seat]?.[ev.slot]];
+        const st = game?.fighters?.[ev.seat]?.[ev.slot];
+        const tr = st && bd ? trackFor(st, bd) : [];
+        const a = tr[ev.from], b = tr[ev.to];
+        const d = a && b && a.kind === "hp" && b.kind === "hp"
+          ? b.hp - a.hp : ev.to - ev.from;
+        const key = `${ev.seat}-${ev.slot}`;
+        byWho.set(key, (byWho.get(key) || 0) + d);
+      }
+    }
+    return [...byWho.entries()]
+      .filter(([, n]) => n !== 0)
+      .map(([key, n]) => {
+        const [seat, slot] = key.split("-").map(Number);
+        return { key, n, dir: n < 0 ? "down" : "up", name: narrCtx.name(seat, slot) };
+      });
+  }, [beats, catalog, teams, game?.fighters, narrCtx]);
 
   /* ── Moves ── */
   const sendMove = useCallback((move) => send({ action: "move", move }), [send]);
@@ -457,9 +781,10 @@ export default function RagTag({ myId, authUser, onExit }) {
   // shows the wrong prompt the moment the two disagree.
   const owes = useMemo(() => {
     if (!game || over || mySeat < 0 || !game.you_owe) return null;
+    if (!atEnd) return null;           // let them finish watching the fight
     if (game.pending_is_yours) return "pending";
     return game.phase;                 // draft | order | build
-  }, [game, over, mySeat]);
+  }, [game, over, mySeat, atEnd]);
 
   useEffect(() => { setBuildPick(null); setBuildPos(null); }, [game?.round, game?.phase]);
 
@@ -499,8 +824,8 @@ export default function RagTag({ myId, authUser, onExit }) {
               ]} />
             </CmRow>
             <span className="cm-hint">
-              Rag Tag is head-to-head. The bot picks at random for now — it is here so
-              the game can be played, not to give you a hard time.
+              Two fighters each, drafted. Both players reveal at the same time, and the
+              deck is never shuffled.
             </span>
             <div className="cm-footer">
               <span className="cm-summary">
@@ -625,12 +950,34 @@ export default function RagTag({ myId, authUser, onExit }) {
   }
 
   /* ── The board ── */
-  const teams = game?.teams || [[], []];
   const myTeam = mySeat >= 0 ? teams[mySeat] : [];
   const theirTeam = theirSeat >= 0 ? teams[theirSeat] : [];
-  const cards = catalog?.cards || {};
-  const instances = game?.instances || [];
-  const cardOf = (inst) => (inst == null ? null : cards[String(instances[inst]?.cid)]);
+  // Nothing empty is rendered before the bell: the draft used to sit under two
+  // hollow team headers and a 200px box reading "The bell has not rung yet.",
+  // which pushed the only decision on the screen most of a phone-height down.
+  const fightOn = turnBeats.length > 0;
+  const teamsKnown = (teams?.[0]?.length || 0) > 0 && (teams?.[1]?.length || 0) > 0;
+
+  /* The instant-bonus beat is a real beat but NOT a turn -- it carries turn -1
+     and no cards. Counting it made a two-turn round read "Turn 3 of 3". */
+  const realTurns = turnBeats.length;
+
+  const turnLabel = realTurns
+    ? `Turn ${Math.min(beatIdx, lastIdx) + 1} of ${realTurns}` : "—";
+
+  const logRow = (row) => (row.kind === "turn"
+    ? (
+      <div className="rt-log-turn" key={row.key}>
+        <span className="rt-log-turn-n">{row.turn == null ? "Setup" : `Turn ${row.turn}`}</span>
+        {row.cards.filter(Boolean).length > 0 && (
+          <span className="rt-log-turn-cards">{row.cards.filter(Boolean).join(" · ")}</span>
+        )}
+      </div>
+    ) : (
+      <div className={`rt-log-line rt-tone-${row.tone}`} key={row.key}>
+        <Icon name={row.icon} /><span>{row.text}</span>
+      </div>
+    ));
 
   return (
     <div className="app ragtag">
@@ -647,193 +994,356 @@ export default function RagTag({ myId, authUser, onExit }) {
         ]} />}
       />
       <div className="rt-wrap">
-        {!connected && <div className="rt-waitline">Reconnecting…</div>}
+        {!connected && <div className="rt-waitline rt-warn">Reconnecting…</div>}
 
-        <div className="rt-teams">
-          <TeamSide
-            label={names[game?.seats?.[theirSeat]] || "Opponent"}
-            team={theirTeam}
-            fighters={game?.fighters?.[theirSeat]}
-            catalog={catalog}
-            activeSlot={shownBeat?.active?.[theirSeat]}
-            struckSlots={struckSlots[theirSeat]}
-          />
-          <TeamSide
-            label={names[myId] || "You"} mine
-            team={myTeam}
-            fighters={game?.fighters?.[mySeat]}
-            catalog={catalog}
-            activeSlot={shownBeat?.active?.[mySeat]}
-            struckSlots={struckSlots[mySeat]}
-          />
-        </div>
+        <div className={`rt-layout${fightOn || pastRounds.length > 0 ? "" : " rt-layout-solo"}`}>
+          <div className="rt-main">
+            {teamsKnown && <TeamSide
+              label={names[game?.seats?.[theirSeat]] || "Opponent"}
+              team={theirTeam}
+              fighters={game?.fighters?.[theirSeat]}
+              catalog={catalog}
+              activeSlot={shownBeat?.active?.[theirSeat]}
+              fxSlots={fxSlots[theirSeat]}
+              beatKey={`${game?.round}-${beatIdx}`}
+              scale={hpScale}
+            />}
 
-        {game?.phase === "fight" || beats.length > 0 ? (
-          <div className="rt-ring">
-            <div className="rt-ring-hd">
-              <span>Round {game?.round} · turn {shownBeat?.turn ?? "—"}</span>
-              {animating && (
-                <button className="rt-slot" onClick={() => setSkipBeats(true)}>Skip ▸▸</button>
-              )}
-            </div>
-            {shownBeat ? (
-              <>
-                <div className="rt-beat">
-                  <div className="rt-card rt-played" key={`t-${shownBeat.turn}`}>
-                    <div className="rt-card-name">{cardOf(shownBeat.insts?.[theirSeat])?.name || "—"}</div>
-                    <div className="rt-card-by">
-                      {catalog?.fighters?.[cardOf(shownBeat.insts?.[theirSeat])?.fighter]?.name || ""}
-                    </div>
-                    <div className="rt-card-ops">{cardText(cardOf(shownBeat.insts?.[theirSeat]))}</div>
+            {fightOn ? (
+              <section className="rt-stage">
+                <header className="rt-stage-hd">
+                  <span className="rt-round">
+                    Round <b>{game?.round}</b>
+                    <span className="rt-round-sep">·</span>
+                    <span className="rt-turnno">{turnLabel}</span>
+                  </span>
+                  <span className="rt-steps" role="tablist" aria-label="turns this round">
+                    {turnBeats.map((b, i2) => (
+                      <button
+                        key={i2}
+                        type="button"
+                        role="tab"
+                        aria-selected={i2 === beatIdx}
+                        aria-label={`Turn ${i2 + 1}`}
+                        title={`Turn ${i2 + 1}`}
+                        className={`rt-step${i2 === beatIdx ? " rt-step-on" : ""}${i2 < beatIdx ? " rt-step-done" : ""}`}
+                        onClick={() => setBeatIdx(i2)} />
+                    ))}
+                  </span>
+                </header>
+
+                <div className="rt-duel">
+                  <PlayCard side="them" catalog={catalog}
+                    card={cardOf(shownBeat?.insts?.[theirSeat])}
+                    flipKey={`t-${game?.round}-${beatIdx}`} />
+                  <div className="rt-clash" key={`c-${game?.round}-${beatIdx}`} aria-hidden="true">
+                    <span className="rt-clash-burst" />
+                    <span className="rt-clash-word">VS</span>
                   </div>
-                  <div className="rt-vs">VS</div>
-                  <div className="rt-card rt-played" key={`m-${shownBeat.turn}`}>
-                    <div className="rt-card-name">{cardOf(shownBeat.insts?.[mySeat])?.name || "—"}</div>
-                    <div className="rt-card-by">
-                      {catalog?.fighters?.[cardOf(shownBeat.insts?.[mySeat])?.fighter]?.name || ""}
-                    </div>
-                    <div className="rt-card-ops">{cardText(cardOf(shownBeat.insts?.[mySeat]))}</div>
-                  </div>
+                  <PlayCard side="mine" catalog={catalog}
+                    card={cardOf(shownBeat?.insts?.[mySeat])}
+                    flipKey={`m-${game?.round}-${beatIdx}`} />
                 </div>
-                <div className="rt-events">
-                  {(shownBeat.events || []).map((ev, i) => {
-                    const node = eventWords(ev, catalog, teams);
-                    return node ? <span key={i}>{node}</span> : null;
+
+                <div className="rt-ribbon" key={`rb-${game?.round}-${beatIdx}`}>
+                  {beatLines.length ? beatLines.map((l, n) => (
+                    <span className={`rt-rib rt-tone-${l.tone}`} key={l.key}
+                      style={{ "--d": `${Math.min(n, 8) * 60}ms` }}>
+                      <Icon name={l.icon} />{l.text}
+                    </span>
+                  )) : <span className="rt-rib rt-tone-info"><Icon name="dot" />Nothing lands.</span>}
+                </div>
+
+                {atEnd && realTurns > 0 && (
+                  <div className="rt-resolved">
+                    <span className="rt-resolved-hd">Round {game?.round} resolved</span>
+                    {roundTally.length > 0
+                      ? roundTally.map((t) => (
+                        <span key={t.key} className={`rt-tally rt-tally-${t.dir}`}>
+                          {t.name} {t.dir === "down" ? "−" : "+"}{Math.abs(t.n)}
+                        </span>))
+                      : <span className="rt-tally">no health changed hands</span>}
+                  </div>
+                )}
+
+                <div className="rt-controls">
+                  <button type="button" className="rt-ctl" disabled={beatIdx <= 0}
+                    onClick={() => setBeatIdx((n) => Math.max(0, n - 1))}>
+                    <Icon name="prev" />Back
+                  </button>
+                  {!atEnd && (
+                    <>
+                      <button type="button" className="rt-ctl rt-ctl-go"
+                        onClick={() => setBeatIdx((n) => Math.min(lastIdx, n + 1))}>
+                        Next turn<Icon name="next" />
+                      </button>
+                      <button type="button" className="rt-ctl"
+                        onClick={() => setBeatIdx(lastIdx)}>
+                        To the end<Icon name="skip" />
+                      </button>
+                    </>
+                  )}
+                </div>
+              </section>
+            ) : null}
+
+            {teamsKnown && <TeamSide
+              label={names[myId] || "You"} mine
+              team={myTeam}
+              fighters={game?.fighters?.[mySeat]}
+              catalog={catalog}
+              activeSlot={shownBeat?.active?.[mySeat]}
+              fxSlots={fxSlots[mySeat]}
+              beatKey={`${game?.round}-${beatIdx}`}
+              scale={hpScale}
+            />}
+
+            {/* ── Prompts. Every one of them is "you owe a submission". ── */}
+            {!over && owes === "pending" && game?.pending && (
+              <div className="rt-prompt">
+                <h3><Icon name="spirit" />Choose your next Character</h3>
+                <p>Their marker goes on the top space of their track, and its icon applies at once.</p>
+                <div className="rt-picks">
+                  {game.pending.options.map((c) => (
+                    <button type="button" className="rt-pick rt-pick-plain" key={c}
+                      onClick={() => sendMove({ kind: "character", character: c })}>
+                      <span className="rt-pick-body">
+                        <span className="rt-pick-name rt-cap">{c}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {!over && owes === "draft" && (
+              <div className="rt-prompt">
+                <h3><Icon name="win" />
+                  {game.draft_round === 2 ? "Your second fighter" : "Your first fighter"}
+                  <span className="rt-step-of">fighter {game.draft_round === 2 ? 2 : 1} of 2</span>
+                </h3>
+                <p>
+                  {game.draft_round === 2
+                    ? "These are the ones your opponent passed on. This one fights beside your first."
+                    : "Take one, then pass the rest across to your opponent."}
+                </p>
+                <div className="rt-picks rt-draft">
+                  {(game.draft_hand || []).map((fid) => {
+                    const b = catalog?.fighters?.[fid];
+                    const sg = sigilOf(fid);
+                    const hp = maxHpOf(b);
+                    return (
+                      <button type="button" className="rt-pick rt-draft-card" key={fid}
+                        style={{ "--f-ink": sg.ink, "--f-deep": sg.deep }}
+                        onClick={() => sendMove({ kind: "draft", fighter: fid })}>
+                        <span className="rt-draft-art"><Sigil fid={fid} /></span>
+                        <span className="rt-draft-body">
+                          <span className="rt-pick-name">{b?.name || fid}</span>
+                          <span className="rt-draft-stats">
+                            <span className="rt-stat rt-hp">
+                              <Icon name="hp" /><b>{hp ?? "—"}</b><small>HP</small>
+                            </span>
+                            <span className="rt-stat rt-pw">
+                              <Icon name="power" /><b>{b ? b.base_power : "?"}</b><small>Power</small>
+                            </span>
+                          </span>
+                          <span className="rt-pick-tags">
+                            {(b?.tags || []).map((t) => <em key={t}>{t}</em>)}
+                          </span>
+                        </span>
+                      </button>
+                    );
                   })}
                 </div>
-              </>
-            ) : <div className="rt-events">The ring is quiet.</div>}
-          </div>
-        ) : null}
-
-        {/* ── Prompts. Every one of them is "you owe a submission". ── */}
-        {!over && owes === "pending" && game?.pending && (
-          <div className="rt-prompt">
-            <h3>Choose your next Character</h3>
-            <p>Their marker goes on the top space of their track, and its icon applies at once.</p>
-            <div className="rt-picks">
-              {game.pending.options.map((c) => (
-                <button className="rt-pick" key={c}
-                  onClick={() => sendMove({ kind: "character", character: c })}>
-                  <div className="rt-pick-name">{c}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {!over && owes === "draft" && (
-          <div className="rt-prompt">
-            <h3>Pick a Fighter {game.draft_round === 2 ? "(second)" : "(first)"}</h3>
-            <p>
-              {game.draft_round === 2
-                ? "These are the ones your opponent passed on."
-                : "Pick one, then pass the rest across."}
-            </p>
-            <div className="rt-picks">
-              {(game.draft_hand || []).map((fid) => {
-                const b = catalog?.fighters?.[fid];
-                return (
-                  <button className="rt-pick" key={fid}
-                    onClick={() => sendMove({ kind: "draft", fighter: fid })}>
-                    <div className="rt-pick-name">{b?.name || fid}</div>
-                    <div className="rt-pick-sub">
-                      {b ? `${b.base_power} power · ${(b.tags || []).join(", ")}` : ""}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {!over && owes === "order" && (
-          <div className="rt-prompt">
-            <h3>Who leads?</h3>
-            <p>Their Starting Card goes on top of your two-card Fight Deck.</p>
-            <div className="rt-picks">
-              {myTeam.map((fid, slot) => (
-                <button className="rt-pick" key={fid}
-                  onClick={() => sendMove({ kind: "order", slot })}>
-                  <div className="rt-pick-name">{catalog?.fighters?.[fid]?.name || fid}</div>
-                  <div className="rt-pick-sub">leads the round</div>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {!over && owes === "build" && (
-          <div className="rt-prompt">
-            <h3>Build your deck</h3>
-            <p>Keep one of these three and slide it in anywhere. The other two go to the bottom.</p>
-            <div className="rt-picks">
-              {(game.build_offer || []).map((inst) => {
-                const c = cardOf(inst);
-                return (
-                  <button key={inst}
-                    className={`rt-pick${buildPick === inst ? " rt-sel" : ""}`}
-                    onClick={() => { setBuildPick(inst); setBuildPos(null); }}>
-                    <div className="rt-pick-name">{c?.name || "?"}</div>
-                    <div className="rt-pick-sub">
-                      {catalog?.fighters?.[c?.fighter]?.name}{c?.instant_bonus ? " · instant bonus" : ""}
-                    </div>
-                    <div className="rt-pick-sub">{cardText(c)}</div>
-                  </button>
-                );
-              })}
-            </div>
-            {buildPick != null && (
-              <>
-                <p style={{ marginTop: "0.6rem" }}>Where does it go? Top is played first.</p>
-                <div className="rt-slots">
-                  {(game.fight_deck || []).map((inst, i) => (
-                    <span key={`s${i}`} style={{ display: "contents" }}>
-                      <button className={`rt-slot${buildPos === i ? " rt-sel" : ""}`}
-                        onClick={() => setBuildPos(i)}>▾</button>
-                      <span className="rt-deckcard">{cardOf(inst)?.name || "?"}</span>
-                    </span>
-                  ))}
-                  <button
-                    className={`rt-slot${buildPos === (game.fight_deck || []).length ? " rt-sel" : ""}`}
-                    onClick={() => setBuildPos((game.fight_deck || []).length)}>▾</button>
-                </div>
-              </>
+              </div>
             )}
-            <button className="rt-go" disabled={buildPick == null || buildPos == null}
-              onClick={() => sendMove({ kind: "build", inst: buildPick, pos: buildPos })}>
-              Lock it in
-            </button>
-          </div>
-        )}
 
-        {!over && owes === null && (
-          <div className="rt-waitline">
-            {game?.phase === "build" ? "Waiting for your opponent to build…"
-              : game?.phase === "draft" ? "Waiting for their pick…"
-              : game?.phase === "order" ? "Waiting for them to choose who leads…"
-              : animating ? "Fighting…" : "Waiting…"}
-          </div>
-        )}
+            {!over && owes === "order" && (
+              <div className="rt-prompt">
+                <h3><Icon name="again" />Who leads?</h3>
+                <p>Whoever you pick plays their Starting Card first.</p>
+                <div className="rt-picks rt-picks-wide">
+                  {myTeam.map((fid, slot) => {
+                    const sg = sigilOf(fid);
+                    const sc = startingCards[fid];
+                    return (
+                      <button type="button" className="rt-pick rt-pick-fighter" key={fid}
+                        style={{ "--f-ink": sg.ink, "--f-deep": sg.deep }}
+                        onClick={() => sendMove({ kind: "order", slot })}>
+                        <span className="rt-pick-crest"><Sigil fid={fid} /></span>
+                        <span className="rt-pick-body">
+                          <span className="rt-pick-name">{catalog?.fighters?.[fid]?.name || fid}</span>
+                          <span className="rt-pick-sub">opens with <b>{sc?.name || "their Starting Card"}</b></span>
+                          <span className="rt-pick-ops">
+                            {(sc?.ops || []).map((op, n) => (
+                              <em key={n}><Icon name={iconForOp(op)} />{opWords(op)}</em>
+                            ))}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
-        {over && (
-          <div className="rt-over">
-            <h2>
-              {game.winner === "draw" ? "Draw"
-                : game.winner === mySeat ? "You win" : "You lose"}
-            </h2>
-            <p>{game.log?.[game.log.length - 1] || ""} · {game.round} rounds</p>
-            <div style={{ marginTop: "0.8rem" }}>
-              <LobbyAction onClick={leaveToLobby}>Back to lobby</LobbyAction>
+            {!over && owes === "build" && (() => {
+              const offer = game.build_offer || [];
+              // Two of the three offered cards are routinely the SAME card, and
+              // rendered identically that reads as a rendering bug rather than
+              // as a real choice between two copies. Number them.
+              const seen = {};
+              const copyOf = {};
+              for (const inst of offer) {
+                const cid = instances[inst]?.cid;
+                seen[cid] = (seen[cid] || 0) + 1;
+                copyOf[inst] = seen[cid];
+              }
+              const total = {};
+              for (const inst of offer) total[instances[inst]?.cid] = seen[instances[inst]?.cid];
+
+              const deck = game.fight_deck || [];
+              const rows = [];
+              const drop = (pos, label) => (
+                <button type="button" key={`d${pos}`}
+                  className={`rt-drop${buildPos === pos ? " rt-sel" : ""}`}
+                  aria-label={label}
+                  onClick={() => setBuildPos(pos)}>
+                  <span className="rt-drop-line" />
+                  <span className="rt-drop-label">{label}</span>
+                  <span className="rt-drop-line" />
+                </button>
+              );
+              // One grammar for all three, or the middle one reads as the only
+              // target and the outer two read as section headings.
+              rows.push(drop(0, "Insert here"));
+              deck.forEach((inst, n) => {
+                rows.push(
+                  <div className="rt-deck-row" key={`c${n}`}>
+                    <span className="rt-deck-n">{n + 1}</span>
+                    <span className="rt-deck-name">{cardOf(inst)?.name || "?"}</span>
+                  </div>);
+                rows.push(drop(n + 1, "Insert here"));
+              });
+
+              const need = buildPick == null ? "Pick a card to keep"
+                : buildPos == null ? "Now choose where it goes"
+                : null;
+
+              return (
+                <div className="rt-prompt">
+                  <h3><Icon name="plant_scheme" />Build your deck</h3>
+                  <p>
+                    The two you do not keep go to the bottom of your Build Deck.
+                  </p>
+                  <div className="rt-picks rt-picks-wide">
+                    {offer.map((inst) => {
+                      const c = cardOf(inst);
+                      const sg = sigilOf(c?.fighter);
+                      const cid = instances[inst]?.cid;
+                      return (
+                        <button type="button" key={inst}
+                          className={`rt-pick rt-pick-card${buildPick === inst ? " rt-sel" : ""}`}
+                          aria-pressed={buildPick === inst}
+                          style={{ "--f-ink": sg.ink, "--f-deep": sg.deep }}
+                          onClick={() => { setBuildPick(inst); setBuildPos(null); }}>
+                          <span className="rt-pick-crest"><Sigil fid={c?.fighter} /></span>
+                          <span className="rt-pick-body">
+                            <span className="rt-pick-name">
+                              {c?.name || "?"}
+                              {total[cid] > 1 && copyOf[inst] > 1 && (
+                                <span className="rt-copy">2nd copy</span>
+                              )}
+                            </span>
+                            <span className="rt-pick-sub">
+                              {catalog?.fighters?.[c?.fighter]?.name}
+                              {c?.instant_bonus ? " · instant bonus" : ""}
+                            </span>
+                            <span className="rt-pick-ops">
+                              {(c?.ops || []).map((op, n) => (
+                                <em key={n}><Icon name={iconForOp(op)} />{opWords(op)}</em>
+                              ))}
+                            </span>
+                          </span>
+                          {buildPick === inst && <span className="rt-pick-tick" aria-hidden="true" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {buildPick != null && (
+                    <>
+                      <div className="rt-slots">{rows}</div>
+                    </>
+                  )}
+
+                  {need
+                    ? <p className="rt-need"><Icon name="next" />{need}</p>
+                    : (
+                      <button type="button" className="rt-go"
+                        onClick={() => sendMove({ kind: "build", inst: buildPick, pos: buildPos })}>
+                        Lock it in
+                      </button>
+                    )}
+                </div>
+              );
+            })()}
+
+            {!over && owes === null && atEnd && (
+              <div className="rt-waitline">
+                {game?.phase === "build" ? "Waiting for your opponent to build…"
+                  : game?.phase === "draft" ? "Waiting for their pick…"
+                  : game?.phase === "order" ? "Waiting for them to choose who leads…"
+                  : "Waiting…"}
+              </div>
+            )}
+
+            {over && atEnd && (
+              <div className={`rt-over rt-over-${game.winner === "draw" ? "draw" : game.winner === mySeat ? "win" : "lose"}`}>
+                <span className="rt-over-crest"><Icon name="win" /></span>
+                <h2>
+                  {game.winner === "draw" ? "A draw"
+                    : game.winner === mySeat ? "You win" : "You lose"}
+                </h2>
+                <p>{game.log?.[game.log.length - 1] || ""} · {game.round} rounds</p>
+                <div className="rt-over-actions">
+                  <LobbyAction onClick={leaveToLobby}>Back to lobby</LobbyAction>
+                </div>
+              </div>
+            )}
+            {over && !atEnd && (
+              <div className="rt-waitline rt-warn">
+                It is decided — step to the last turn to see how it ended.
+              </div>
+            )}
+          </div>
+
+          {/* ── The battle log ──
+              Only what has actually been watched. Stepping back does not erase
+              it: the log is the record of the fight, the stage is the moment. */}
+          <aside className={`rt-rail${roundRows.length || pastRounds.length ? "" : " rt-rail-empty"}`}>
+            <div className="rt-log">
+              <header className="rt-log-hd"><Icon name="track" />Battle log</header>
+              <div className="rt-log-body" ref={logRef}>
+                {pastRounds.map((r) => (
+                  <section className="rt-log-round" key={`r${r.round}`}>
+                    <h4>Round {r.round}</h4>
+                    {r.rows.map(logRow)}
+                  </section>
+                ))}
+                {roundRows.length > 0 && (
+                  <section className="rt-log-round rt-log-live" key={`live-${game?.round}`}>
+                    <h4>Round {game?.round}</h4>
+                    {roundRows.map(logRow)}
+                  </section>
+                )}
+                {roundRows.length === 0 && pastRounds.length === 0 && (
+                  <p className="rt-log-empty">No turns resolved yet.</p>
+                )}
+              </div>
             </div>
-          </div>
-        )}
-
-        {game?.log?.length > 0 && (
-          <div className="rt-log">
-            {game.log.slice(-12).map((line, i) => <div key={i}>{line}</div>)}
-          </div>
-        )}
+          </aside>
+        </div>
       </div>
       {toast && <div className="rt-toast">{toast}</div>}
       {showRules && (

@@ -4595,37 +4595,88 @@ try {
 		check("asked who leads", /leads/i.test(leadHd), `heading was "${leadHd}"`);
 		await page.locator(".rt-prompt .rt-pick").first().click().catch(() => {});
 
-		// The fight resolves server-side and arrives as beats; the ring plays them.
-		await page.waitForSelector(".rt-ring", { timeout: 25_000 }).catch(() => {});
-		check("the ring appears", await page.locator(".rt-ring").count() > 0);
-		await sleep(2600);
+		// The fight resolves server-side and arrives as beats. It is played back
+		// BY HAND -- one click a turn -- so the two things worth gating are that
+		// it does NOT advance on its own, and that the next decision is held back
+		// until the last turn is on screen. Both are behaviour a passing render
+		// test would happily miss.
+		await page.waitForSelector(".rt-stage", { timeout: 25_000 }).catch(() => {});
+		check("the stage appears", await page.locator(".rt-stage").count() > 0);
+
+		const turnsThisRound = await page.locator(".rt-steps .rt-step").count();
+		check("a step marker per turn", turnsThisRound >= 2, `${turnsThisRound} markers`);
+
+		const firstTurnText = await page.locator(".rt-turnno").first().innerText().catch(() => "");
+		await sleep(2200);
+		const stillTurnText = await page.locator(".rt-turnno").first().innerText().catch(() => "");
+		check("the fight does not advance on its own",
+			firstTurnText === stillTurnText && /1\b/.test(stillTurnText),
+			`was "${firstTurnText}", now "${stillTurnText}"`);
+
 		const cardNames = await page.locator(".rt-card-name").allInnerTexts().catch(() => []);
 		check("both revealed cards are named",
 			cardNames.filter((t) => t && t !== "—").length >= 2,
 			JSON.stringify(cardNames));
 
+		// The log is HISTORY: it carries the turns already stepped past, not the
+		// one on the stage. Showing both put the same sentences on screen twice.
+		const logLines = await page.locator(".rt-log-line").count();
+		check("the battle log is present", await page.locator(".rt-log").count() === 1);
+
+		// Nothing may ask for the next decision while turns remain unwatched.
+		if (turnsThisRound > 1) {
+			const heldHd = await page.locator(".rt-prompt h3").count();
+			check("the next decision waits for the replay to finish", heldHd === 0,
+				`a prompt was already showing: "${await page.locator(".rt-prompt h3").first().innerText().catch(() => "")}"`);
+		}
+
+		await page.locator(".rt-ctl-go").click({ timeout: 10_000 }).catch(() => {});
+		await sleep(500);
+		const afterNext = await page.locator(".rt-turnno").first().innerText().catch(() => "");
+		check("Next turn advances the fight", afterNext !== stillTurnText,
+			`still "${afterNext}"`);
+		const logAfter = await page.locator(".rt-log-line").count();
+		check("the turn just watched lands in the log", logAfter > logLines,
+			`${logLines} -> ${logAfter}`);
+
 		// BUILD!: pick a card, pick a slot, lock it in.
-		await page.waitForSelector(".rt-prompt .rt-go", { timeout: 30_000 }).catch(() => {});
+		await page.waitForSelector(".rt-prompt h3", { timeout: 30_000 }).catch(() => {});
 		const buildHd = await page.locator(".rt-prompt h3").first().innerText().catch(() => "");
 		check("reached the BUILD! step", /Build/i.test(buildHd), `heading was "${buildHd}"`);
 		const offered = await page.locator(".rt-prompt .rt-pick").count();
 		check("three cards offered", offered === 3, `offered ${offered}`);
 
-		const lockedBefore = await page.locator(".rt-go[disabled]").count();
-		check("cannot lock in before choosing", lockedBefore === 1);
+		// There is no disabled "Lock it in" any more: a grey slab with a button's
+		// box read as the CTA you were waiting to be allowed to press. Until the
+		// choice is complete the panel states the REQUIREMENT instead, and the
+		// button does not exist at all.
+		check("no button before the choice is complete",
+			await page.locator(".rt-go").count() === 0);
+		const needTxt = await page.locator(".rt-need").first().innerText().catch(() => "");
+		check("the panel says what is still missing", /pick a card/i.test(needTxt),
+			`said "${needTxt}"`);
 
 		await page.locator(".rt-prompt .rt-pick").first().click().catch(() => {});
-		await page.waitForSelector(".rt-slot", { timeout: 10_000 }).catch(() => {});
-		const slots = await page.locator(".rt-slots .rt-slot").count();
-		check("a slot for every position in the deck", slots >= 3, `${slots} slots`);
-		await page.locator(".rt-slots .rt-slot").first().click().catch(() => {});
+		await page.waitForSelector(".rt-drop", { timeout: 10_000 }).catch(() => {});
+		const slots = await page.locator(".rt-slots .rt-drop").count();
+		check("a labelled drop zone above, between and below every card",
+			slots >= 3, `${slots} drop zones`);
+		await page.locator(".rt-slots .rt-drop").first().click().catch(() => {});
 		await page.locator(".rt-go").click({ timeout: 10_000 }).catch(() => {});
 
-		// The round turns over: the fight deck is one card longer than it was.
+		// The round turns over, and the finished round stays in the log.
 		await sleep(2500);
-		const roundText = await page.locator(".rt-ring-hd").first().innerText().catch(() => "");
-		check("a second round began", /Round\s*2/i.test(roundText) || /turn/i.test(roundText),
-			`ring header was "${roundText}"`);
+		const roundText = await page.locator(".rt-stage-hd .rt-round").first().innerText().catch(() => "");
+		check("a second round began", /2/.test(roundText), `stage header was "${roundText}"`);
+		// An empty round header is suppressed, so at turn 1 of round 2 the log
+		// legitimately holds only the ARCHIVED round 1. Step one turn: now the
+		// log must carry both -- the finished round kept, and the live one it is
+		// building. That is the pair worth asserting.
+		await page.locator(".rt-ctl-go").click({ timeout: 8_000 }).catch(() => {});
+		await sleep(600);
+		const rounds = await page.locator(".rt-log-round h4").allInnerTexts().catch(() => []);
+		check("the log keeps the finished round and starts the live one",
+			rounds.length >= 2 && /1/.test(rounds[0]), JSON.stringify(rounds));
 
 		check("no page errors", errors.length === 0, errors[0]?.slice(0, 200) || "");
 		await ctx.close();
