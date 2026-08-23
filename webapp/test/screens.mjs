@@ -2054,7 +2054,7 @@ try {
 		// shared one, so it resolves these ties in the opposite order.
 		for (const [route, marker] of [["/spender", ".sp-lobby, .lby-cols"],
 			["/duel", ".duel"], ["/coc", ".coc"], ["/dontminion", ".dm"],
-			["/dissonance", ".dis"]]) {
+			["/dissonance", ".dis"], ["/ragtag", ".ragtag"]]) {
 			await page.goto(`http://localhost:${PORT}${route}`, { waitUntil: "networkidle" });
 			await page.waitForSelector(marker, { timeout: 25_000 }).catch(() => {});
 			await page.waitForSelector(".lby-tabs", { timeout: 15_000 }).catch(() => {});

@@ -1,6 +1,6 @@
 # Forrest Games — Claude Context
 
-A six-game multiplayer board-game website (+ a Books feature) sharing one backend, auth
+A seven-game multiplayer board-game website (+ a Books feature) sharing one backend, auth
 layer, and frontend shell. Real-time play over WebSockets, server-authoritative game state,
 and per-game AI opponents that range from simple heuristics to client-side neural nets
 compiled to WASM.
@@ -16,6 +16,7 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
 | [`games/spender_duel/CLAUDE.md`](games/spender_duel/CLAUDE.md) | Duel engine, hidden info, and the current coherent/minimax search |
 | [`games/dontminion/CLAUDE.md`](games/dontminion/CLAUDE.md) | Dontminion (Dominion) frame-stack engine, the frozen effects API, multi-bot server, decision-prompt frontend |
 | [`games/dissonance/CLAUDE.md`](games/dissonance/CLAUDE.md) | Dissonance — parity trick-taking rules, the Rust reference + parity gate, auction/scoring calibration, the five modes (classic / skat / minor / dummy / quartet), and the browser-served Hard tier |
+| [`games/rag_tag/CLAUDE.md`](games/rag_tag/CLAUDE.md) | Rag Tag (Tag Team) — the simultaneous turn resolution, the generated fighter data and where it came from, the two-pass declaration |
 | [`shared/CLAUDE.md`](shared/CLAUDE.md) | Shared frontend kits + URL routing |
 | [`books/CLAUDE.md`](books/CLAUDE.md) | The Books feature |
 | [`docs/ai-research-log.md`](docs/ai-research-log.md) | **AI campaign history, dated sessions, rejected-experiment postmortems.** When something here says "see the research log," that's the blow-by-blow + "do not relitigate" detail. |
@@ -41,6 +42,8 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
   Ages, Adventures, Empires, Renaissance and Menagerie; 368 cards + 114 LANDSCAPE cards
   (53 Events, 21 Landmarks, 20 Projects and 20 Ways) + 5 Artifacts, more sets landing
   per phase).
+  Rag Tag (Tag Team — 2 players, 12 fighters, 120 cards; both players reveal and resolve
+  at the same time, and the deck is never shuffled).
   Plus **Books** (a ranking/suggestions page) and **WWSD** (a browser autoplayer for a friend's
   external Splendor site).
 
@@ -71,7 +74,7 @@ core/                  # SHARED BACKEND PLATFORM (imported by every feature; imp
   ratelimit.py         #   SlidingWindowLimiter (auth + WebSocket abuse throttle)
   config.py            #   cors_allowed_origins()
   rooms.py             #   shared room-server primitives + the state_json codec
-                       #   (encode/decode_state, pack/unpack_rng) — all six games use it
+                       #   (encode/decode_state, pack/unpack_rng) — all seven games use it
   build_info.py        #   commit + started_at for /health, so a deploy can be VERIFIED not assumed
 games/
   spender/             # Spender (Splendor) — main.py exposes `router` (APIRouter), + ai/ stack
@@ -85,6 +88,10 @@ games/
                        #   main.py (dontminion_app @ /dontminion) + Dontminion.jsx; expansion
                        #   picker, 2-4p, multi-bot rooms. tools/replay_prod_saves.py is the
                        #   migration gate. EXPANSIONS.md is the phase roadmap + debt ledger
+  rag_tag/             # Rag Tag (Tag Team) — 2p SIMULTANEOUS auto battler. 12 fighters,
+                       #   120 cards, decks that are never shuffled. fighters.py is
+                       #   GENERATED from data/*.json by tools/import_bga.py; effects.py
+                       #   is the closed op vocabulary that data is held to
   dissonance/          # Dissonance — 2p parity trick-taking. engine.py is a PORT of
                        #   rust-cores/dissonance-core (the solver-validated reference);
                        #   tests/test_rust_parity.py is the drift gate. FIVE modes
@@ -153,7 +160,7 @@ locally** (no wheel for Python 3.14 on this box; prod Docker is 3.11) — valida
 login that survives a redeploy. The sqlite path (identical wrapper) IS locally tested.
 
 ### Auth correctness & security (hard-won — do not regress)
-- **WS SEAT IDENTITY IS BOUND IN ALL SIX GAMES.** The `player` path segment is client-supplied and
+- **WS SEAT IDENTITY IS BOUND IN ALL SEVEN GAMES.** The `player` path segment is client-supplied and
   every pid is broadcast in the public players map, so a socket must PROVE it owns its pid before it
   can act as that seat or receive that seat's view. `authed` flips true only via create / join-as-a-new-
   seat / join-with-a-matching-`session_token` / reconnect-with-the-room-token / auth_reconnect; every
@@ -197,7 +204,7 @@ ROOMS[room_id] = {
 }
 ```
 
-**The generic half lives in `core/rooms.py`** (all six games use it, aliased to their historical
+**The generic half lives in `core/rooms.py`** (all seven games use it, aliased to their historical
 private names): `normalize_room`, `gen_room_token`, `db_conn`, `ensure_room_loaded`, `send_json`,
 `delete_open_game(table, host_col, ...)`, and `release_socket` (the stale-socket guard + phantom-room
 collection; per-game policy stays explicit as the `disarm_client_ai` / `drop_empty_open_only` flags).
@@ -207,10 +214,10 @@ times because three copies of `mk_room_state` each leaked differently.
 **Still duplicated (~25 functions, the obvious next extraction):** `save_game`, `load_game_to_memory`,
 `_persist_row` and the `list_open_games`/`list_user_games`/`list_user_history`/`list_active_games`
 family. Same shape in every game, differing only in table name and columns — though not every game
-has every member: `save_game`/`load_game_to_memory`/`list_open_games` are all six, `list_user_history`
-is five (Where Wolf? has no History), `list_active_games` only Spender and CoC. **They drift exactly
+has every member: `save_game`/`load_game_to_memory`/`list_open_games` are all seven, `list_user_history`
+is six (Where Wolf? has no History), `list_active_games` only Spender and CoC. **They drift exactly
 as you would expect** — back when four games had one, the `list_user_history` row caps were
-independently 20/30/30/30 until 2026-08-05; all five now bind `core.rooms.HISTORY_LIMIT` (see the
+independently 20/30/30/30 until 2026-08-05; all six now bind `core.rooms.HISTORY_LIMIT` (see the
 lobby History note below).
 
 **THE HOW-TO-PLAY MODAL IS SHARED — `RulesModal` in `shared/lobby.jsx`, reached from a Rules button
@@ -220,10 +227,10 @@ in every lobby's create row (right of ↻).** Chrome only: each game's WORDS liv
 grows past `max-height`, nothing scrolls, and the close button sits below the fold). On phones the
 create row scrolls SIDEWAYS rather than wrapping — with five controls it stops fitting at ~430px —
 via `justify-content:safe center`, because plain `center` pushes the overflow off the unreachable
-LEFT edge. `screens.mjs` drives all six lobbies: the button is optional on the component, so a game
+LEFT edge. `screens.mjs` drives all seven lobbies: the button is optional on the component, so a game
 that forgets to pass `onRules` renders a perfectly fine lobby with no way into the rules.
 
-**THE LOBBY IS ONE SHARED LAYOUT — `shared/lobby.jsx` + its CSS, used by all six games.**
+**THE LOBBY IS ONE SHARED LAYOUT — `shared/lobby.jsx` + its CSS, used by all seven games.**
 The column grid (`.lby-cols`), the card list (`.lby-list`), the rows (`.lby-card*`), the section
 headers (`LobbySectionHd`), the empty states (`.lby-empty`), the turn pills (`TurnBadge`) and the
 phone tab bar (`LobbyTabs`) all live there. **Spender was the last hold-out and was converted
@@ -242,7 +249,7 @@ shipped spin keyframes.
   so column-only placement wrapped Active to row 2 and it read as "pushed down"); making it the
   shared behaviour means no game has to remember.
 - **A game's CSS must not set `display`/`grid-template-columns`/`gap` on its own lobby-grid class.**
-  Five of the six sheets are concatenated AFTER the shared one, so a base rule there out-orders the
+  Six of the seven sheets are concatenated AFTER the shared one, so a base rule there out-orders the
   shared MEDIA rules and pins the lobby to three columns on a phone. CoC is the exception (its sheet
   comes first), which is exactly the kind of asymmetry that makes this worth stating rather than
   discovering. Per-game tuning goes through `--lby-list-max`, which works from either side.
@@ -264,7 +271,7 @@ the old server just runs out of pages sooner. Browser coverage is one `screens.m
 Dontminion against a STUBBED `/games/history` of 55 rows (the hook is shared, so covering it once
 covers the logic; each game's wiring is one line).
 
-**Load-bearing invariants across all six games:**
+**Load-bearing invariants across all seven games:**
 - **Pending sub-decisions are real game-state keys**, not transient message fields — so they survive
   saves/reconnects and are server-enforced (Spender `pending_noble_pid`/`pending_discard_pid`; CoC and
   Duel `pending_pid`/`pending_kind`/`pending`; Dontminion the same pair mirroring the top frame of its
@@ -482,7 +489,7 @@ covers the logic; each game's wiring is one line).
   **verified, not trusted**: `runBuild()` rebuilds anyway unless `dist/` is newer than every source file
   under `webapp`/`games`/`shared`/`books`, so the build-first invariant survives a stale flag, a bailed
   smoke run, or an edit made between the two gates. Never replace that check with the flag alone.
-- **The five non-shell games + Books are CODE-SPLIT** (`React.lazy` in Spender.jsx) — Spender itself is
+- **The six non-shell games + Books are CODE-SPLIT** (`React.lazy` in Spender.jsx) — Spender itself is
   the shell, so it is not lazy. The entry chunk is ~310KB instead of ~600KB. Adding a game screen means
   a `lazy()` + `<Suspense>` branch, and a `SCREENS` entry in `webapp/test/screens.mjs`.
 - **The WS throttle is process-global and keyed on client IP** (`core.rooms`, 60 connects/min,
