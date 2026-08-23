@@ -123,27 +123,10 @@ def fx(name: str) -> Callable[[Callable], Callable]:
 
 #: Named by the data, not yet implemented. Shrinks to empty as engine.py lands;
 #: test_fighters.py fails if it disagrees with what the data actually uses.
-UNIMPLEMENTED_FX = frozenset({
-    # Health-track and board mechanics
-    "bodvar_transform",           # Rage tops out: +3 Power, then flip to the Bear
-    "brijit_revive",              # pushed past both KOs: back at 4 HP, end of turn
-    "mephisto_flip_serpent",      # flip the token WITHOUT applying the new face
-    "milady_unleash_scheme",      # from the HEALTH TRACK: resolves after card actions
-    # Cards
-    "golem_reanimation",          # next card resolves twice, second as a fresh turn
-    "mordred_execution",          # finisher, after the Opponent's card resolves
-    "mephisto_drag_you_to_hell",  # lose this turn for any reason => you win instead
-    "feyfolk_all_legends_must_pass",
-    "brijit_redirect_attacks",
-    "brijit_eternal_youth",       # steal the Opponents' Healing
-    "ching_terror_of_the_seas",   # 0-7 / 8-15 / exactly 20, and the 20 resets to 0
-    "wong_harder_they_fall",      # Attack using the OPPONENT'S Power
-    "wong_crippling_touch",       # removes both cards from the game permanently
-    "wong_match_partner_power",
-    "wb_corrupted_lawman",
-    "wb_keys_to_the_armory",
-    "milady_poison",              # half current HP rounded down; resolves last
-})
+#: Named by the data and not yet implemented. Empty since the engine landed;
+#: test_fighters.py fails if it disagrees with what the data actually uses, in
+#: BOTH directions, so it cannot rot into a lie either way.
+UNIMPLEMENTED_FX = frozenset()
 
 
 # --------------------------------------------------------------------------
@@ -256,3 +239,241 @@ def collect_fx_names(ops: Any, found: set[str]) -> set[str]:
             if branch in op:
                 collect_fx_names(op[branch], found)
     return found
+
+
+# ==========================================================================
+# The escape hatch, implemented
+# ==========================================================================
+#
+# Every handler takes (turn, seat, who, phase) and reaches state only through
+# the Turn helpers, never the game dict, so a card cannot quietly break an
+# invariant. `who` is the acting fighter as (seat, slot); `phase` is 'declare'
+# during the cards' own resolution and 'late' for icons, bonuses and THEN.
+#
+# `engine` is imported inside each function: engine imports THIS module for its
+# registries, so a module-level import would be a cycle.
+
+
+@fx("bodvar_transform")
+def _bodvar_transform(turn, seat, who, phase):
+    """Rage tops out. +3 Power has already applied; now he becomes the Bear.
+
+    The Bear's opening HP is Bödvar's Power cubes at this instant, capped at 15 --
+    a starting point, not a ceiling, so he can Heal above it afterwards. Tokens
+    ride along, because they live on the fighter rather than the board. And he
+    takes no HP change at all for the rest of this turn.
+    """
+    from . import engine
+
+    f = turn.f(who)
+    if f.get("face") == "berserker_bear":
+        return
+    turn.flush_power(who)
+    f["face"] = "berserker_bear"
+    f["hp"] = min(f["power"], 15)
+    turn.immune.add(who)
+    turn.hp_delta.pop(who, None)
+    turn.note(kind="transform", seat=who[0], slot=who[1], to="berserker_bear",
+              hp=f["hp"])
+
+
+@fx("brijit_revive")
+def _brijit_revive(turn, seat, who, phase):
+    """Pushed past both KO spaces, she comes back -- at the END of the turn."""
+    turn.revive.add(who)
+    turn.note(kind="revive", seat=who[0], slot=who[1])
+
+
+@fx("mephisto_flip_serpent")
+def _mephisto_flip_serpent(turn, seat, who, phase):
+    """Flip the token WITHOUT applying the new face. Next card reads the new one."""
+    f = turn.f(who)
+    f["tokens"]["serpent_face"] = 1 - f["tokens"].get("serpent_face", 0)
+    turn.note(kind="serpent", seat=who[0], slot=who[1],
+              face="black" if f["tokens"]["serpent_face"] else "white")
+
+
+@fx("milady_unleash_scheme")
+def _milady_unleash_from_track(turn, seat, who, phase):
+    """An Intrigue off the HEALTH TRACK, which resolves after all card actions.
+
+    That timing is the whole difference from the card version: because it lands
+    later it can move a marker that is currently sitting on a Stop.
+    """
+    turn.deferred.append((who[0], {"op": "unleash_scheme"}))
+
+
+@fx("golem_reanimation")
+def _golem_reanimation(turn, seat, who, phase):
+    """The card on the Golem's next turn resolves twice, the second as a new turn."""
+    turn.game["double_next"][seat] = True
+    turn.note(kind="reanimation", seat=seat)
+
+
+@fx("mordred_execution")
+def _mordred_execution(turn, seat, who, phase):
+    """A finisher, read after the Opponent's card has resolved."""
+    from . import engine
+
+    if phase == "declare":
+        turn.deferred.append((seat, {"op": "fx", "name": "mordred_execution"}))
+        return
+    opp = turn.resolve_target(seat, "opp")[0]
+    left = engine.hp_value(turn.f(opp))
+    if 0 < left <= 4:
+        turn.add_hp(opp, -left)
+        turn.note(kind="execution", seat=opp[0], slot=opp[1], damage=left)
+
+
+@fx("mephisto_drag_you_to_hell")
+def _drag_you_to_hell(turn, seat, who, phase):
+    """Lose this turn for ANY reason -- KO, your Partner, even Incineration -- and
+    you win the fight instead."""
+    turn.drag.add(seat)
+
+
+@fx("feyfolk_all_legends_must_pass")
+def _all_legends_must_pass(turn, seat, who, phase):
+    """Their only KO condition: all three already Spirits when this is revealed."""
+    from . import engine
+
+    if turn.spirits_at_start.get(who, 0) >= 4:
+        turn.fey_folk_losses.add(seat)
+        turn.note(kind="ko", seat=who[0], slot=who[1])
+
+
+@fx("brijit_redirect_attacks")
+def _brijit_redirect(turn, seat, who, phase):
+    """Every Attack her Block caught turns around onto the opposing Partner."""
+    opp_mate = turn.resolve_target(seat, "opp_partner")[0]
+    for atk in turn.attacks:
+        if atk["seat"] != seat and atk["negated"] and atk["power"] > 0:
+            turn.add_hp(opp_mate, -atk["power"])
+            turn.note(kind="redirect", seat=opp_mate[0], slot=opp_mate[1],
+                      power=atk["power"])
+
+
+@fx("brijit_eternal_youth")
+def _eternal_youth(turn, seat, who, phase):
+    """She steals the Opponents' Healing.
+
+    It cancels only their Heal, not their whole card, and she gains the 2 Power
+    only if she actually recovered something. Deferred to the end of declaration
+    because the other side's card may not have been walked yet.
+    """
+    if phase == "declare":
+        turn.post_declare.append(("eternal_youth", seat, who))
+        return
+    stolen = 0
+    for src_seat, tgt, amount in turn.heal_log:
+        if src_seat != seat and tgt[0] != seat:
+            turn.add_hp(tgt, -amount)
+            stolen += amount
+    if stolen:
+        turn.add_hp(who, stolen)
+        turn.add_power(who, 2)
+        turn.note(kind="steal_heal", seat=who[0], slot=who[1], amount=stolen)
+
+
+@fx("ching_terror_of_the_seas")
+def _terror_of_the_seas(turn, seat, who, phase):
+    """Three different cards depending on the Fleet, and 16-19 really is nothing."""
+    from . import engine
+
+    ships = turn.f(who)["tracks"].get("navigation", 0)
+    if ships <= 7:
+        turn.add_attack(seat, who, turn.resolve_target(seat, "opp"), turn.power(who))
+        return
+    if ships <= 15:
+        turn.add_hp(who, 2)
+        return
+    if ships < 20:
+        return
+    # Twenty Ships. Both Opponents drop to 1 HP as Direct Damage -- so Stops and
+    # health-track icons all still apply -- and nothing else this turn touches
+    # them. The Fleet then goes back to nothing.
+    for tgt in turn.resolve_target(seat, "both_opps"):
+        turn.hp_delta.pop(tgt, None)
+        left = engine.hp_value(turn.f(tgt))
+        if left > 1:
+            turn.add_hp(tgt, -(left - 1))
+        turn.ignore_hp.add(tgt)
+    turn.f(who)["tracks"]["navigation"] = 0
+    turn.note(kind="terror", seat=seat)
+
+
+@fx("wong_harder_they_fall")
+def _harder_they_fall(turn, seat, who, phase):
+    """Mark the Opponent, or cash the mark in and hit them with their own Power."""
+    from . import engine
+
+    opp = turn.resolve_target(seat, "opp")[0]
+    if turn.f(opp)["tokens"].get("concentration", 0) > 0:
+        # Their Power, not his -- and if the target gets redirected it is still
+        # the ORIGINAL target's Power that is used.
+        turn.add_attack(seat, who, [opp], turn.power(opp))
+        turn.deferred.append((seat, {"op": "take_token", "token": "concentration"}))
+        return
+    if turn.f(who)["tokens"].get("concentration", 0) > 0:
+        turn.move_token(who, opp, "concentration")
+
+
+@fx("wong_crippling_touch")
+def _crippling_touch(turn, seat, who, phase):
+    """After the Opponent's card resolves, remove it; THEN remove this one.
+
+    Both leave the game permanently, so both decks get smaller -- which is the
+    one thing in Rag Tag that changes how long a fight can run.
+    """
+    if phase == "declare":
+        turn.deferred.append((seat, {"op": "fx", "name": "wong_crippling_touch"}))
+        return
+    turn.remove_from_play(turn.revealed[1 - seat])
+    turn.remove_from_play(turn.revealed[seat])
+
+
+@fx("wong_match_partner_power")
+def _match_partner_power(turn, seat, who, phase):
+    """His Power becomes his Partner's. It does go DOWN if theirs is lower."""
+    mate = turn.resolve_target(seat, "partner")[0]
+    turn.add_power(who, turn.f(mate)["power"] - turn.f(who)["power"])
+
+
+@fx("wb_corrupted_lawman")
+def _corrupted_lawman(turn, seat, who, phase):
+    """The Sheriff changes sides, and is worth something to whoever holds him."""
+    opp = turn.resolve_target(seat, "opp")[0]
+    if turn.f(who)["tokens"].get("sheriff", 0) > 0:
+        turn.move_token(who, opp, "sheriff")
+        turn.add_attack(seat, who, [opp], turn.power(who))
+        return
+    holder = turn.token_holder("sheriff")
+    if holder is not None and holder[0] != seat:
+        turn.add_power(holder, 1)
+        turn.move_token(holder, who, "sheriff")
+        turn.add_power(who, 1)
+
+
+@fx("wb_keys_to_the_armory")
+def _keys_to_the_armory(turn, seat, who, phase):
+    """Whoever is holding the Sheriff gains 2 Power -- that may be an Opponent."""
+    holder = turn.token_holder("sheriff")
+    if holder is not None:
+        turn.add_power(holder, 2)
+
+
+@fx("milady_poison")
+def _poison(turn, seat, who, phase):
+    """Half the Opponent's CURRENT HP, rounded down, so it can never finish them.
+
+    It resolves after every other Intrigue and reads the HP total left once
+    everything else has landed, which is why it arrives here deferred.
+    """
+    from . import engine
+
+    opp = turn.resolve_target(seat, "opp")[0]
+    left = engine.hp_value(turn.f(opp))
+    hurt = left // 2
+    if hurt:
+        turn.add_hp(opp, -hurt)
+        turn.note(kind="poison", seat=opp[0], slot=opp[1], damage=hurt)
