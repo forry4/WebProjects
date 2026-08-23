@@ -130,7 +130,7 @@
      "ops": [{"op": "fx", "name": "feyfolk_all_legends_must_pass"}],
      "note": "If all three Characters are Spirits at the START of this turn, the Fey Folk are KO. This is their ONLY KO condition -- and if Wong Fei-Hung removes this card from play they cannot lose."},
     {"fighter": "the_fey_folk", "id": 51, "name": "Spirit Storm", "copies": 2, "art_ids": [51],
-     "ops": [{"op": "attack", "power_bonus": {"kind": "spirits", "per": 1}}],
+     "ops": [{"op": "attack", "power_bonus": {"kind": "spirits", "times": 1}}],
      "note": "Spirit count is read at the START of the turn; a Character becoming a Spirit during it does not count."},
     {"fighter": "the_fey_folk", "id": 52, "name": "Fairy Ring", "copies": 2, "art_ids": [52],
      "ops": [{"op": "heal", "n": {"kind": "spirits", "times": 2}, "target": "partner"}]},
