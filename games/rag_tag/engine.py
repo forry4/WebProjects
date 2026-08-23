@@ -1369,3 +1369,122 @@ def public_view(game: dict, seat) -> dict:
     view["pending_is_yours"] = game["pending_pid"] == game["seats"][seat]
     view["pending"] = game["pending"] if view["pending_is_yours"] else None
     return view
+
+
+# ==========================================================================
+# The server-facing API
+# ==========================================================================
+#
+# Rag Tag is SIMULTANEOUS, so there is no single seat on turn. `may_act` is the
+# question the server actually needs -- does this player owe a submission? -- and
+# `turn_pid` exists only for the bot scheduler, which wants one pid or none.
+
+
+def is_over(game) -> bool:
+    return bool(game) and game.get("winner") is not None
+
+
+def owes_move(game: dict, seat: int) -> bool:
+    """Is this seat holding the game up?"""
+    if is_over(game):
+        return False
+    if game["pending_pid"] == game["seats"][seat]:
+        return True
+    phase = game["phase"]
+    if phase == "draft":
+        return len(game["draft_picks"][seat]) < game["draft_round"]
+    if phase == "order":
+        return game["order_choice"][seat] is None
+    if phase == "build":
+        return game["build_choice"][seat] is None
+    return False
+
+
+def may_act(game, pid: str) -> bool:
+    if not game or is_over(game):
+        return False
+    try:
+        seat = seat_of(game, pid)
+    except IllegalMove:
+        return False
+    return owes_move(game, seat)
+
+
+def turn_pid(game):
+    """One pid the bot scheduler can act on, or None.
+
+    Both seats can owe a move at once; the scheduler only ever asks about the
+    bot's own pid, so returning the first owing seat is enough and is stable.
+    """
+    if not game or is_over(game):
+        return None
+    for seat in (0, 1):
+        if owes_move(game, seat):
+            return game["seats"][seat]
+    return None
+
+
+def legal_moves(game: dict, seat: int) -> list[dict]:
+    """Every move this seat could legally submit right now."""
+    if not owes_move(game, seat):
+        return []
+    if game["pending_pid"] == game["seats"][seat]:
+        if game["pending_kind"] == "choose_character":
+            return [{"kind": "character", "character": c}
+                    for c in game["pending"]["options"]]
+        return []
+    phase = game["phase"]
+    if phase == "draft":
+        return [{"kind": "draft", "fighter": fid}
+                for fid in game["draft_hands"][seat]]
+    if phase == "order":
+        return [{"kind": "order", "slot": s} for s in (0, 1)]
+    if phase == "build":
+        return [{"kind": "build", "inst": inst, "pos": pos}
+                for inst in (game["build_offer"][seat] or [])
+                for pos in legal_build_positions(game, seat)]
+    return []
+
+
+def apply_move(game: dict, pid: str, move: dict) -> None:
+    """The single entry point the server validates every move through.
+
+    A client-side bot is safe precisely because it cannot skip this.
+    """
+    if is_over(game):
+        raise IllegalMove("the fight is over")
+    kind = (move or {}).get("kind")
+    if kind == "draft":
+        draft_pick(game, pid, move.get("fighter"))
+    elif kind == "order":
+        order_pick(game, pid, move.get("slot"))
+    elif kind == "build":
+        build_submit(game, pid, move.get("inst"), move.get("pos"),
+                     move.get("bottom_last"))
+    elif kind == "character":
+        choose_character(game, pid, move.get("character"))
+    else:
+        raise IllegalMove("unknown move")
+    advance(game)
+
+
+def player_view(game, pid):
+    """`public_view` addressed by pid -- what a socket for `pid` may receive."""
+    if not game:
+        return None
+    seat = None
+    if pid in game.get("seats", []):
+        seat = game["seats"].index(pid)
+    return public_view(game, seat)
+
+
+def result_summary(game) -> dict:
+    """A finished game in the shape the lobby's History row wants."""
+    if not is_over(game):
+        return {}
+    return {
+        "winner": game["winner"],
+        "rounds": game["round"],
+        "teams": [list(t) for t in game.get("teams", [[], []])],
+        "reason": (game["log"][-1] if game.get("log") else ""),
+    }

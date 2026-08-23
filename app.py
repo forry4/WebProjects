@@ -139,3 +139,12 @@ try:
     LOG.info("mounted Dissonance at /dissonance")
 except Exception as _ot_err:  # pragma: no cover - optional package
     LOG.warning("Dissonance not mounted: %s", _ot_err)
+
+# Rag Tag — its self-contained sub-app mounted under /ragtag. Same defensive
+# guard: an import error here must not take down the rest of the backend.
+try:
+    from games.rag_tag.main import ragtag_app
+    app.mount("/ragtag", ragtag_app)
+    LOG.info("mounted Rag Tag at /ragtag")
+except Exception as _rt_err:  # pragma: no cover - optional package
+    LOG.warning("Rag Tag not mounted: %s", _rt_err)
