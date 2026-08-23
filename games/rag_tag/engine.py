@@ -1368,6 +1368,11 @@ def public_view(game: dict, seat) -> dict:
     view["build_offer"] = list(game["build_offer"][seat] or [])
     view["pending_is_yours"] = game["pending_pid"] == game["seats"][seat]
     view["pending"] = game["pending"] if view["pending_is_yours"] else None
+    # Whether each side still owes a submission. The client must not have to
+    # re-derive this: a simultaneous game has no "your turn" to read off the
+    # phase, and a client that guesses wrong shows the wrong prompt.
+    view["you_owe"] = owes_move(game, seat)
+    view["they_owe"] = owes_move(game, 1 - seat)
     return view
 
 

@@ -20,6 +20,7 @@ const GAMES = [
 	// APPEND new games only — webapp/test/screens.mjs clicks .home-game-card by INDEX.
 	{ id: "dontminion", name: "Dontminion", tagline: "A kingdom built one card at a time", status: "ready", screen: "dontminion", accent: "#b08d57", players: "1–4 players" },
 	{ id: "dissonance", name: "Dissonance", tagline: "Winning every trick is a losing plan", status: "ready", screen: "dissonance", accent: "#4fb783", players: "2 players" },
+	{ id: "ragtag", name: "Rag Tag", tagline: "Two fighters, one deck you never shuffle", status: "ready", screen: "ragtag", accent: "#e8663c", players: "2 players" },
 ];
 // Local vs AI (the offline hub) is deliberately NOT in the catalogue: with a connection the
 // home menu's real games supersede it, and without one you never get past the loading screen —
@@ -36,6 +37,8 @@ const GAME_EMBLEM = {
 	// A splayed hand of three cards — the deck-builder.
 	dontminion: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round"><rect x="9" y="4" width="7" height="10" rx="1" transform="rotate(8 12.5 9)" /><rect x="4" y="6" width="7" height="10" rx="1" transform="rotate(-12 7.5 11)" /><rect x="8.5" y="9" width="7" height="10" rx="1" /><path d="M10.5 12H14M10.5 14.5H14" /></svg>),
 	dissonance: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round"><rect x="3.5" y="6" width="8" height="11" rx="1.2" transform="rotate(-10 7.5 11.5)" /><rect x="12" y="6" width="8" height="11" rx="1.2" transform="rotate(10 16 11.5)" /><path d="M5.5 11h3M7 9.5v3" /><path d="M14.8 11.5h3" /></svg>),
+	// Two raised fists over a tagged-in third — the tag team.
+	ragtag: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round"><path d="M4 13.5V9.5a1.5 1.5 0 0 1 3 0v3" /><path d="M7 12.5V8a1.5 1.5 0 0 1 3 0v4.5" /><path d="M10 12.5v-1a1.5 1.5 0 0 1 3 0v5a3.5 3.5 0 0 1-3.5 3.5H8A4 4 0 0 1 4 16v-2.5" /><path d="M16.5 4.5L20 8l-3.5 3.5" /></svg>),
 };
 
 export { SITE_NAME, GAMES, GAME_EMBLEM };

@@ -25,6 +25,7 @@ on:
       - 'games/spender_duel/**'
       - 'games/dontminion/**'
       - 'games/dissonance/**'
+      - 'games/rag_tag/**'
       - 'books/**'
       - 'shared/**'
       - '.github/workflows/deploy-pages.yml'

@@ -1,0 +1,372 @@
+/* Rag Tag.
+ *
+ * A real stylesheet, imported with ?inline and injected by the component's own
+ * <style> tag. It is NEVER a JS template literal: one stray backtick used to
+ * terminate the literal, reparse the rest of the file as a tagged template and
+ * blank the page, and it shipped that way twice.
+ *
+ * The lobby is the SHARED kit (shared/lobby.jsx + shared/lobby.lobby-css.css).
+ * This sheet is concatenated AFTER it, so nothing here may set display,
+ * grid-template-columns or gap on .rt-lobby-cols — a base rule here out-orders
+ * the shared MEDIA rules and would pin a phone to three columns. Per-game width
+ * tuning goes through --lby-list-max, which works from either side.
+ */
+
+.ragtag {
+  --lby-accent: #e8663c;
+  --rt-ink: #f4ece2;
+  --rt-dim: #b9a894;
+  --rt-panel: #2a1f1a;
+  --rt-panel-2: #362720;
+  --rt-line: #4a3529;
+  --rt-hp: #5fbf6a;
+  --rt-power: #9b6fd0;
+  --rt-hit: #e8663c;
+  --lby-list-max: 30rem;
+  color: var(--rt-ink);
+}
+
+.ragtag .rt-wrap {
+  max-width: 74rem;
+  margin: 0 auto;
+  padding: 0 0.75rem 3rem;
+}
+
+/* ── Fighter boards ─────────────────────────────────────────────────────── */
+
+.ragtag .rt-teams {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.ragtag .rt-side {
+  border: 1px solid var(--rt-line);
+  border-radius: 0.6rem;
+  background: var(--rt-panel);
+  padding: 0.5rem 0.6rem;
+}
+
+.ragtag .rt-side.rt-mine {
+  border-color: var(--lby-accent);
+}
+
+.ragtag .rt-side-hd {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--rt-dim);
+  margin-bottom: 0.4rem;
+}
+
+.ragtag .rt-side-name { font-weight: 700; color: var(--rt-ink); }
+
+.ragtag .rt-fighters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.ragtag .rt-fighter {
+  border: 1px solid var(--rt-line);
+  border-radius: 0.5rem;
+  background: var(--rt-panel-2);
+  padding: 0.45rem 0.55rem;
+  position: relative;
+  transition: box-shadow 160ms ease, transform 160ms ease;
+}
+
+.ragtag .rt-fighter.rt-active {
+  box-shadow: 0 0 0 2px var(--lby-accent);
+}
+
+.ragtag .rt-fighter.rt-ko { opacity: 0.45; }
+
+.ragtag .rt-fighter.rt-struck { animation: rt-shake 320ms ease; }
+
+@keyframes rt-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
+.ragtag .rt-fname {
+  font-weight: 700;
+  font-size: 0.92rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.ragtag .rt-tag {
+  font-size: 0.66rem;
+  color: var(--rt-dim);
+  border: 1px solid var(--rt-line);
+  border-radius: 0.6rem;
+  padding: 0 0.3rem;
+}
+
+.ragtag .rt-stats {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  margin-top: 0.3rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ragtag .rt-hp { color: var(--rt-hp); font-weight: 700; }
+.ragtag .rt-pw { color: var(--rt-power); font-weight: 700; }
+.ragtag .rt-hp small, .ragtag .rt-pw small { color: var(--rt-dim); font-weight: 400; }
+
+.ragtag .rt-bar {
+  height: 5px;
+  border-radius: 3px;
+  background: #1b120e;
+  overflow: hidden;
+  margin-top: 0.3rem;
+}
+
+.ragtag .rt-bar span {
+  display: block;
+  height: 100%;
+  background: var(--rt-hp);
+  transition: width 300ms ease;
+}
+
+.ragtag .rt-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.3rem;
+}
+
+.ragtag .rt-chip {
+  font-size: 0.68rem;
+  border: 1px solid var(--rt-line);
+  border-radius: 0.6rem;
+  padding: 0 0.35rem;
+  color: var(--rt-dim);
+}
+
+.ragtag .rt-chip b { color: var(--rt-ink); }
+
+/* ── The ring ───────────────────────────────────────────────────────────── */
+
+.ragtag .rt-ring {
+  border: 1px solid var(--rt-line);
+  border-radius: 0.6rem;
+  background: var(--rt-panel);
+  padding: 0.7rem;
+  margin: 0.6rem 0;
+  min-height: 8.5rem;
+}
+
+.ragtag .rt-ring-hd {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.8rem;
+  color: var(--rt-dim);
+  margin-bottom: 0.5rem;
+}
+
+.ragtag .rt-beat {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.ragtag .rt-vs { color: var(--rt-dim); font-weight: 700; }
+
+.ragtag .rt-card {
+  border: 1px solid var(--rt-line);
+  border-radius: 0.5rem;
+  background: var(--rt-panel-2);
+  padding: 0.5rem 0.6rem;
+  min-height: 4.5rem;
+}
+
+.ragtag .rt-card.rt-played { animation: rt-flip 320ms ease; }
+
+@keyframes rt-flip {
+  from { transform: rotateY(90deg); opacity: 0; }
+  to { transform: rotateY(0); opacity: 1; }
+}
+
+.ragtag .rt-card-name { font-weight: 700; font-size: 0.9rem; }
+.ragtag .rt-card-by { font-size: 0.72rem; color: var(--rt-dim); }
+.ragtag .rt-card-ops { font-size: 0.78rem; margin-top: 0.3rem; color: var(--rt-ink); }
+
+.ragtag .rt-events {
+  margin-top: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--rt-dim);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.6rem;
+  min-height: 1.1rem;
+}
+
+.ragtag .rt-ev-hit { color: var(--rt-hit); }
+.ragtag .rt-ev-heal { color: var(--rt-hp); }
+.ragtag .rt-ev-pw { color: var(--rt-power); }
+
+/* ── Choices ────────────────────────────────────────────────────────────── */
+
+.ragtag .rt-prompt {
+  border: 1px solid var(--lby-accent);
+  border-radius: 0.6rem;
+  background: var(--rt-panel);
+  padding: 0.7rem;
+  margin: 0.6rem 0;
+}
+
+.ragtag .rt-prompt h3 {
+  font-size: 0.95rem;
+  margin-bottom: 0.15rem;
+}
+
+.ragtag .rt-prompt p {
+  font-size: 0.8rem;
+  color: var(--rt-dim);
+  margin-bottom: 0.5rem;
+}
+
+.ragtag .rt-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.ragtag .rt-pick {
+  border: 1px solid var(--rt-line);
+  border-radius: 0.5rem;
+  background: var(--rt-panel-2);
+  color: var(--rt-ink);
+  padding: 0.45rem 0.6rem;
+  cursor: pointer;
+  text-align: left;
+  min-width: 9rem;
+  font: inherit;
+}
+
+.ragtag .rt-pick:hover { border-color: var(--lby-accent); }
+.ragtag .rt-pick.rt-sel { border-color: var(--lby-accent); box-shadow: 0 0 0 1px var(--lby-accent); }
+.ragtag .rt-pick-name { font-weight: 700; font-size: 0.88rem; }
+.ragtag .rt-pick-sub { font-size: 0.72rem; color: var(--rt-dim); }
+
+/* The insert strip: your Fight Deck with a slot between every pair. */
+.ragtag .rt-slots {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+  margin-top: 0.5rem;
+}
+
+.ragtag .rt-slot {
+  border: 1px dashed var(--rt-line);
+  border-radius: 0.35rem;
+  background: transparent;
+  color: var(--rt-dim);
+  cursor: pointer;
+  padding: 0 0.35rem;
+  font: inherit;
+  font-size: 0.75rem;
+}
+
+.ragtag .rt-slot:hover, .ragtag .rt-slot.rt-sel {
+  border-color: var(--lby-accent);
+  border-style: solid;
+  color: var(--rt-ink);
+}
+
+.ragtag .rt-deckcard {
+  border: 1px solid var(--rt-line);
+  border-radius: 0.35rem;
+  background: var(--rt-panel-2);
+  padding: 0.25rem 0.45rem;
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.ragtag .rt-go {
+  margin-top: 0.6rem;
+  border: 1px solid var(--lby-accent);
+  background: var(--lby-accent);
+  color: #1b120e;
+  font-weight: 700;
+  border-radius: 0.45rem;
+  padding: 0.4rem 0.9rem;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.ragtag .rt-go[disabled] { opacity: 0.45; cursor: default; }
+
+.ragtag .rt-waitline {
+  font-size: 0.82rem;
+  color: var(--rt-dim);
+  margin-top: 0.4rem;
+}
+
+/* ── Result ─────────────────────────────────────────────────────────────── */
+
+.ragtag .rt-over {
+  border: 1px solid var(--lby-accent);
+  border-radius: 0.6rem;
+  background: var(--rt-panel);
+  padding: 1rem;
+  text-align: center;
+  margin: 0.8rem 0;
+}
+
+.ragtag .rt-over h2 { font-size: 1.4rem; margin-bottom: 0.2rem; }
+.ragtag .rt-over p { color: var(--rt-dim); font-size: 0.85rem; }
+
+.ragtag .rt-log {
+  margin-top: 0.6rem;
+  max-height: 9rem;
+  overflow-y: auto;
+  font-size: 0.76rem;
+  color: var(--rt-dim);
+  border-top: 1px solid var(--rt-line);
+  padding-top: 0.4rem;
+}
+
+.ragtag .rt-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.2rem;
+  transform: translateX(-50%);
+  background: var(--rt-panel-2);
+  border: 1px solid var(--lby-accent);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.9rem;
+  font-size: 0.85rem;
+  z-index: 40;
+}
+
+.ragtag .rt-waiting {
+  text-align: center;
+  padding: 3rem 1rem;
+}
+
+.ragtag .rt-code {
+  font-size: 1.6rem;
+  letter-spacing: 0.2em;
+  font-weight: 700;
+  color: var(--lby-accent);
+}
+
+/* Mobile: two fighters side by side is already the tightest useful layout, so
+   the boards stack rather than shrink further. */
+@media (max-width: 560px) {
+  .ragtag .rt-fighters { grid-template-columns: 1fr; }
+  .ragtag .rt-beat { grid-template-columns: 1fr; }
+  .ragtag .rt-vs { text-align: center; }
+}

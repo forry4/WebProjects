@@ -39,6 +39,7 @@ const SCREENS = [
 	{ path: "/werewolf", chunk: "WhereWolf", marker: ".ww" },
 	{ path: "/dontminion", chunk: "Dontminion", marker: ".dm" },
 	{ path: "/dissonance", chunk: "Dissonance", marker: ".dis" },
+	{ path: "/ragtag", chunk: "RagTag", marker: ".ragtag" },
 	{ path: "/books", chunk: "Books", marker: ".bk-app" },
 ];
 
@@ -4537,6 +4538,99 @@ try {
 	// most timing-sensitive thing in the file — running in the tail, where lane B has
 	// already finished and it has the box almost to itself. Measured: beat is the
 	// last ~20s either way, so this costs nothing and buys it a quiet machine.
+
+	// Rag Tag: create a game against the bot and play a whole round through --
+	// draft, who-leads, the fight animation, and a BUILD! submission. The point
+	// is that this game is SIMULTANEOUS, so there is no "your turn" to wait on:
+	// every prompt appears because the server said `you_owe`, and a client that
+	// re-derived it would show the wrong one. Only a real play-through catches
+	// that; mounting the route proves nothing about it.
+	async function ragtagFight(log) {
+		const ctx = await browser.newContext();
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "ragtag-harness", name: "RagHarness", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		page.on("console", (m) => { if (m.type() === "error") errors.push(`console: ${m.text()}`); });
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(`ragtag: ${name}`); log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		await page.goto(`http://localhost:${PORT}/ragtag`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".lby-create-row", { timeout: 25_000 }).catch(() => {});
+		check("lobby reachable by URL", await page.locator(".lby-create-row").count() > 0);
+
+		await page.locator(".lby-cta").click({ timeout: 15_000 }).catch(() => {});
+		await page.waitForSelector(".cm-create", { timeout: 15_000 }).catch(() => {});
+		await page.locator(".cm-create").click({ timeout: 15_000 }).catch(() => {});
+
+		// Draft: two picks, and the second hand is the one the bot passed across.
+		let drafted = 0;
+		for (let round = 0; round < 2; round++) {
+			await page.waitForSelector(".rt-prompt .rt-pick", { timeout: 25_000 }).catch(() => {});
+			const n = await page.locator(".rt-prompt .rt-pick").count();
+			if (n === 0) break;
+			await page.locator(".rt-prompt .rt-pick").first().click().catch(() => {});
+			drafted += 1;
+			await sleep(700);
+		}
+		check("drafted two fighters", drafted === 2, `made ${drafted} pick(s)`);
+
+		// The Fey Folk ask for a Character before anything else; if they were
+		// drafted the same prompt shape answers it, so this loop covers both.
+		for (let i = 0; i < 3; i++) {
+			const heading = await page.locator(".rt-prompt h3").first().innerText().catch(() => "");
+			if (!/Who leads/i.test(heading) && await page.locator(".rt-prompt .rt-pick").count() > 0
+				&& /Character/i.test(heading)) {
+				await page.locator(".rt-prompt .rt-pick").first().click().catch(() => {});
+				await sleep(600);
+			} else break;
+		}
+
+		// Who leads.
+		await page.waitForSelector(".rt-prompt .rt-pick", { timeout: 20_000 }).catch(() => {});
+		const leadHd = await page.locator(".rt-prompt h3").first().innerText().catch(() => "");
+		check("asked who leads", /leads/i.test(leadHd), `heading was "${leadHd}"`);
+		await page.locator(".rt-prompt .rt-pick").first().click().catch(() => {});
+
+		// The fight resolves server-side and arrives as beats; the ring plays them.
+		await page.waitForSelector(".rt-ring", { timeout: 25_000 }).catch(() => {});
+		check("the ring appears", await page.locator(".rt-ring").count() > 0);
+		await sleep(2600);
+		const cardNames = await page.locator(".rt-card-name").allInnerTexts().catch(() => []);
+		check("both revealed cards are named",
+			cardNames.filter((t) => t && t !== "—").length >= 2,
+			JSON.stringify(cardNames));
+
+		// BUILD!: pick a card, pick a slot, lock it in.
+		await page.waitForSelector(".rt-prompt .rt-go", { timeout: 30_000 }).catch(() => {});
+		const buildHd = await page.locator(".rt-prompt h3").first().innerText().catch(() => "");
+		check("reached the BUILD! step", /Build/i.test(buildHd), `heading was "${buildHd}"`);
+		const offered = await page.locator(".rt-prompt .rt-pick").count();
+		check("three cards offered", offered === 3, `offered ${offered}`);
+
+		const lockedBefore = await page.locator(".rt-go[disabled]").count();
+		check("cannot lock in before choosing", lockedBefore === 1);
+
+		await page.locator(".rt-prompt .rt-pick").first().click().catch(() => {});
+		await page.waitForSelector(".rt-slot", { timeout: 10_000 }).catch(() => {});
+		const slots = await page.locator(".rt-slots .rt-slot").count();
+		check("a slot for every position in the deck", slots >= 3, `${slots} slots`);
+		await page.locator(".rt-slots .rt-slot").first().click().catch(() => {});
+		await page.locator(".rt-go").click({ timeout: 10_000 }).catch(() => {});
+
+		// The round turns over: the fight deck is one card longer than it was.
+		await sleep(2500);
+		const roundText = await page.locator(".rt-ring-hd").first().innerText().catch(() => "");
+		check("a second round began", /Round\s*2/i.test(roundText) || /turn/i.test(roundText),
+			`ring header was "${roundText}"`);
+
+		check("no page errors", errors.length === 0, errors[0]?.slice(0, 200) || "");
+		await ctx.close();
+	}
+
 	// skat → Hard → beat stay contiguous and in order, preserving the adjacency the
 	// comments in those blocks were written against.
 	const laneA = [offlineSpender, offlineCoc, offlineDuel, offlineDissonance,
@@ -4547,7 +4641,7 @@ try {
 	const laneB = [routeMounts, shellNav, authScreen, spenderPlayTurn, spenderWaitingRoom,
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, lastDifficulty,
-		dissonanceQuartet];
+		dissonanceQuartet, ragtagFight];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant
 	// writing it — it then ran because it was simply the next statement. Now it has
