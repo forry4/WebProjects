@@ -37,6 +37,7 @@ from games.rag_tag import engine                                    # noqa: E402
 
 import scrape_target as tgt                                         # noqa: E402
 import tt_inspect                                                   # noqa: E402
+import tt_oracle                                                    # noqa: E402
 
 LOGS = tgt.CORP + "/logs"
 SEATS = ["p0", "p1"]
@@ -44,12 +45,26 @@ SEATS = ["p0", "p1"]
 
 # ── the BGA half — written against real logs (tt_inspect.py), not guessed ────────────
 import collections                                                  # noqa: E402
-from games.rag_tag.fighters import FIGHTERS, DECKS, STARTING_CARD, ROSTER   # noqa: E402
+from games.rag_tag.fighters import CARDS, FIGHTERS, ROSTER   # noqa: E402
 
 BGA_TO_FID = {v["bga_id"]: k for k, v in FIGHTERS.items()}
-# Our CARDS ids ARE BGA's `typeArg` — verified by name on real logs (TheFeyFolk/50 =
-# "All Legends Must Pass", ChingShih/70 = "Terror of the Seas"). So no card table is needed
-# and `import_bga.py`'s transcription is independently confirmed.
+
+# BGA's `typeArg` is an ART id, NOT our card id, and the two diverge exactly where a card has
+# two copies: CARDS[10] (golem, "Protect the Innocent", copies 2) carries art_ids [10, 15], so
+# BGA calls the second copy 15 and we have no cid 15 at all. 78 art ids -> 74 cards, 4 of them
+# doubled — which matches the "78 card faces" the package docs cite.
+#
+# Assuming typeArg == cid therefore worked for ~95% of cards and failed only on the four
+# duplicated ones, surfacing as "card 15 not in offer+deck" — a lookup miss dressed up as a
+# deck-state bug. Map through art_ids.
+ART_TO_CID = {int(a): cid
+              for cid, c in CARDS.items()
+              for a in (c.get("art_ids") or [cid])}
+
+
+def _cid(card):
+    """BGA card dict -> our card id."""
+    return ART_TO_CID[int(card["typeArg"])]
 
 
 def _seat_map(events, manifest_row):
@@ -92,7 +107,7 @@ def _reconstruct_hands(picks):
     return [hands[0], hands[1]]
 
 
-def _build_events(events, seats):
+def _build_events(events, fid_seat):
     """updateBuildDeckArgs split into (seat, kind, payload).
 
     kind == "order": the two starting cards being laid out (no drawnCards).
@@ -107,14 +122,13 @@ def _build_events(events, seats):
         added = a.get("addedCard")
         if not added:
             continue
-        seat = None
-        for c in (a.get("deck") or []) + [added]:
-            loc = str(c.get("location") or "")
-            if "_" in loc:
-                pid = loc.rsplit("_", 1)[-1]
-                if pid in seats:
-                    seat = seats[pid]
-                    break
+        # SEAT FROM THE CARD, not from the location string. Every card belongs to exactly
+        # one fighter and every fighter to exactly one team, so cid -> fighter -> seat is
+        # unambiguous and self-checking. Parsing `location` ("player-deck_<pid>") looked
+        # equivalent but mis-attributed some packets, and the symptom was the far-away
+        # "card N not in offer+deck" -- a seat error wearing a rules error's clothes.
+        fid = BGA_TO_FID.get(added.get("type"))
+        seat = fid_seat.get(fid)
         if seat is None:
             continue
         drawn = a.get("drawnCards") or []
@@ -151,7 +165,9 @@ def parse_actions(events, manifest_row):
     for seat, fid in picks:
         teams[seat].append(fid)
 
-    for seat, kind, a in _build_events(events, seats):
+    fid_seat = {fid: seat for seat, fids in teams.items() for fid in fids}
+    builds = {0: [], 1: []}
+    for seat, kind, a in _build_events(events, fid_seat):
         if kind == "order":
             if seat in ordered:
                 continue
@@ -165,10 +181,19 @@ def parse_actions(events, manifest_row):
                 plan.append({"op": "move", "seat": seat,
                              "move": {"kind": "order", "slot": teams[seat].index(fid0)}})
         else:
-            offer = [int(c["typeArg"]) for c in a["drawnCards"]] + [int(a["addedCard"]["typeArg"])]
-            plan.append({"op": "build_offer_cids", "seat": seat, "cids": offer,
-                         "kept_cid": int(a["addedCard"]["typeArg"]),
-                         "pos": a["addedCard"].get("locationArg")})
+            offer = [_cid(c) for c in a["drawnCards"]] + [_cid(a["addedCard"])]
+            builds[seat].append({"op": "build_offer_cids", "seat": seat, "cids": offer,
+                                 "kept_cid": _cid(a["addedCard"]),
+                                 "pos": a["addedCard"].get("locationArg")})
+
+    # INTERLEAVE BY ROUND. Both seats submit once per BUILD step and the engine only advances
+    # when both are in, so replaying the log's own emission order (which can run several of one
+    # seat's builds together) left build_choice already set and owes_move False -- reported as
+    # an illegal move with an EMPTY legal list, which is the tell for "nobody owes a move".
+    for k in range(max(len(builds[0]), len(builds[1]))):
+        for seat in (0, 1):
+            if k < len(builds[seat]):
+                plan.append(builds[seat][k])
 
     ranks = manifest_row["ranks"].split(",")
     plan.append({"op": "result", "winner_seat": ranks.index("1")})
@@ -214,8 +239,20 @@ def replay(path, manifest_row, verbose=False, on_move=None):
     except Exception as e:                            # noqa: BLE001
         return _stop(None, 0, f"parse: {type(e).__name__}: {e}")
 
+    snaps = tt_oracle.snapshots(events)
     game = engine.new_game(SEATS, seed=0)
-    applied, recorded = 0, None
+    applied, recorded, si, divergence = 0, None, 0, None
+
+    def check():
+        """Compare our state to the next BGA snapshot. Records, never aborts —
+        a divergence is the RESULT of this gate, not an error in running it."""
+        nonlocal si, divergence
+        if divergence is not None or si >= len(snaps):
+            return
+        bad = tt_oracle.diff(game, snaps[si])
+        if bad:
+            divergence = {"snapshot": si, "round": game.get("round"), "fighters": bad}
+        si += 1
     for step in plan:
         op = step["op"]
         try:
@@ -248,10 +285,17 @@ def replay(path, manifest_row, verbose=False, on_move=None):
                                  f"legal[:3]={legal[:3]}")
                 if on_move is not None:
                     on_move(game, SEATS[seat], move, seat)
+                was = game["phase"]
                 engine.apply_move(game, SEATS[seat], move)
                 applied += 1
                 if verbose:
                     print(f"  [{applied:>3}] seat {seat} {move}")
+                # snapshot 0 is the freshly-built boards; later ones follow each FIGHT, which
+                # resolves when the second seat's build lands and the phase turns over.
+                if was == "order" and game["phase"] != "order":
+                    check()
+                elif move.get("kind") == "build" and game["phase"] != "build":
+                    check()
         except Exception as e:                        # noqa: BLE001
             return _stop(game, applied, f"{op}: {type(e).__name__}: {e}")
 
@@ -261,12 +305,14 @@ def replay(path, manifest_row, verbose=False, on_move=None):
     return {"over": over, "applied": applied, "stopped": None,
             "winner": ours, "recorded_winner": recorded,
             "winner_match": bool(over) and ours == recorded,
-            "phase": game["phase"], "summary": summary}
+            "phase": game["phase"], "summary": summary,
+            "divergence": divergence, "snapshots": len(snaps), "checked": si}
 
 
 def _stop(game, applied, why):
     return {"over": False, "applied": applied, "stopped": why,
-            "winner": None, "recorded_winner": None, "winner_match": False, "summary": {}}
+            "winner": None, "recorded_winner": None, "winner_match": False, "summary": {},
+            "divergence": None, "snapshots": 0, "checked": 0}
 
 
 def main():
