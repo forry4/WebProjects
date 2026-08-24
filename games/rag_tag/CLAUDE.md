@@ -214,9 +214,15 @@ in a loop, and the wrapper gives each element its own instance.
 
 The modal is where the rules text lives that will not fit on a face: the
 **per-card notes** from the data (20 cards have one, and they settle exactly the
-interactions a player stops and wonders about), and `boardFacts` — a fighter's
-oddities DERIVED from their track rather than written out, so a corrected import
-fixes the modal too. Watch the three shapes `special_track` comes in: a real
+interactions a player stops and wonders about), `OP_GLOSSARY` in `art.jsx` — the
+non-obvious half of each mechanic the card uses, because without it a one-op
+card's modal printed the title, the fighter and the same effect line already on
+the face, which teaches nothing and trains the player to stop holding cards —
+and `boardFacts`, a fighter's oddities DERIVED from their track rather than
+written out, so a corrected import fixes the modal too. The health track itself
+is DRAWN (`TrackStrip`) rather than described: "1 STOP space, the marker halts
+the moment it lands on one" is a sentence about a spatial thing, and the strip
+comes off the same data so the two cannot disagree. Watch the three shapes `special_track` comes in: a real
 space list (Bödvar, Joan), a min/max range with `spaces: []` (Ching Shih, the
 Fey Folk), and **an empty object for a fighter that has none** — which is
 truthy, and printed a track Milady does not have.

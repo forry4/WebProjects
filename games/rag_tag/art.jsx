@@ -186,6 +186,33 @@ export const FX_TEXT = {
   wong_match_partner_power: "Your Power becomes your partner's — down as well as up",
 };
 
+/* What a mechanic MEANS, for the detail modal.
+ *
+ * Without this the card modal was an empty state wearing a panel: for a card
+ * with no rules note it printed the title, the fighter, and the same one-line
+ * effect already on the face. A player who holds a card and learns nothing
+ * stops holding cards. These are the non-obvious halves — the parts the verb
+ * does not tell you — so even a one-op card is worth opening.
+ */
+export const OP_GLOSSARY = {
+  attack: "Attack — deals your Power in damage. A single Block cancels EVERY attack that team makes this turn, whatever it was aimed at.",
+  block: "Block — cancels every attack the opposing team makes this turn, even the ones aimed at their own partner.",
+  damage: "Direct damage — not an attack, so a Block does not stop it.",
+  heal: "Heal — moves the marker back up the track. A fighter already on a KO space can never be healed.",
+  power: "Power — settles after the cards resolve, so Power gained this turn does not fuel this turn's attack.",
+  transfer_power: "Moving Power settles with everything else, after both cards have resolved.",
+  cancel: "Cancel — the other card does nothing at all, including its own cancel. Read before anything else happens.",
+  ignite: "Aflame — a burning token that stays. Five of them is Incineration, and that is an instant loss.",
+  track: "A track advances a marker on this fighter's own board, separately from their health.",
+  spirit: "Spirits are the Fey Folk's Characters after they fall. They still count, and some cards scale with how many there are.",
+  plant_scheme: "A planted Scheme waits on the health track. It fires later, when something reaches it.",
+  unleash_scheme: "Unleashing takes an Intrigue token off the pile — its effect is hidden until it resolves.",
+  give_token: "Passing a token can hand an opponent something they want. Check who ends up holding it.",
+  take_token: "Taking a token pulls it from whoever holds it, including an opponent.",
+  flip_card: "This card has two faces. Turning it over changes what it does next time it is revealed.",
+  fx: "This one does not follow the usual pattern — read the note above.",
+};
+
 /* Which icon fronts an op row on a card. Kept beside the icon table so adding
  * an op to the data and forgetting the picture is one file to notice it in. */
 export function iconForOp(op) {

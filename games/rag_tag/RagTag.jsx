@@ -10,7 +10,7 @@ import {
   readLobbyCache, writeLobbyCache,
 } from "../../shared/lobby.jsx";
 import { buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
-import { Sigil, Icon, sigilOf, iconForOp, FX_TEXT } from "./art.jsx";
+import { Sigil, Icon, sigilOf, iconForOp, FX_TEXT, OP_GLOSSARY } from "./art.jsx";
 import { narrateBeat, narrateRound } from "./narrate.jsx";
 import { useCardInfoGesture } from "../../shared/gestures.js";
 
@@ -214,7 +214,11 @@ function boardFacts(board) {
       ? "A STOP on almost every space: the marker moves at most one space a turn, whatever the total."
       : `${stops} STOP space${stops === 1 ? "" : "s"} — the marker halts the moment it lands on one.`);
   }
-  if (iconed > 0) out.push(`${iconed} space${iconed === 1 ? "" : "s"} carry an icon that fires when the marker passes.`);
+  if (iconed > 0) {
+    out.push(iconed === 1
+      ? "1 space carries an icon that fires when the marker passes it."
+      : `${iconed} spaces carry an icon that fires when the marker passes them.`);
+  }
   const st = board.special_track;
   if (st && st.id) {
     const label = String(st.id).replace(/_/g, " ");
@@ -377,8 +381,10 @@ function FighterCard({ fid, state, board, active, fx, beatKey, scale, onInfo }) 
       <div className="rt-stats">
         <span className="rt-stat rt-hp">
           <Icon name="hp" />
-          <b>{ko ? "KO" : spirit || spent ? "—" : hpNow}</b>
-          {!ko && !spirit && !spent && <small>{`/${hpMax}`}</small>}
+          <b>
+            {ko ? "KO" : spirit || spent ? "—" : hpNow}
+            {!ko && !spirit && !spent && <small className="rt-den">{`/${hpMax}`}</small>}
+          </b>
         </span>
         <span className="rt-stat rt-pw">
           <Icon name="power" /><b>{state.power}</b><small>Power</small>
@@ -494,6 +500,32 @@ function PlayCard({ card, catalog, flipKey, side, onInfo }) {
   );
 }
 
+/* A board's health track, drawn rather than described.
+ *
+ * The facts below it were sentences about a spatial thing — "1 STOP space, the
+ * marker halts the moment it lands on one", "4 spaces carry an icon" — which is
+ * the hardest possible way to say where they are. The strip is generated from
+ * the same data, so it cannot disagree with the prose it replaces.
+ */
+function TrackStrip({ track }) {
+  if (!track || track.length < 2) return null;
+  return (
+    <div className="rt-strip" role="img" aria-label={`${track.length} spaces`}>
+      {track.map((sp, i) => {
+        const stop = (sp.icons || []).includes("stop");
+        const cls = ["rt-cell"];
+        if (sp.kind !== "hp") cls.push(`rt-cell-${sp.kind}`);
+        else if (stop) cls.push("rt-cell-stop");
+        else if ((sp.icons || []).length) cls.push("rt-cell-icon");
+        return (
+          <i key={i} className={cls.join(" ")}
+            title={sp.kind !== "hp" ? sp.kind : stop ? "stop" : (sp.icons || []).length ? "icon" : String(sp.hp)} />
+        );
+      })}
+    </div>
+  );
+}
+
 function InfoTarget({ as: Tag = "div", onInfo, children, ...rest }) {
   const gesture = useCardInfoGesture(onInfo);
   return <Tag {...rest} {...gesture}>{children}</Tag>;
@@ -540,17 +572,35 @@ function InfoModal({ info, catalog, onClose }) {
       <div className="rt-modal" style={{ "--f-ink": sig.ink, "--f-deep": sig.deep }}
         role="dialog" aria-modal="true" aria-label={isCard ? card.name : board.name}
         onClick={(e) => e.stopPropagation()}>
-        <div className="rt-modal-art"><Sigil fid={fid} /></div>
+        <div className="rt-modal-art">
+          <span className="rt-modal-medal"><Sigil fid={fid} /></span>
+        </div>
         <div className="rt-modal-body">
           <h2>{isCard ? card.name : board.name}</h2>
-          <p className="rt-modal-meta">
+          {/* Two tiers, not one dot-run: what KIND of thing this is, then the
+              numbers, in the same chip vocabulary the board uses — those are
+              what the modal was opened to check. */}
+          <p className="rt-modal-tags">
             {isCard
               ? [board?.name, card.starting ? "Starting Card" : null,
-                card.copies > 1 ? `${card.copies} copies in the deck` : "1 copy in the deck",
                 card.instant_bonus ? "instant bonus" : null].filter(Boolean).join(" · ")
-              : [(board.tags || []).join(" · "),
-                `${board.base_power} starting Power`,
-                `${maxHpOf(board) ?? "?"} health`].filter(Boolean).join(" · ")}
+              : (board.tags || []).join(" · ")}
+          </p>
+          <p className="rt-modal-stats">
+            {isCard ? (
+              <span className="rt-chip">
+                {card.copies > 1 ? `${card.copies} copies` : "1 copy"} in the deck
+              </span>
+            ) : (
+              <>
+                <span className="rt-stat rt-hp">
+                  <Icon name="hp" /><b>{maxHpOf(board) ?? "?"}</b><small>health</small>
+                </span>
+                <span className="rt-stat rt-pw">
+                  <Icon name="power" /><b>{board.base_power}</b><small>Power</small>
+                </span>
+              </>
+            )}
           </p>
 
           {isCard && (
@@ -574,16 +624,62 @@ function InfoModal({ info, catalog, onClose }) {
 
           {isCard && card.note && <p className="rt-modal-note">{card.note}</p>}
 
-          {facts.length > 0 && (
-            <ul className="rt-modal-facts">
-              {facts.map((f, i) => <li key={i}>{f}</li>)}
-            </ul>
+          {isCard && (() => {
+            // The non-obvious half of each mechanic this card uses. Without it a
+            // one-op card's modal repeated its own face and taught nothing.
+            const seen = [];
+            const walk = (list) => {
+              for (const op of list || []) {
+                if (op.op && OP_GLOSSARY[op.op] && !seen.includes(op.op)) seen.push(op.op);
+                walk(op.then); walk(op.else); walk(op.success);
+              }
+            };
+            walk(ops); walk(backOps);
+            if (!seen.length) return null;
+            return (
+              <>
+                <h3 className="rt-modal-h3">How it works</h3>
+                <ul className="rt-modal-facts">
+                  {seen.map((k) => <li key={k}>{OP_GLOSSARY[k]}</li>)}
+                </ul>
+              </>
+            );
+          })()}
+
+          {!isCard && (
+            <>
+              <h3 className="rt-modal-h3">Board</h3>
+              {board.characters
+                ? board.characters.map((c) => (
+                  <div className="rt-modal-track" key={c.id}>
+                    <span className="rt-modal-track-name rt-cap">{c.id}</span>
+                    <TrackStrip track={c.hp_track} />
+                  </div>))
+                : <div className="rt-modal-track"><TrackStrip track={board.hp_track} /></div>}
+              {board.back?.hp_track && (
+                <div className="rt-modal-track">
+                  <span className="rt-modal-track-name">transformed</span>
+                  <TrackStrip track={board.back.hp_track} />
+                </div>
+              )}
+              <p className="rt-modal-key">
+                <span className="rt-cell rt-cell-ko" /> KO
+                <span className="rt-cell rt-cell-stop" /> stop
+                <span className="rt-cell rt-cell-icon" /> icon
+                <span className="rt-cell rt-cell-revive" /> revive
+              </p>
+              {facts.length > 0 && (
+                <ul className="rt-modal-facts">
+                  {facts.map((f, i) => <li key={i}>{f}</li>)}
+                </ul>
+              )}
+            </>
           )}
 
           {!isCard && deck.length > 0 && (
             <>
               <h3 className="rt-modal-h3">
-                Their {deck.reduce((n, c) => n + (c.copies || 1), 0)} cards
+                Deck — {deck.reduce((n, c) => n + (c.copies || 1), 0)} cards
                 {deck.length !== deck.reduce((n, c) => n + (c.copies || 1), 0)
                   && <span className="rt-modal-h3-sub">{deck.length} different</span>}
               </h3>
@@ -591,6 +687,7 @@ function InfoModal({ info, catalog, onClose }) {
                 {deck.map((c) => (
                   <span className={`rt-modal-chip${c.starting ? " rt-modal-chip-start" : ""}`} key={c.cid}>
                     {c.name}{c.copies > 1 ? ` ×${c.copies}` : ""}
+                    {c.starting && <em className="rt-modal-start">start</em>}
                   </span>
                 ))}
               </div>
