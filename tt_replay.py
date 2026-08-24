@@ -241,6 +241,10 @@ def force_build_offer(game, seat, cids):
     return chosen
 
 
+class _Pending(Exception):
+    """A choose_character the log has not told us how to answer."""
+
+
 def replay(path, manifest_row, verbose=False, on_move=None):
     """Drive our engine from a log. Returns a dict describing how far it got."""
     events = list(tt_inspect.events(path))
@@ -251,13 +255,26 @@ def replay(path, manifest_row, verbose=False, on_move=None):
 
     game = engine.new_game(SEATS, seed=0)
     applied, recorded, checked, divergence = 0, None, 0, None
+    trace = []
 
     def do_check(step):
         nonlocal checked, divergence
         snap = tt_oracle.snapshot_of(step["event"])
         if not snap or game["phase"] == "draft":
             return
+        # ORACLE IS NOT CALIBRATED — divergences below are NOT bug reports.
+        # BGA's snapshots do not correspond one-to-one with our engine's state transitions,
+        # and the offset is not even uniform: measured on a game that replays PERFECTLY,
+        # mordred tracks in lockstep while the_wild_bunch runs exactly one snapshot ahead
+        # (ours [1,1,4,7,10,13,13] vs theirs [1,1,1,4,7,10,13]). Different seats drain their
+        # builds at different points, so no single global shift can align them — a one-step
+        # lag was tried and changed nothing. Until this is calibrated against a game known to
+        # be correct, treat every divergence as SUSPECT: a miscalibrated oracle manufactures
+        # bugs that were never there, which is worse than having no oracle at all.
         checked += 1
+        trace.append({"round": game.get("round"),
+                      "ours": {k: v[0] for k, v in tt_oracle.our_state(game).items()},
+                      "bga": {k: v[0] for k, v in snap.items()}})
         bad = tt_oracle.diff(game, snap)
         if bad and divergence is None:
             divergence = {"mid": step["mid"], "round": game.get("round"),
@@ -287,13 +304,29 @@ def replay(path, manifest_row, verbose=False, on_move=None):
     # game runs [0,1][1,0][0,1][0,0] with counts 8 vs 7, and the moment it desyncs every later
     # submission comes back with an EMPTY legal list. Asking the engine who owes a move makes
     # the replay immune to a missing, duplicated or reordered packet in either seat's stream.
+    #
+    # Builds are queued AS ENCOUNTERED, never all up front. Pre-queuing them let the first
+    # drain run the entire game to completion, after which every remaining `check` compared a
+    # FINISHED game to a mid-game snapshot — all seven checks in one game fired at round 6.
+    # The gate reported divergences the whole time while measuring nothing real, which is the
+    # worst failure mode available to a correctness check.
     queues = {0: [], 1: []}
-    rest = []
-    for step in plan:
-        (queues[step["seat"]] if step["op"] == "build_offer_cids" else rest).append(step)
+
+    def drain():
+        """Submit whatever builds the engine is currently asking for, and no more."""
+        while not engine.is_over(game) and game["phase"] == "build":
+            if game.get("pending_kind") == "choose_character":
+                raise _Pending()
+            progressed = False
+            for seat in (0, 1):
+                if engine.owes_move(game, seat) and queues[seat]:
+                    do_build(queues[seat].pop(0))
+                    progressed = True
+            if not progressed:
+                return
 
     try:
-        for step in rest:
+        for step in plan:
             op = step["op"]
             if op == "draft_hands":
                 force_draft_hands(game, step["hands"])
@@ -301,31 +334,24 @@ def replay(path, manifest_row, verbose=False, on_move=None):
                 recorded = step["winner_seat"]
             elif op == "check":
                 do_check(step)
+            elif op == "build_offer_cids":
+                queues[step["seat"]].append(step)
+                drain()
             elif op == "move":
                 if game.get("pending_kind") == "choose_character":
                     return _stop(game, applied, "unhandled pending: choose_character")
                 seat, move = step["seat"], step["move"]
                 if move not in engine.legal_moves(game, seat):
-                    return _stop(game, applied,
-                                 f"illegal {move!r} (phase={game['phase']})")
+                    return _stop(game, applied, f"illegal {move!r} (phase={game['phase']})")
                 if on_move is not None:
                     on_move(game, SEATS[seat], move, seat)
                 engine.apply_move(game, SEATS[seat], move)
                 applied += 1
-            # once the boards exist, drain whatever builds the engine is now asking for
-            while not engine.is_over(game) and game["phase"] == "build":
-                if game.get("pending_kind") == "choose_character":
-                    return _stop(game, applied, "unhandled pending: choose_character")
-                progressed = False
-                for seat in (0, 1):
-                    if engine.owes_move(game, seat) and queues[seat]:
-                        do_build(queues[seat].pop(0))
-                        progressed = True
-                if not progressed:
-                    break
-    except Exception as e:                            # noqa: BLE001
+                drain()
+    except _Pending:
+        return _stop(game, applied, "unhandled pending: choose_character")
+    except Exception as e:                            # noqa: BLE001 — report, don't crash the batch
         return _stop(game, applied, f"{type(e).__name__}: {e}")
-
     left = len(queues[0]) + len(queues[1])
     over = engine.is_over(game)
     summary = engine.result_summary(game) if over else {}
@@ -339,13 +365,13 @@ def replay(path, manifest_row, verbose=False, on_move=None):
             "winner": ours, "recorded_winner": recorded,
             "winner_match": bool(over) and ours == recorded,
             "phase": game["phase"], "summary": summary,
-            "divergence": divergence, "checked": checked, "unused": left}
+            "divergence": divergence, "checked": checked, "unused": left, "trace": trace}
 
 
 def _stop(game, applied, why):
     return {"over": False, "applied": applied, "stopped": why,
             "winner": None, "recorded_winner": None, "winner_match": False, "summary": {},
-            "divergence": None, "checked": 0, "unused": 0}
+            "divergence": None, "checked": 0, "unused": 0, "trace": []}
 
 
 def main():

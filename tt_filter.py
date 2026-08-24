@@ -56,7 +56,7 @@ def main():
         print(f"  {n:>3}  {why}")
     if div:
         print()
-        print("STATE DIVERGENCES (power/KO vs BGA - these name RULES, not transport):")
+        print("STATE DIVERGENCES - ORACLE UNCALIBRATED, these are SUSPECT not bugs:")
         for what, n in div.most_common(12):
             print(f"  {n:>3}  {what}")
     open(f"{CORP}/kept_games.txt", "w").write("\n".join(keep))
