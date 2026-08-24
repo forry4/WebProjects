@@ -468,7 +468,7 @@ CARDS = {10: {'fighter': 'golem',
                'cond': {'kind': 'no_opponent_attacked'},
                'then': [{'op': 'attack'}]}],
       'note': 'A Block is not an Attack, so an opponent who Blocks still satisfies the '
-              "condition -- Mordred Attacks, and that Attack triggers their Block's Bonus "
+              "condition — Mordred Attacks, and that Attack triggers their Block's Bonus "
               'Action.'},
  23: {'fighter': 'mordred',
       'id': 23,
@@ -542,7 +542,7 @@ CARDS = {10: {'fighter': 'golem',
       'copies': 1,
       'art_ids': [43],
       'ops': [{'op': 'fx', 'name': 'mephisto_drag_you_to_hell'}],
-      'note': 'If your team was to lose this turn for ANY reason you instantly win instead -- '
+      'note': 'If your team was to lose this turn for ANY reason you instantly win instead — '
               "including Shango's Incineration, and including your Partner being KO'd."},
  44: {'fighter': 'mephisto',
       'id': 44,
@@ -581,7 +581,7 @@ CARDS = {10: {'fighter': 'golem',
       'art_ids': [50],
       'ops': [{'op': 'fx', 'name': 'feyfolk_all_legends_must_pass'}],
       'note': 'If all three Characters are Spirits at the START of this turn, the Fey Folk are '
-              'KO. This is their ONLY KO condition -- and if Wong Fei-Hung removes this card '
+              'KO. This is their ONLY KO condition — and if Wong Fei-Hung removes this card '
               'from play they cannot lose.'},
  51: {'fighter': 'the_fey_folk',
       'id': 51,
@@ -636,7 +636,7 @@ CARDS = {10: {'fighter': 'golem',
       'starting': True,
       'art_ids': [60, 61],
       'ops': [{'op': 'damage', 'n': 1, 'target': 'self'}, {'op': 'attack'}],
-      'note': 'She takes the 1 Direct Damage even when the Attack is Blocked -- but not when '
+      'note': 'She takes the 1 Direct Damage even when the Attack is Blocked — but not when '
               "Ching Shih's 20-Ship action has already set her HP to 1."},
  62: {'fighter': 'maman_brijit',
       'id': 62,
@@ -786,7 +786,7 @@ CARDS = {10: {'fighter': 'golem',
       'copies': 2,
       'art_ids': [85],
       'ops': [{'op': 'block', 'success': [{'op': 'fx', 'name': 'wong_match_partner_power'}]}],
-      'note': "Wong's Power becomes equal to his Partner's -- it does go DOWN if the Partner "
+      'note': "Wong's Power becomes equal to his Partner's — it does go DOWN if the Partner "
               'has less.'},
  90: {'fighter': 'milady',
       'id': 90,
@@ -804,7 +804,7 @@ CARDS = {10: {'fighter': 'golem',
               {'op': 'if',
                'cond': {'kind': 'self_attacked'},
                'then': [{'op': 'unleash_scheme'}]}],
-      'note': 'Milady herself, not her Partner, must be ATTACKED -- Direct Damage does not '
+      'note': 'Milady herself, not her Partner, must be ATTACKED — Direct Damage does not '
               'trigger it.'},
  92: {'fighter': 'milady',
       'id': 92,
@@ -897,7 +897,7 @@ CARDS = {10: {'fighter': 'golem',
        'art_ids': [106],
        'ops': [{'op': 'fx', 'name': 'wb_keys_to_the_armory'},
                {'op': 'give_token', 'token': 'sheriff', 'to': 'opp', 'after': True}],
-       'note': 'Whichever Fighter holds the Sheriff token gains 2 Power -- that may be an '
+       'note': 'Whichever Fighter holds the Sheriff token gains 2 Power — that may be an '
                'opponent. THEN the token goes to your Opponent.'},
  110: {'fighter': 'shango',
        'id': 110,

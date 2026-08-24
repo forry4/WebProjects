@@ -198,6 +198,29 @@ put the same four sentences on screen twice, ~700px apart, which three independe
 reviewers each called out. Finished rounds are archived as their NARRATED ROWS, not
 as beats, because the text depends on board state that has since moved on.
 
+### Press-and-hold / right-click reads anything
+Every face that stands for a fighter or a card — the four board panels, both
+played cards, the draft picks, the who-leads options, the build offers and the
+rows of your Fight Deck — opens a detail modal on right-click or a long press.
+The gesture is `useCardInfoGesture` in **`shared/gestures.js`**, shared with
+Dontminion: the hard half is that **Android fires `contextmenu` on a long press
+and iOS Safari does not**, so touch needs a real timer, and that is not a thing
+to keep two copies of. Both paths funnel through one `fired` flag so a hold can
+never also play the card.
+
+Because most of those faces are rendered inside `.map()`, they go through
+`<InfoTarget>` rather than calling the hook directly — a hook cannot be called
+in a loop, and the wrapper gives each element its own instance.
+
+The modal is where the rules text lives that will not fit on a face: the
+**per-card notes** from the data (20 cards have one, and they settle exactly the
+interactions a player stops and wonders about), and `boardFacts` — a fighter's
+oddities DERIVED from their track rather than written out, so a corrected import
+fixes the modal too. Watch the three shapes `special_track` comes in: a real
+space list (Bödvar, Joan), a min/max range with `spaces: []` (Ching Shih, the
+Fey Folk), and **an empty object for a fighter that has none** — which is
+truthy, and printed a track Milady does not have.
+
 ### Everything visual is drawn in the bundle
 There is no licensed art in the repo (see *Where the data came from*), so `art.jsx`
 carries a hand-authored emblem and accent colour per fighter plus the mechanical
@@ -231,7 +254,7 @@ media rules and pins a phone to three columns. Width and padding ARE fair game.
 
 | File | Covers |
 |---|---|
-| `test_fighters` | the generated data: staleness, the closed op vocabulary, deck sizes, every track able to end a fighter |
+| `test_fighters` | the generated data: staleness, the closed op vocabulary, deck sizes, every track able to end a fighter, and that no `--` transcription artefact reaches the detail modal |
 | `test_engine` | the rules, mostly by rigging an exact position and resolving ONE turn — a simultaneous game has no "make a move and see"; plus the beat NARRATION events (attack/block/cancel), which render as an empty log line rather than as any kind of failure |
 | `test_bot` | the soak: whole games over random teams, every fighter forced in, invariants, seat symmetry |
 | `test_server` | rooms, moves, the bot scheduler end to end |

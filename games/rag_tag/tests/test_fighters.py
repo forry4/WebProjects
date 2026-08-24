@@ -188,3 +188,23 @@ def test_milady_has_nine_distinct_schemes_across_eleven_tokens():
     assert len(ids) == len(set(ids)) == 9
     assert schemes["total_tokens"] == 11
     assert fighters.FIGHTERS["milady"]["tokens"]["scheme"] == 11
+
+
+def test_no_transcription_artefacts_reach_the_table():
+    """`--` is a shell-safety habit, not punctuation, and it shipped to a card.
+
+    The rules notes are prose I typed, and the detail modal renders them
+    verbatim, so a double hyphen lands on screen mid-sentence looking like
+    unprocessed source data. Cheap to assert, and the only place it can be
+    caught is here -- the engine never reads these strings.
+    """
+    bad = []
+    for card in fighters.CARDS.values():
+        for field in ("name", "note"):
+            text = card.get(field) or ""
+            if "--" in text:
+                bad.append(f"{card['name']}.{field}")
+    for fid, board in fighters.FIGHTERS.items():
+        if "--" in (board.get("name") or ""):
+            bad.append(f"{fid}.name")
+    assert not bad, f"double hyphens reach the UI in: {bad}"

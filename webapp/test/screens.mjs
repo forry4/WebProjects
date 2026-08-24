@@ -4639,6 +4639,31 @@ try {
 		check("the turn just watched lands in the log", logAfter > logLines,
 			`${logLines} -> ${logAfter}`);
 
+		// The detail modal. Right-click is the desktop half of the gesture
+		// (shared/gestures.js); the touch half is a timer, because iOS Safari does
+		// not fire `contextmenu` on a long press. What matters here is that the
+		// gesture reaches a fighter AND a card, and that it does not also trigger
+		// whatever the plain click on that element was wired to do.
+		await page.locator(".rt-fighter").first().click({ button: "right" }).catch(() => {});
+		await sleep(400);
+		const infoTitle = await page.locator(".rt-modal h2").first().innerText().catch(() => "");
+		check("right-click on a fighter opens its details", infoTitle.length > 0,
+			`modal title was "${infoTitle}"`);
+		check("...and the details name its cards",
+			await page.locator(".rt-modal-chip").count() > 0);
+		await page.keyboard.press("Escape").catch(() => {});
+		await sleep(300);
+		check("Escape closes it", await page.locator(".rt-modal").count() === 0);
+
+		await page.locator(".rt-card").first().click({ button: "right" }).catch(() => {});
+		await sleep(400);
+		const cardInfo = await page.locator(".rt-modal h2").first().innerText().catch(() => "");
+		check("right-click on a played card opens its details", cardInfo.length > 0,
+			`modal title was "${cardInfo}"`);
+		await page.locator(".rt-modal-close").click({ timeout: 5_000 }).catch(() => {});
+		await sleep(300);
+		check("the close button closes it", await page.locator(".rt-modal").count() === 0);
+
 		// BUILD!: pick a card, pick a slot, lock it in.
 		await page.waitForSelector(".rt-prompt h3", { timeout: 30_000 }).catch(() => {});
 		const buildHd = await page.locator(".rt-prompt h3").first().innerText().catch(() => "");

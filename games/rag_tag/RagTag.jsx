@@ -12,6 +12,7 @@ import {
 import { buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 import { Sigil, Icon, sigilOf, iconForOp, FX_TEXT } from "./art.jsx";
 import { narrateBeat, narrateRound } from "./narrate.jsx";
+import { useCardInfoGesture } from "../../shared/gestures.js";
 
 /* Rag Tag — a two-player auto battler.
  *
@@ -185,6 +186,49 @@ function isTurnBeat(beat) {
   return !!beat && (beat.insts || []).some((x) => x != null);
 }
 
+/* The things about a board that are true but not printed anywhere the player
+   can see them mid-fight. Derived from the track rather than written out, so a
+   corrected import fixes the modal too. */
+function boardFacts(board) {
+  if (!board) return [];
+  const out = [];
+  const tr = board.hp_track || [];
+  const kos = tr.filter((sp) => sp.kind === "ko").length;
+  const stops = tr.filter((sp) => (sp.icons || []).includes("stop")).length;
+  const iconed = tr.filter((sp) => sp.kind === "hp" && (sp.icons || []).length).length;
+
+  if (board.characters) {
+    out.push(`Three Characters, one at a time — ${board.characters
+      .map((c) => c.id).join(", ")}. Each has its own health track.`);
+    out.push("Losing the last health on a Character turns them into a Spirit and the next one steps in.");
+  }
+  if (board.back) {
+    out.push("Double-sided: this fighter transforms, and the other side has its own health track.");
+  }
+  if (kos > 1) out.push(`${kos} KO spaces, so there is further to fall than the number suggests.`);
+  if (tr.some((sp) => sp.kind === "revive")) {
+    out.push("A revive space BELOW the KO spaces — pushed past both, they come back.");
+  }
+  if (stops > 0) {
+    out.push(stops >= tr.length - 2
+      ? "A STOP on almost every space: the marker moves at most one space a turn, whatever the total."
+      : `${stops} STOP space${stops === 1 ? "" : "s"} — the marker halts the moment it lands on one.`);
+  }
+  if (iconed > 0) out.push(`${iconed} space${iconed === 1 ? "" : "s"} carry an icon that fires when the marker passes.`);
+  const st = board.special_track;
+  if (st && st.id) {
+    const label = String(st.id).replace(/_/g, " ");
+    const spaces = (st.spaces || []).length;
+    out.push(spaces ? `Has a ${label} track of ${spaces} spaces.`
+      : st.max != null ? `Has a ${label} track running ${st.min ?? 0} to ${st.max}.`
+        : `Has a ${label} track.`);
+  }
+  for (const [t, n] of Object.entries(board.tokens || {})) {
+    if (n) out.push(`Starts with ${n} ${String(t).replace(/_/g, " ")}.`);
+  }
+  return out;
+}
+
 function maxHpOf(board) {
   if (!board) return null;
   const tracks = board.characters ? board.characters.map((c) => c.hp_track)
@@ -246,7 +290,8 @@ function HealthTrack({ track, at, scale }) {
   );
 }
 
-function FighterCard({ fid, state, board, active, fx, beatKey, scale }) {
+function FighterCard({ fid, state, board, active, fx, beatKey, scale, onInfo }) {
+  const gesture = useCardInfoGesture(board ? onInfo : null);
   if (!state || !board) return <div className="rt-fighter rt-fighter-ghost" />;
   const sig = sigilOf(fid);
   const track = trackFor(state, board);
@@ -310,7 +355,8 @@ function FighterCard({ fid, state, board, active, fx, beatKey, scale }) {
   if (fx?.hp > 0) cls.push("rt-mended");
 
   return (
-    <div className={cls.join(" ")} style={{ "--f-ink": sig.ink, "--f-deep": sig.deep }}>
+    <div className={cls.join(" ")} style={{ "--f-ink": sig.ink, "--f-deep": sig.deep }}
+      {...gesture} title={`${board.name} — hold or right-click for details`}>
       <div className="rt-fighter-glow" aria-hidden="true" />
       <div className="rt-fhd">
         <span className="rt-crest"><Sigil fid={fid} /></span>
@@ -366,7 +412,7 @@ function FighterCard({ fid, state, board, active, fx, beatKey, scale }) {
   );
 }
 
-function TeamSide({ label, mine, team, fighters, catalog, activeSlot, fxSlots, beatKey, scale }) {
+function TeamSide({ label, mine, team, fighters, catalog, activeSlot, fxSlots, beatKey, scale, onInfo }) {
   return (
     <div className={`rt-side${mine ? " rt-mine" : ""}`}>
       <div className="rt-side-hd">
@@ -384,6 +430,7 @@ function TeamSide({ label, mine, team, fighters, catalog, activeSlot, fxSlots, b
             fx={fxSlots?.[slot]}
             beatKey={beatKey}
             scale={scale}
+            onInfo={onInfo ? () => onInfo({ kind: "fighter", fid }) : null}
           />
         ))}
       </div>
@@ -400,7 +447,8 @@ function TeamSide({ label, mine, team, fighters, catalog, activeSlot, fxSlots, b
  * greying it out mid-sentence, and landed differently on every card — three
  * separate reviewers read it as a broken background image.
  */
-function PlayCard({ card, catalog, flipKey, side }) {
+function PlayCard({ card, catalog, flipKey, side, onInfo }) {
+  const gesture = useCardInfoGesture(card ? onInfo : null);
   const fid = card?.fighter;
   const sig = sigilOf(fid);
   const board = catalog?.fighters?.[fid];
@@ -420,7 +468,8 @@ function PlayCard({ card, catalog, flipKey, side }) {
   const bonuses = ops.filter((op) => op.success);
   return (
     <div className={`rt-card rt-card-${side}`} key={flipKey}
-      style={{ "--f-ink": sig.ink, "--f-deep": sig.deep }}>
+      style={{ "--f-ink": sig.ink, "--f-deep": sig.deep }}
+      {...gesture} title={`${card.name} — hold or right-click for details`}>
       <div className="rt-card-art">
         <Sigil fid={fid} />
         {card.instant_bonus && <span className="rt-card-flag">instant bonus</span>}
@@ -440,6 +489,115 @@ function PlayCard({ card, catalog, flipKey, side }) {
             </li>
           ))}
         </ul>
+      </div>
+    </div>
+  );
+}
+
+function InfoTarget({ as: Tag = "div", onInfo, children, ...rest }) {
+  const gesture = useCardInfoGesture(onInfo);
+  return <Tag {...rest} {...gesture}>{children}</Tag>;
+}
+
+/* A fighter or a card, in full.
+ *
+ * Reached by right-click or press-and-hold on anything that represents one —
+ * the same gesture everywhere, so it means one thing. This is where the rules
+ * text lives that will not fit on a face: a fighter's board oddities, and the
+ * per-card FAQ notes from the data, which settle exactly the interactions a
+ * player stops and wonders about mid-fight.
+ */
+function InfoModal({ info, catalog, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const isCard = info.kind === "card";
+  const card = isCard ? info.card : null;
+  const fid = isCard ? card?.fighter : info.fid;
+  const board = catalog?.fighters?.[fid];
+  const sig = sigilOf(fid);
+  if (isCard && !card) return null;
+  if (!isCard && !board) return null;
+
+  const deck = [];
+  if (!isCard) {
+    for (const [cid, c] of Object.entries(catalog?.cards || {})) {
+      if (c.fighter === fid) deck.push({ cid, ...c });
+    }
+    deck.sort((a, b) => (b.starting ? 1 : 0) - (a.starting ? 1 : 0)
+      || a.name.localeCompare(b.name));
+  }
+
+  const facts = isCard ? [] : boardFacts(board);
+  const ops = isCard ? (card.ops || []) : [];
+  const backOps = isCard && card.two_faced ? (card.ops_back || []) : [];
+
+  return (
+    <div className="rt-backdrop" onClick={onClose} role="presentation">
+      <div className="rt-modal" style={{ "--f-ink": sig.ink, "--f-deep": sig.deep }}
+        role="dialog" aria-modal="true" aria-label={isCard ? card.name : board.name}
+        onClick={(e) => e.stopPropagation()}>
+        <div className="rt-modal-art"><Sigil fid={fid} /></div>
+        <div className="rt-modal-body">
+          <h2>{isCard ? card.name : board.name}</h2>
+          <p className="rt-modal-meta">
+            {isCard
+              ? [board?.name, card.starting ? "Starting Card" : null,
+                card.copies > 1 ? `${card.copies} copies in the deck` : "1 copy in the deck",
+                card.instant_bonus ? "instant bonus" : null].filter(Boolean).join(" · ")
+              : [(board.tags || []).join(" · "),
+                `${board.base_power} starting Power`,
+                `${maxHpOf(board) ?? "?"} health`].filter(Boolean).join(" · ")}
+          </p>
+
+          {isCard && (
+            <ul className="rt-modal-ops">
+              {ops.map((op, i) => (
+                <li key={i}><Icon name={iconForOp(op)} /><span>{opWords(op)}</span></li>
+              ))}
+              {ops.filter((op) => op.success).map((op, i) => (
+                <li className="rt-card-bonus" key={`s${i}`}>
+                  <Icon name="fx" /><span>Success: {op.success.map(opWords).join(", ")}</span>
+                </li>
+              ))}
+              {backOps.length > 0 && (
+                <li className="rt-modal-sep"><Icon name="flip_card" /><span>Turned over:</span></li>
+              )}
+              {backOps.map((op, i) => (
+                <li key={`b${i}`}><Icon name={iconForOp(op)} /><span>{opWords(op)}</span></li>
+              ))}
+            </ul>
+          )}
+
+          {isCard && card.note && <p className="rt-modal-note">{card.note}</p>}
+
+          {facts.length > 0 && (
+            <ul className="rt-modal-facts">
+              {facts.map((f, i) => <li key={i}>{f}</li>)}
+            </ul>
+          )}
+
+          {!isCard && deck.length > 0 && (
+            <>
+              <h3 className="rt-modal-h3">
+                Their {deck.reduce((n, c) => n + (c.copies || 1), 0)} cards
+                {deck.length !== deck.reduce((n, c) => n + (c.copies || 1), 0)
+                  && <span className="rt-modal-h3-sub">{deck.length} different</span>}
+              </h3>
+              <div className="rt-modal-deck">
+                {deck.map((c) => (
+                  <span className={`rt-modal-chip${c.starting ? " rt-modal-chip-start" : ""}`} key={c.cid}>
+                    {c.name}{c.copies > 1 ? ` ×${c.copies}` : ""}
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+        <button type="button" className="rt-modal-close" onClick={onClose} aria-label="Close">×</button>
       </div>
     </div>
   );
@@ -470,6 +628,8 @@ export default function RagTag({ myId, authUser, onExit }) {
   const [beatIdx, setBeatIdx] = useState(0);
   // Rounds already fought, kept so the log is the whole fight and not just now.
   const [pastRounds, setPastRounds] = useState([]);
+  // The fighter or card being read in full (press-and-hold / right-click).
+  const [info, setInfo] = useState(null);
 
   const [historyShown, historyMore] = useProgressiveList(history);
   const urlAttemptRef = useRef(null);
@@ -1007,6 +1167,7 @@ export default function RagTag({ myId, authUser, onExit }) {
               fxSlots={fxSlots[theirSeat]}
               beatKey={`${game?.round}-${beatIdx}`}
               scale={hpScale}
+              onInfo={setInfo}
             />}
 
             {fightOn ? (
@@ -1035,6 +1196,7 @@ export default function RagTag({ myId, authUser, onExit }) {
                 <div className="rt-duel">
                   <PlayCard side="them" catalog={catalog}
                     card={cardOf(shownBeat?.insts?.[theirSeat])}
+                    onInfo={() => setInfo({ kind: "card", card: cardOf(shownBeat?.insts?.[theirSeat]) })}
                     flipKey={`t-${game?.round}-${beatIdx}`} />
                   <div className="rt-clash" key={`c-${game?.round}-${beatIdx}`} aria-hidden="true">
                     <span className="rt-clash-burst" />
@@ -1042,6 +1204,7 @@ export default function RagTag({ myId, authUser, onExit }) {
                   </div>
                   <PlayCard side="mine" catalog={catalog}
                     card={cardOf(shownBeat?.insts?.[mySeat])}
+                    onInfo={() => setInfo({ kind: "card", card: cardOf(shownBeat?.insts?.[mySeat]) })}
                     flipKey={`m-${game?.round}-${beatIdx}`} />
                 </div>
 
@@ -1096,6 +1259,7 @@ export default function RagTag({ myId, authUser, onExit }) {
               fxSlots={fxSlots[mySeat]}
               beatKey={`${game?.round}-${beatIdx}`}
               scale={hpScale}
+              onInfo={setInfo}
             />}
 
             {/* ── Prompts. Every one of them is "you owe a submission". ── */}
@@ -1133,8 +1297,10 @@ export default function RagTag({ myId, authUser, onExit }) {
                     const sg = sigilOf(fid);
                     const hp = maxHpOf(b);
                     return (
-                      <button type="button" className="rt-pick rt-draft-card" key={fid}
+                      <InfoTarget as="button" type="button" className="rt-pick rt-draft-card" key={fid}
                         style={{ "--f-ink": sg.ink, "--f-deep": sg.deep }}
+                        title={`${b?.name || fid} — hold or right-click for details`}
+                        onInfo={() => setInfo({ kind: "fighter", fid })}
                         onClick={() => sendMove({ kind: "draft", fighter: fid })}>
                         <span className="rt-draft-art"><Sigil fid={fid} /></span>
                         <span className="rt-draft-body">
@@ -1151,7 +1317,7 @@ export default function RagTag({ myId, authUser, onExit }) {
                             {(b?.tags || []).map((t) => <em key={t}>{t}</em>)}
                           </span>
                         </span>
-                      </button>
+                      </InfoTarget>
                     );
                   })}
                 </div>
@@ -1167,8 +1333,10 @@ export default function RagTag({ myId, authUser, onExit }) {
                     const sg = sigilOf(fid);
                     const sc = startingCards[fid];
                     return (
-                      <button type="button" className="rt-pick rt-pick-fighter" key={fid}
+                      <InfoTarget as="button" type="button" className="rt-pick rt-pick-fighter" key={fid}
                         style={{ "--f-ink": sg.ink, "--f-deep": sg.deep }}
+                        title={`${catalog?.fighters?.[fid]?.name || fid} — hold or right-click for details`}
+                        onInfo={() => setInfo({ kind: "fighter", fid })}
                         onClick={() => sendMove({ kind: "order", slot })}>
                         <span className="rt-pick-crest"><Sigil fid={fid} /></span>
                         <span className="rt-pick-body">
@@ -1180,7 +1348,7 @@ export default function RagTag({ myId, authUser, onExit }) {
                             ))}
                           </span>
                         </span>
-                      </button>
+                      </InfoTarget>
                     );
                   })}
                 </div>
@@ -1219,10 +1387,12 @@ export default function RagTag({ myId, authUser, onExit }) {
               rows.push(drop(0, "Insert here"));
               deck.forEach((inst, n) => {
                 rows.push(
-                  <div className="rt-deck-row" key={`c${n}`}>
+                  <InfoTarget className="rt-deck-row" key={`c${n}`}
+                    title={`${cardOf(inst)?.name || "?"} — hold or right-click for details`}
+                    onInfo={() => setInfo({ kind: "card", card: cardOf(inst) })}>
                     <span className="rt-deck-n">{n + 1}</span>
                     <span className="rt-deck-name">{cardOf(inst)?.name || "?"}</span>
-                  </div>);
+                  </InfoTarget>);
                 rows.push(drop(n + 1, "Insert here"));
               });
 
@@ -1242,10 +1412,12 @@ export default function RagTag({ myId, authUser, onExit }) {
                       const sg = sigilOf(c?.fighter);
                       const cid = instances[inst]?.cid;
                       return (
-                        <button type="button" key={inst}
+                        <InfoTarget as="button" type="button" key={inst}
                           className={`rt-pick rt-pick-card${buildPick === inst ? " rt-sel" : ""}`}
                           aria-pressed={buildPick === inst}
                           style={{ "--f-ink": sg.ink, "--f-deep": sg.deep }}
+                          title={`${c?.name || "card"} — hold or right-click for details`}
+                          onInfo={() => setInfo({ kind: "card", card: c })}
                           onClick={() => { setBuildPick(inst); setBuildPos(null); }}>
                           <span className="rt-pick-crest"><Sigil fid={c?.fighter} /></span>
                           <span className="rt-pick-body">
@@ -1266,7 +1438,7 @@ export default function RagTag({ myId, authUser, onExit }) {
                             </span>
                           </span>
                           {buildPick === inst && <span className="rt-pick-tick" aria-hidden="true" />}
-                        </button>
+                        </InfoTarget>
                       );
                     })}
                   </div>
@@ -1345,6 +1517,7 @@ export default function RagTag({ myId, authUser, onExit }) {
           </aside>
         </div>
       </div>
+      {info && <InfoModal info={info} catalog={catalog} onClose={() => setInfo(null)} />}
       {toast && <div className="rt-toast">{toast}</div>}
       {showRules && (
         <RulesModal title="How to play — Rag Tag" onClose={() => setShowRules(false)}>

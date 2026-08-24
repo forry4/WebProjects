@@ -113,6 +113,18 @@ for (const v of VIEWS) {
   await clickIf(".rt-ctl-go:not([disabled])");
   await shot("08-fight-turn2");
 
+  // The detail modal, on a fighter and on a played card. Right-click is the
+  // desktop half of the gesture; the touch half is a real timer (see
+  // shared/gestures.js) and is covered by the screens gate, not here.
+  await page.locator(".rt-fighter").first().click({ button: "right" }).catch(() => {});
+  await shot("07b-info-fighter", { full: false });
+  await page.keyboard.press("Escape").catch(() => {});
+  await sleep(300);
+  await page.locator(".rt-card").first().click({ button: "right" }).catch(() => {});
+  await shot("07c-info-card", { full: false });
+  await page.keyboard.press("Escape").catch(() => {});
+  await sleep(300);
+
   // Straight to the end of the round.
   await clickIf(".rt-ctl:not([disabled]):has-text('To the end')");
   await sleep(700);

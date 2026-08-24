@@ -7,7 +7,7 @@
     "A CARD is one entry. `copies` is how many physical copies sit in that fighter's deck,",
     "printed on the card as its frequency badge. `starting` marks the fighter's Starting Card;",
     "one of its copies carries the star and is set aside at setup, the rest live in the Build",
-    "Deck. `art_ids` are BGA's image ids -- the star copy is drawn separately, which is why some",
+    "Deck. `art_ids` are BGA's image ids — the star copy is drawn separately, which is why some",
     "cards list two.",
     "",
     "OPS. Each op is {op, ...}. `target` defaults to 'self' and is one of:",
@@ -35,12 +35,12 @@
   "known_gaps": [
     "Milady's 11 Intrigue (Scheme) tokens carry only 9 DISTINCT abilities, listed in",
     "milady_schemes below and taken verbatim-in-mechanics from BGA's own i18n strings.",
-    "Which 2 are duplicated is not visible in any public source -- the art is a face-down",
+    "Which 2 are duplicated is not visible in any public source — the art is a face-down",
     "pile. A gamedatas dump or a replay settles it; until then import_bga.py must not",
     "silently guess. See data/README.md.",
     "",
     "Ching Shih's 'Terror of the Seas' prints effects for 0-7, 8-15 and exactly 20 Ships.",
-    "16-19 is deliberately blank on the card -- it does nothing but the trailing THEN +1 Ship."
+    "16-19 is deliberately blank on the card — it does nothing but the trailing THEN +1 Ship."
   ],
 
   "milady_schemes": {
@@ -84,7 +84,7 @@
      "ops": [{"op": "block", "success": [{"op": "attack"}]}]},
     {"fighter": "mordred", "id": 22, "name": "Hidden Dagger", "copies": 3, "art_ids": [22],
      "ops": [{"op": "if", "cond": {"kind": "no_opponent_attacked"}, "then": [{"op": "attack"}]}],
-     "note": "A Block is not an Attack, so an opponent who Blocks still satisfies the condition -- Mordred Attacks, and that Attack triggers their Block's Bonus Action."},
+     "note": "A Block is not an Attack, so an opponent who Blocks still satisfies the condition — Mordred Attacks, and that Attack triggers their Block's Bonus Action."},
     {"fighter": "mordred", "id": 23, "name": "Cloak of Shadow", "copies": 3, "art_ids": [23],
      "ops": [{"op": "block", "success": [{"op": "heal", "n": 3, "target": "self"}]}]},
     {"fighter": "mordred", "id": 24, "name": "Execution", "copies": 1, "art_ids": [24],
@@ -112,7 +112,7 @@
               "then": [{"op": "damage", "n": 4, "target": "opp"}]}]},
     {"fighter": "mephisto", "id": 43, "name": "Drag You to Hell", "copies": 1, "art_ids": [43],
      "ops": [{"op": "fx", "name": "mephisto_drag_you_to_hell"}],
-     "note": "If your team was to lose this turn for ANY reason you instantly win instead -- including Shango's Incineration, and including your Partner being KO'd."},
+     "note": "If your team was to lose this turn for ANY reason you instantly win instead — including Shango's Incineration, and including your Partner being KO'd."},
     {"fighter": "mephisto", "id": 44, "name": "Serpent of the Pit", "copies": 2, "art_ids": [44],
      "ops": [{"op": "if", "cond": {"kind": "serpent", "face": "black"},
               "then": [{"op": "attack"}],
@@ -128,7 +128,7 @@
 
     {"fighter": "the_fey_folk", "id": 50, "name": "All Legends Must Pass", "copies": 1, "starting": true, "art_ids": [50],
      "ops": [{"op": "fx", "name": "feyfolk_all_legends_must_pass"}],
-     "note": "If all three Characters are Spirits at the START of this turn, the Fey Folk are KO. This is their ONLY KO condition -- and if Wong Fei-Hung removes this card from play they cannot lose."},
+     "note": "If all three Characters are Spirits at the START of this turn, the Fey Folk are KO. This is their ONLY KO condition — and if Wong Fei-Hung removes this card from play they cannot lose."},
     {"fighter": "the_fey_folk", "id": 51, "name": "Spirit Storm", "copies": 2, "art_ids": [51],
      "ops": [{"op": "attack", "power_bonus": {"kind": "spirits", "times": 1}}],
      "note": "Spirit count is read at the START of the turn; a Character becoming a Spirit during it does not count."},
@@ -151,7 +151,7 @@
 
     {"fighter": "maman_brijit", "id": 60, "name": "Chili Pepper Rum", "copies": 2, "starting": true, "art_ids": [60, 61],
      "ops": [{"op": "damage", "n": 1, "target": "self"}, {"op": "attack"}],
-     "note": "She takes the 1 Direct Damage even when the Attack is Blocked -- but not when Ching Shih's 20-Ship action has already set her HP to 1."},
+     "note": "She takes the 1 Direct Damage even when the Attack is Blocked — but not when Ching Shih's 20-Ship action has already set her HP to 1."},
     {"fighter": "maman_brijit", "id": 62, "name": "Soul Embrace", "copies": 2, "art_ids": [62],
      "ops": [{"op": "damage", "n": 1, "target": "partner"}, {"op": "power", "n": 1, "target": "self"}]},
     {"fighter": "maman_brijit", "id": 63, "name": "Sacrifice of Love", "copies": 1, "art_ids": [63],
@@ -203,14 +203,14 @@
      "ops": [{"op": "power", "n": 1, "target": "self"}, {"op": "heal", "n": 2, "target": "partner"}]},
     {"fighter": "wong_fei_hung", "id": 85, "name": "Ging Balance", "copies": 2, "art_ids": [85],
      "ops": [{"op": "block", "success": [{"op": "fx", "name": "wong_match_partner_power"}]}],
-     "note": "Wong's Power becomes equal to his Partner's -- it does go DOWN if the Partner has less."},
+     "note": "Wong's Power becomes equal to his Partner's — it does go DOWN if the Partner has less."},
 
     {"fighter": "milady", "id": 90, "name": "Dressed to Kill", "copies": 1, "starting": true, "art_ids": [90],
      "ops": [{"op": "plant_scheme"}]},
     {"fighter": "milady", "id": 91, "name": "With a Stab and a Smile", "copies": 1, "art_ids": [91],
      "ops": [{"op": "attack"},
              {"op": "if", "cond": {"kind": "self_attacked"}, "then": [{"op": "unleash_scheme"}]}],
-     "note": "Milady herself, not her Partner, must be ATTACKED -- Direct Damage does not trigger it."},
+     "note": "Milady herself, not her Partner, must be ATTACKED — Direct Damage does not trigger it."},
     {"fighter": "milady", "id": 92, "name": "What Doesn't Kill You Makes Me Stronger", "copies": 1, "art_ids": [92],
      "ops": [{"op": "attack"},
              {"op": "if", "cond": {"kind": "own_attack_blocked"}, "then": [{"op": "power", "n": 1, "target": "self"}]}]},
@@ -243,7 +243,7 @@
     {"fighter": "the_wild_bunch", "id": 106, "name": "Keys to the Armory", "copies": 1, "art_ids": [106],
      "ops": [{"op": "fx", "name": "wb_keys_to_the_armory"},
              {"op": "give_token", "token": "sheriff", "to": "opp", "after": true}],
-     "note": "Whichever Fighter holds the Sheriff token gains 2 Power -- that may be an opponent. THEN the token goes to your Opponent."},
+     "note": "Whichever Fighter holds the Sheriff token gains 2 Power — that may be an opponent. THEN the token goes to your Opponent."},
 
     {"fighter": "shango", "id": 110, "name": "Aflame!", "copies": 1, "starting": true, "art_ids": [110],
      "ops": [{"op": "ignite"}]},
