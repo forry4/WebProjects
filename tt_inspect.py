@@ -40,8 +40,11 @@ def main():
     if len(sys.argv) > 1:
         p = f"{LOGS}/{sys.argv[1]}.json"
         for mid, d in events(p):
-            args = {k: v for k, v in (d.get("args") or {}).items()
-                    if k not in ("i18n", "playerName")}
+            a = d.get("args")
+            # args is USUALLY a dict but not always -- gameStateMultipleActiveUpdate sends a
+            # bare list of player ids. Assuming dict here crashed the dump on real logs.
+            args = ({k: v for k, v in a.items() if k not in ("i18n", "playerName")}
+                    if isinstance(a, dict) else a)
             print(f"[{mid:>4}] {d['type']:<24} {json.dumps(args, default=str)[:200]}")
         return 0
 
@@ -52,7 +55,8 @@ def main():
         for _, d in events(p):
             t = d["type"]
             types[t] += 1
-            for k in (d.get("args") or {}):
+            a = d.get("args")
+            for k in (a if isinstance(a, dict) else {}):
                 argkeys[t][k] += 1
             sample.setdefault(t, d.get("args"))
 
