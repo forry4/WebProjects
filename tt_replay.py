@@ -157,6 +157,37 @@ def _steps(events, fid_seat):
     return out
 
 
+def _character_choices(events):
+    """fid -> [character ids, in the order the log first reveals them].
+
+    A fighter with Characters (the Fey Folk) picks one before anything else, and our engine
+    models that as a `choose_character` pending that blocks the whole game until answered.
+    BGA records it as `fighterSpecificState.activeTrack` flipping from null to a 1-based track
+    number, so track N is that fighter's Nth character in board order.
+    """
+    out, last = collections.defaultdict(list), {}
+    for _mid, d in events:
+        if d["type"] != "updateCardAndFighterData":
+            continue
+        for f in (d["args"].get("allFighters") or []):
+            fid = BGA_TO_FID.get(f.get("typeArg"))
+            st = f.get("fighterState") or {}
+            spec = st.get("fighterSpecificState") if isinstance(st, dict) else None
+            track = spec.get("activeTrack") if isinstance(spec, dict) else None
+            if fid is None or not track:
+                continue
+            chars = FIGHTERS[fid].get("characters") or []
+            # Record every TRANSITION, not every distinct value. The Fey Folk switch
+            # Character repeatedly and can return to one they held before, so deduping on
+            # (fighter, track) silently dropped the repeats and the replay ran out of answers
+            # mid-game — it stopped at 12 moves instead of 4, which looked like progress
+            # rather than a truncated table.
+            if 1 <= int(track) <= len(chars) and last.get(fid) != int(track):
+                last[fid] = int(track)
+                out[fid].append(chars[int(track) - 1]["id"])
+    return out
+
+
 def parse_actions(events, manifest_row):
     """BGA events -> ordered replay instructions (see module docstring for the shapes)."""
     seats = _seat_map(events, manifest_row)
@@ -164,7 +195,8 @@ def parse_actions(events, manifest_row):
     if len(picks) != 4:
         raise ValueError(f"expected 4 fighterDrafted, got {len(picks)}")
 
-    plan = [{"op": "draft_hands", "hands": _reconstruct_hands(picks)}]
+    plan = [{"op": "draft_hands", "hands": _reconstruct_hands(picks)},
+            {"op": "characters", "choices": _character_choices(events)}]
     for seat, fid in picks:
         plan.append({"op": "move", "seat": seat, "move": {"kind": "draft", "fighter": fid}})
 
@@ -256,6 +288,7 @@ def replay(path, manifest_row, verbose=False, on_move=None):
     game = engine.new_game(SEATS, seed=0)
     applied, recorded, checked, divergence = 0, None, 0, None
     trace = []
+    characters = {}
 
     def do_check(step):
         nonlocal checked, divergence
@@ -312,11 +345,24 @@ def replay(path, manifest_row, verbose=False, on_move=None):
     # worst failure mode available to a correctness check.
     queues = {0: [], 1: []}
 
+    def answer_pending():
+        """Resolve a choose_character from the log, or report that we cannot."""
+        while game.get("pending_kind") == "choose_character":
+            pend = game["pending"]
+            fid = game["teams"][pend["seat"]][pend["slot"]]
+            queue = characters.get(fid) or []
+            pick = next((c for c in queue if c in pend["options"]), None)
+            if pick is None:
+                raise _Pending()
+            queue.remove(pick)   # consume in order; transitions are recorded in sequence
+            engine.apply_move(game, SEATS[pend["seat"]], {"kind": "character",
+                                                          "character": pick})
+
     def drain():
         """Submit whatever builds the engine is currently asking for, and no more."""
+        answer_pending()
         while not engine.is_over(game) and game["phase"] == "build":
-            if game.get("pending_kind") == "choose_character":
-                raise _Pending()
+            answer_pending()
             progressed = False
             for seat in (0, 1):
                 if engine.owes_move(game, seat) and queues[seat]:
@@ -330,6 +376,8 @@ def replay(path, manifest_row, verbose=False, on_move=None):
             op = step["op"]
             if op == "draft_hands":
                 force_draft_hands(game, step["hands"])
+            elif op == "characters":
+                characters.update(step["choices"])
             elif op == "result":
                 recorded = step["winner_seat"]
             elif op == "check":
@@ -338,8 +386,7 @@ def replay(path, manifest_row, verbose=False, on_move=None):
                 queues[step["seat"]].append(step)
                 drain()
             elif op == "move":
-                if game.get("pending_kind") == "choose_character":
-                    return _stop(game, applied, "unhandled pending: choose_character")
+                answer_pending()
                 seat, move = step["seat"], step["move"]
                 if move not in engine.legal_moves(game, seat):
                     return _stop(game, applied, f"illegal {move!r} (phase={game['phase']})")
