@@ -128,7 +128,7 @@ def _steps(events, fid_seat):
 
     Yields (mid, seat, kind, args, drawn) in log order.
     """
-    ordered, out = set(), []
+    ordered, out, seen = set(), [], set()
     for mid, d in events:
         if d["type"] != "updateBuildDeckArgs":
             continue
@@ -141,6 +141,15 @@ def _steps(events, fid_seat):
             continue
         drawn = a.get("drawnCards")
         if drawn:
+            # BGA re-sends identical packets. Without this the same build is replayed twice,
+            # the two seats stop pairing up round by round, and the second submission comes
+            # back with an EMPTY legal list — the tell for "this seat already moved".
+            sig = (seat, tuple(sorted((c.get("type"), c.get("typeArg")) for c in drawn)),
+                   (added.get("type"), added.get("typeArg")),
+                   added.get("locationArg"), len(a.get("deck") or []))
+            if sig in seen:
+                continue
+            seen.add(sig)
             out.append((mid, seat, "build", a, drawn))
         elif CARDS[_cid(added)].get("starting") and seat not in ordered:
             ordered.add(seat)
@@ -167,13 +176,19 @@ def parse_actions(events, manifest_row):
     # Snapshots carry move_ids too, so checks can be INTERLEAVED BY MOVE ID rather than
     # consumed in sequence — which is what made the earlier "joan power 2 vs 1" divergence
     # untrustworthy. A check now lands at the point in the game it actually describes.
-    snaps = {}
-    for mid, d in events:
-        if d["type"] == "updateCardAndFighterData" and mid and d["args"].get("allFighters"):
-            snaps.setdefault(mid, d)
 
-    pending_steps = _steps(events, fid_seat)
-    for idx, (mid, seat, kind, a, drawn) in enumerate(pending_steps):
+    # Anchor checks by EVENT ORDER. The authoritative build packets carry move_id 0, so
+    # anchoring on move_id emitted no checks whatsoever (checked=0 everywhere) — a gate that
+    # silently measures nothing, which is worse than one that fails.
+    steps = {id(a): (seat, kind, a, drawn)
+             for _m, seat, kind, a, drawn in _steps(events, fid_seat)}
+    for _mid, d in events:
+        if d["type"] == "updateCardAndFighterData" and d["args"].get("allFighters"):
+            plan.append({"op": "check", "mid": _mid, "event": d})
+            continue
+        if d["type"] != "updateBuildDeckArgs" or id(d["args"]) not in steps:
+            continue
+        seat, kind, a, drawn = steps.pop(id(d["args"]))
         # A snapshot at move_id M describes the state AFTER the move at M, so its check is
         # emitted after that step. Checking before it read every fighter exactly one power
         # low — a uniform off-by-one across all four fighters, which is the signature of a
@@ -189,9 +204,6 @@ def parse_actions(events, manifest_row):
             offer = [_cid(c) for c in (drawn or [])] + [kept]
             plan.append({"op": "build_offer_cids", "seat": seat, "cids": offer,
                          "kept_cid": kept, "pos": a["addedCard"].get("locationArg")})
-        nxt = pending_steps[idx + 1][0] if idx + 1 < len(pending_steps) else None
-        for smid in sorted(k for k in list(snaps) if k <= mid or (nxt and k < nxt)):
-            plan.append({"op": "check", "mid": smid, "event": snaps.pop(smid)})
 
     ranks = manifest_row["ranks"].split(",")
     plan.append({"op": "result", "winner_seat": ranks.index("1")})
@@ -239,69 +251,101 @@ def replay(path, manifest_row, verbose=False, on_move=None):
 
     game = engine.new_game(SEATS, seed=0)
     applied, recorded, checked, divergence = 0, None, 0, None
+
+    def do_check(step):
+        nonlocal checked, divergence
+        snap = tt_oracle.snapshot_of(step["event"])
+        if not snap or game["phase"] == "draft":
+            return
+        checked += 1
+        bad = tt_oracle.diff(game, snap)
+        if bad and divergence is None:
+            divergence = {"mid": step["mid"], "round": game.get("round"),
+                          "phase": game["phase"], "fighters": bad}
+
+    def do_build(step):
+        """Submit one queued BUILD for its seat."""
+        nonlocal applied
+        seat = step["seat"]
+        insts = force_build_offer(game, seat, step["cids"])
+        kept = next(i for i in insts if game["instances"][i]["cid"] == step["kept_cid"])
+        legal_pos = engine.legal_build_positions(game, seat)
+        pos = step["pos"] if step["pos"] in legal_pos else (legal_pos[-1] if legal_pos else 0)
+        move = {"kind": "build", "inst": kept, "pos": pos}
+        if move not in engine.legal_moves(game, seat):
+            raise ValueError(f"illegal {move} (phase={game['phase']})")
+        if on_move is not None:
+            on_move(game, SEATS[seat], move, seat)
+        engine.apply_move(game, SEATS[seat], move)
+        applied += 1
+        if verbose:
+            print(f"  [{applied:>3}] seat {seat} {move}")
+
+    # BUILDS ARE QUEUED PER SEAT AND DRIVEN BY owes_move, NOT BY LOG ORDER.
+    # Both seats submit once per BUILD step and the engine advances only when both are in, so
+    # replaying the log's own sequence requires it to alternate perfectly. It does not: one
+    # game runs [0,1][1,0][0,1][0,0] with counts 8 vs 7, and the moment it desyncs every later
+    # submission comes back with an EMPTY legal list. Asking the engine who owes a move makes
+    # the replay immune to a missing, duplicated or reordered packet in either seat's stream.
+    queues = {0: [], 1: []}
+    rest = []
     for step in plan:
-        op = step["op"]
-        try:
+        (queues[step["seat"]] if step["op"] == "build_offer_cids" else rest).append(step)
+
+    try:
+        for step in rest:
+            op = step["op"]
             if op == "draft_hands":
                 force_draft_hands(game, step["hands"])
-            elif op == "check":
-                # A divergence is the RESULT of this gate, not an error running it: record
-                # the first one and keep going, so one bad rule does not hide the rest.
-                snap = tt_oracle.snapshot_of(step["event"])
-                if snap and game["phase"] != "draft":
-                    checked += 1
-                    bad = tt_oracle.diff(game, snap)
-                    if bad and divergence is None:
-                        divergence = {"mid": step["mid"], "round": game.get("round"),
-                                      "phase": game["phase"], "fighters": bad}
             elif op == "result":
                 recorded = step["winner_seat"]
-            elif op in ("move", "build_offer_cids"):
-                # An unanswered choose_character pending blocks everything after it. Surface
-                # it rather than guessing an option -- a wrong guess would look like a rules
-                # divergence later, which is exactly the failure we are trying to detect.
+            elif op == "check":
+                do_check(step)
+            elif op == "move":
                 if game.get("pending_kind") == "choose_character":
                     return _stop(game, applied, "unhandled pending: choose_character")
-                if op == "build_offer_cids":
-                    seat = step["seat"]
-                    insts = force_build_offer(game, seat, step["cids"])
-                    kept = next(i for i in insts
-                                if game["instances"][i]["cid"] == step["kept_cid"])
-                    pos = step["pos"]
-                    legal_pos = engine.legal_build_positions(game, seat)
-                    if pos is None or pos not in legal_pos:
-                        pos = legal_pos[-1] if legal_pos else 0
-                    move = {"kind": "build", "inst": kept, "pos": pos}
-                else:
-                    seat, move = step["seat"], step["move"]
-                legal = engine.legal_moves(game, seat)
-                if move not in legal:
+                seat, move = step["seat"], step["move"]
+                if move not in engine.legal_moves(game, seat):
                     return _stop(game, applied,
-                                 f"illegal {move!r} (phase={game['phase']}); "
-                                 f"legal[:3]={legal[:3]}")
+                                 f"illegal {move!r} (phase={game['phase']})")
                 if on_move is not None:
                     on_move(game, SEATS[seat], move, seat)
                 engine.apply_move(game, SEATS[seat], move)
                 applied += 1
-                if verbose:
-                    print(f"  [{applied:>3}] seat {seat} {move}")
-        except Exception as e:                        # noqa: BLE001
-            return _stop(game, applied, f"{op}: {type(e).__name__}: {e}")
+            # once the boards exist, drain whatever builds the engine is now asking for
+            while not engine.is_over(game) and game["phase"] == "build":
+                if game.get("pending_kind") == "choose_character":
+                    return _stop(game, applied, "unhandled pending: choose_character")
+                progressed = False
+                for seat in (0, 1):
+                    if engine.owes_move(game, seat) and queues[seat]:
+                        do_build(queues[seat].pop(0))
+                        progressed = True
+                if not progressed:
+                    break
+    except Exception as e:                            # noqa: BLE001
+        return _stop(game, applied, f"{type(e).__name__}: {e}")
 
+    left = len(queues[0]) + len(queues[1])
     over = engine.is_over(game)
     summary = engine.result_summary(game) if over else {}
     ours = summary.get("winner")
-    return {"over": over, "applied": applied, "stopped": None,
+    stopped = None
+    if not over:
+        stopped = f"stalled in phase={game['phase']} with {left} builds unused"
+    elif left:
+        stopped = f"our engine ended {left} builds early"
+    return {"over": over, "applied": applied, "stopped": stopped,
             "winner": ours, "recorded_winner": recorded,
             "winner_match": bool(over) and ours == recorded,
             "phase": game["phase"], "summary": summary,
-            "divergence": divergence, "checked": checked}
+            "divergence": divergence, "checked": checked, "unused": left}
 
 
 def _stop(game, applied, why):
     return {"over": False, "applied": applied, "stopped": why,
             "winner": None, "recorded_winner": None, "winner_match": False, "summary": {},
-            "divergence": None, "checked": 0}
+            "divergence": None, "checked": 0, "unused": 0}
 
 
 def main():
