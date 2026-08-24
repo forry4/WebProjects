@@ -21,6 +21,17 @@ from games.rag_tag import engine, fighters as F
 BGA_TO_FID = {v["bga_id"]: k for k, v in F.FIGHTERS.items()}
 
 
+def snapshot_of(d):
+    """One updateCardAndFighterData event -> {fid: (power, is_ko)}."""
+    snap = {}
+    for f in (d["args"].get("allFighters") or []):
+        fid = BGA_TO_FID.get(f.get("typeArg"))
+        st = f.get("fighterState") or {}
+        if fid is not None and isinstance(st, dict):
+            snap[fid] = (f.get("power"), bool(st.get("isKnockedOut")))
+    return snap
+
+
 def snapshots(events):
     """Ordered [{fid: (power, is_ko)}], one per updateCardAndFighterData that carries state."""
     out = []

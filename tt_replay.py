@@ -107,45 +107,44 @@ def _reconstruct_hands(picks):
     return [hands[0], hands[1]]
 
 
-def _build_events(events, fid_seat):
-    """updateBuildDeckArgs split into (seat, kind, payload).
+def _steps(events, fid_seat):
+    """The real per-seat step sequence, in log order.
 
-    kind == "order": the two starting cards being laid out (no drawnCards).
-    kind == "build": a BUILD step — the offer is drawnCards + addedCard (2 shown-and-
-    returned + 1 kept == BUILD_DRAW 3); `deck` carries locationArg = position.
+    THE PRIVATE PACKETS ARE AUTHORITATIVE. updateBuildDeckArgs arrives in two flavours: a
+    move_id-0 packet carrying `drawnCards` (the acting player's own view) and a move_id-
+    bearing one with `drawnCards` stripped (what the opponent may see). Counting them settles
+    which to trust — one game had 15 private build packets against only 7 public ones, so the
+    public stream is a PARTIAL duplicate and driving off it silently dropped over half the
+    builds ("ran out of plan in phase=build").
+
+    Getting here cost three wrong models in a row — "no drawnCards means order step", then
+    "first packet per seat is the order step", then "move_id packets are the sequence". Each
+    was refuted by counting rather than by reasoning; the counts were available the whole
+    time. Reach for them earlier next time.
+
+      * BUILD  — any packet with drawnCards; the offer is drawnCards + addedCard.
+      * ORDER  — addedCard is a STARTING card (those begin in the Fight Deck and never enter
+                 the Build Deck), once per seat; later views of it are duplicates.
+
+    Yields (mid, seat, kind, args, drawn) in log order.
     """
-    out, seen = [], set()
-    for _mid, d in events:
+    ordered, out = set(), []
+    for mid, d in events:
         if d["type"] != "updateBuildDeckArgs":
             continue
         a = d["args"]
         added = a.get("addedCard")
         if not added:
             continue
-        # SEAT FROM THE CARD, not from the location string. Every card belongs to exactly
-        # one fighter and every fighter to exactly one team, so cid -> fighter -> seat is
-        # unambiguous and self-checking. Parsing `location` ("player-deck_<pid>") looked
-        # equivalent but mis-attributed some packets, and the symptom was the far-away
-        # "card N not in offer+deck" -- a seat error wearing a rules error's clothes.
-        fid = BGA_TO_FID.get(added.get("type"))
-        seat = fid_seat.get(fid)
+        seat = fid_seat.get(BGA_TO_FID.get(added.get("type")))
         if seat is None:
             continue
-        drawn = a.get("drawnCards") or []
-        kind = "build" if drawn else "order"
-        # BGA RE-SENDS identical state packets (the same payload arrived under move_id 0 and
-        # again under 7). Undeduped, that emitted a second `order` for a seat whose
-        # order_choice was already set, which the engine correctly refused -- and it read as
-        # a rules divergence rather than a transport artefact. Dedupe on content.
-        sig = (seat, kind,
-               tuple(sorted((c.get("type"), c.get("typeArg")) for c in drawn)),
-               (a["addedCard"].get("type"), a["addedCard"].get("typeArg")),
-               tuple(sorted((c.get("locationArg"), c.get("type"), c.get("typeArg"))
-                            for c in (a.get("deck") or []))))
-        if sig in seen:
-            continue
-        seen.add(sig)
-        out.append((seat, kind, a))
+        drawn = a.get("drawnCards")
+        if drawn:
+            out.append((mid, seat, "build", a, drawn))
+        elif CARDS[_cid(added)].get("starting") and seat not in ordered:
+            ordered.add(seat)
+            out.append((mid, seat, "order", a, None))
     return out
 
 
@@ -160,40 +159,39 @@ def parse_actions(events, manifest_row):
     for seat, fid in picks:
         plan.append({"op": "move", "seat": seat, "move": {"kind": "draft", "fighter": fid}})
 
-    ordered = set()
     teams = collections.defaultdict(list)
     for seat, fid in picks:
         teams[seat].append(fid)
-
     fid_seat = {fid: seat for seat, fids in teams.items() for fid in fids}
-    builds = {0: [], 1: []}
-    for seat, kind, a in _build_events(events, fid_seat):
+
+    # Snapshots carry move_ids too, so checks can be INTERLEAVED BY MOVE ID rather than
+    # consumed in sequence — which is what made the earlier "joan power 2 vs 1" divergence
+    # untrustworthy. A check now lands at the point in the game it actually describes.
+    snaps = {}
+    for mid, d in events:
+        if d["type"] == "updateCardAndFighterData" and mid and d["args"].get("allFighters"):
+            snaps.setdefault(mid, d)
+
+    pending_steps = _steps(events, fid_seat)
+    for idx, (mid, seat, kind, a, drawn) in enumerate(pending_steps):
+        # A snapshot at move_id M describes the state AFTER the move at M, so its check is
+        # emitted after that step. Checking before it read every fighter exactly one power
+        # low — a uniform off-by-one across all four fighters, which is the signature of a
+        # timing offset rather than a rules bug, and worth recognising as such.
         if kind == "order":
-            if seat in ordered:
-                continue
-            ordered.add(seat)
-            # whichever starting card sits at position 0 went first
             deck = sorted((a.get("deck") or []), key=lambda c: c.get("locationArg", 0))
-            if not deck:
-                continue
-            fid0 = BGA_TO_FID.get(deck[0].get("type"))
+            fid0 = BGA_TO_FID.get(deck[0].get("type")) if deck else None
             if fid0 in teams[seat]:
                 plan.append({"op": "move", "seat": seat,
                              "move": {"kind": "order", "slot": teams[seat].index(fid0)}})
         else:
-            offer = [_cid(c) for c in a["drawnCards"]] + [_cid(a["addedCard"])]
-            builds[seat].append({"op": "build_offer_cids", "seat": seat, "cids": offer,
-                                 "kept_cid": _cid(a["addedCard"]),
-                                 "pos": a["addedCard"].get("locationArg")})
-
-    # INTERLEAVE BY ROUND. Both seats submit once per BUILD step and the engine only advances
-    # when both are in, so replaying the log's own emission order (which can run several of one
-    # seat's builds together) left build_choice already set and owes_move False -- reported as
-    # an illegal move with an EMPTY legal list, which is the tell for "nobody owes a move".
-    for k in range(max(len(builds[0]), len(builds[1]))):
-        for seat in (0, 1):
-            if k < len(builds[seat]):
-                plan.append(builds[seat][k])
+            kept = _cid(a["addedCard"])
+            offer = [_cid(c) for c in (drawn or [])] + [kept]
+            plan.append({"op": "build_offer_cids", "seat": seat, "cids": offer,
+                         "kept_cid": kept, "pos": a["addedCard"].get("locationArg")})
+        nxt = pending_steps[idx + 1][0] if idx + 1 < len(pending_steps) else None
+        for smid in sorted(k for k in list(snaps) if k <= mid or (nxt and k < nxt)):
+            plan.append({"op": "check", "mid": smid, "event": snaps.pop(smid)})
 
     ranks = manifest_row["ranks"].split(",")
     plan.append({"op": "result", "winner_seat": ranks.index("1")})
@@ -239,25 +237,23 @@ def replay(path, manifest_row, verbose=False, on_move=None):
     except Exception as e:                            # noqa: BLE001
         return _stop(None, 0, f"parse: {type(e).__name__}: {e}")
 
-    snaps = tt_oracle.snapshots(events)
     game = engine.new_game(SEATS, seed=0)
-    applied, recorded, si, divergence = 0, None, 0, None
-
-    def check():
-        """Compare our state to the next BGA snapshot. Records, never aborts —
-        a divergence is the RESULT of this gate, not an error in running it."""
-        nonlocal si, divergence
-        if divergence is not None or si >= len(snaps):
-            return
-        bad = tt_oracle.diff(game, snaps[si])
-        if bad:
-            divergence = {"snapshot": si, "round": game.get("round"), "fighters": bad}
-        si += 1
+    applied, recorded, checked, divergence = 0, None, 0, None
     for step in plan:
         op = step["op"]
         try:
             if op == "draft_hands":
                 force_draft_hands(game, step["hands"])
+            elif op == "check":
+                # A divergence is the RESULT of this gate, not an error running it: record
+                # the first one and keep going, so one bad rule does not hide the rest.
+                snap = tt_oracle.snapshot_of(step["event"])
+                if snap and game["phase"] != "draft":
+                    checked += 1
+                    bad = tt_oracle.diff(game, snap)
+                    if bad and divergence is None:
+                        divergence = {"mid": step["mid"], "round": game.get("round"),
+                                      "phase": game["phase"], "fighters": bad}
             elif op == "result":
                 recorded = step["winner_seat"]
             elif op in ("move", "build_offer_cids"):
@@ -285,17 +281,10 @@ def replay(path, manifest_row, verbose=False, on_move=None):
                                  f"legal[:3]={legal[:3]}")
                 if on_move is not None:
                     on_move(game, SEATS[seat], move, seat)
-                was = game["phase"]
                 engine.apply_move(game, SEATS[seat], move)
                 applied += 1
                 if verbose:
                     print(f"  [{applied:>3}] seat {seat} {move}")
-                # snapshot 0 is the freshly-built boards; later ones follow each FIGHT, which
-                # resolves when the second seat's build lands and the phase turns over.
-                if was == "order" and game["phase"] != "order":
-                    check()
-                elif move.get("kind") == "build" and game["phase"] != "build":
-                    check()
         except Exception as e:                        # noqa: BLE001
             return _stop(game, applied, f"{op}: {type(e).__name__}: {e}")
 
@@ -306,13 +295,13 @@ def replay(path, manifest_row, verbose=False, on_move=None):
             "winner": ours, "recorded_winner": recorded,
             "winner_match": bool(over) and ours == recorded,
             "phase": game["phase"], "summary": summary,
-            "divergence": divergence, "snapshots": len(snaps), "checked": si}
+            "divergence": divergence, "checked": checked}
 
 
 def _stop(game, applied, why):
     return {"over": False, "applied": applied, "stopped": why,
             "winner": None, "recorded_winner": None, "winner_match": False, "summary": {},
-            "divergence": None, "snapshots": 0, "checked": 0}
+            "divergence": None, "checked": 0}
 
 
 def main():
