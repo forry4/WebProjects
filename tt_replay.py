@@ -32,20 +32,19 @@ parser that silently matches nothing.
 import json
 import sys
 
-sys.path.insert(0, "C:/Users/Forrest/forrestm_projects")
-from games.rag_tag import engine                                    # noqa: E402
+from games.rag_tag import engine
 
-import scrape_target as tgt                                         # noqa: E402
-import tt_inspect                                                   # noqa: E402
-import tt_oracle                                                    # noqa: E402
+import scrape_target as tgt
+import tt_inspect
+import tt_oracle
 
 LOGS = tgt.CORP + "/logs"
 SEATS = ["p0", "p1"]
 
 
 # ── the BGA half — written against real logs (tt_inspect.py), not guessed ────────────
-import collections                                                  # noqa: E402
-from games.rag_tag.fighters import CARDS, FIGHTERS, ROSTER   # noqa: E402
+import collections
+from games.rag_tag.fighters import CARDS, FIGHTERS, ROSTER
 
 BGA_TO_FID = {v["bga_id"]: k for k, v in FIGHTERS.items()}
 
