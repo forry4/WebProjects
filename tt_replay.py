@@ -42,23 +42,137 @@ LOGS = tgt.CORP + "/logs"
 SEATS = ["p0", "p1"]
 
 
-# ── the BGA half — fill in from tt_inspect.py output ──────────────────────────────────
-def parse_actions(events):
-    """BGA events -> an ordered list of replay instructions.
+# ── the BGA half — written against real logs (tt_inspect.py), not guessed ────────────
+import collections                                                  # noqa: E402
+from games.rag_tag.fighters import FIGHTERS, DECKS, STARTING_CARD, ROSTER   # noqa: E402
 
-    Return a list of dicts, each one of:
-        {"op": "draft_hands", "hands": [[fid, ...], [fid, ...]]}
-        {"op": "build_offer", "seat": int, "insts": [a, b, c]}
-        {"op": "move", "seat": int, "move": {...}}    # an engine.legal_moves shape
-    plus, at the end:
-        {"op": "result", "winner_seat": int}
+BGA_TO_FID = {v["bga_id"]: k for k, v in FIGHTERS.items()}
+# Our CARDS ids ARE BGA's `typeArg` — verified by name on real logs (TheFeyFolk/50 =
+# "All Legends Must Pass", ChingShih/70 = "Terror of the Seas"). So no card table is needed
+# and `import_bga.py`'s transcription is independently confirmed.
 
-    NOT IMPLEMENTED — needs real logs. See the module docstring.
+
+def _seat_map(events, manifest_row):
+    """BGA player id -> our seat index, in the manifest's player order."""
+    return {pid: i for i, pid in enumerate(manifest_row["players"].split(","))}
+
+
+def _drafts(events, seats):
+    """[(seat, fid), ...] in pick order — two per seat, round 1 then round 2."""
+    out = []
+    for _mid, d in events:
+        if d["type"] != "fighterDrafted":
+            continue
+        a = d["args"]
+        pid = str(a["playerId"])
+        fid = BGA_TO_FID.get((a.get("fighter") or {}).get("typeArg"))
+        if pid in seats and fid:
+            out.append((seats[pid], fid))
+    return out
+
+
+def _reconstruct_hands(picks):
+    """Draft hands consistent with the observed picks.
+
+    The real hands are not in the log, but the draft PASSES: pick 1 of 6, leftovers swap,
+    pick a second. So a seat's SECOND pick must have started in the OPPONENT's hand. That
+    fully determines which hand each pick came from; the other eight fighters are padding.
+
+    NOTE FOR HARVESTING: padding is invented, so a draft decision harvested from this is a
+    choice over a partly fictional option set. Fine for engine parity (teams end up right);
+    do NOT train a draft policy on it without recovering the true hands.
     """
-    raise NotImplementedError(
-        "parse_actions: run `python tt_inspect.py` on a downloaded log and write this "
-        "against the event types it reports. Do not guess the names."
-    )
+    first = {s: f for s, f in picks[:2]}
+    second = {s: f for s, f in picks[2:]}
+    hands = {0: [first[0], second[1]], 1: [first[1], second[0]]}
+    used = set(hands[0]) | set(hands[1])
+    pad = [f for f in ROSTER if f not in used]
+    hands[0] += pad[:4]
+    hands[1] += pad[4:8]
+    return [hands[0], hands[1]]
+
+
+def _build_events(events, seats):
+    """updateBuildDeckArgs split into (seat, kind, payload).
+
+    kind == "order": the two starting cards being laid out (no drawnCards).
+    kind == "build": a BUILD step — the offer is drawnCards + addedCard (2 shown-and-
+    returned + 1 kept == BUILD_DRAW 3); `deck` carries locationArg = position.
+    """
+    out, seen = [], set()
+    for _mid, d in events:
+        if d["type"] != "updateBuildDeckArgs":
+            continue
+        a = d["args"]
+        added = a.get("addedCard")
+        if not added:
+            continue
+        seat = None
+        for c in (a.get("deck") or []) + [added]:
+            loc = str(c.get("location") or "")
+            if "_" in loc:
+                pid = loc.rsplit("_", 1)[-1]
+                if pid in seats:
+                    seat = seats[pid]
+                    break
+        if seat is None:
+            continue
+        drawn = a.get("drawnCards") or []
+        kind = "build" if drawn else "order"
+        # BGA RE-SENDS identical state packets (the same payload arrived under move_id 0 and
+        # again under 7). Undeduped, that emitted a second `order` for a seat whose
+        # order_choice was already set, which the engine correctly refused -- and it read as
+        # a rules divergence rather than a transport artefact. Dedupe on content.
+        sig = (seat, kind,
+               tuple(sorted((c.get("type"), c.get("typeArg")) for c in drawn)),
+               (a["addedCard"].get("type"), a["addedCard"].get("typeArg")),
+               tuple(sorted((c.get("locationArg"), c.get("type"), c.get("typeArg"))
+                            for c in (a.get("deck") or []))))
+        if sig in seen:
+            continue
+        seen.add(sig)
+        out.append((seat, kind, a))
+    return out
+
+
+def parse_actions(events, manifest_row):
+    """BGA events -> ordered replay instructions (see module docstring for the shapes)."""
+    seats = _seat_map(events, manifest_row)
+    picks = _drafts(events, seats)
+    if len(picks) != 4:
+        raise ValueError(f"expected 4 fighterDrafted, got {len(picks)}")
+
+    plan = [{"op": "draft_hands", "hands": _reconstruct_hands(picks)}]
+    for seat, fid in picks:
+        plan.append({"op": "move", "seat": seat, "move": {"kind": "draft", "fighter": fid}})
+
+    ordered = set()
+    teams = collections.defaultdict(list)
+    for seat, fid in picks:
+        teams[seat].append(fid)
+
+    for seat, kind, a in _build_events(events, seats):
+        if kind == "order":
+            if seat in ordered:
+                continue
+            ordered.add(seat)
+            # whichever starting card sits at position 0 went first
+            deck = sorted((a.get("deck") or []), key=lambda c: c.get("locationArg", 0))
+            if not deck:
+                continue
+            fid0 = BGA_TO_FID.get(deck[0].get("type"))
+            if fid0 in teams[seat]:
+                plan.append({"op": "move", "seat": seat,
+                             "move": {"kind": "order", "slot": teams[seat].index(fid0)}})
+        else:
+            offer = [int(c["typeArg"]) for c in a["drawnCards"]] + [int(a["addedCard"]["typeArg"])]
+            plan.append({"op": "build_offer_cids", "seat": seat, "cids": offer,
+                         "kept_cid": int(a["addedCard"]["typeArg"]),
+                         "pos": a["addedCard"].get("locationArg")})
+
+    ranks = manifest_row["ranks"].split(",")
+    plan.append({"op": "result", "winner_seat": ranks.index("1")})
+    return plan
 
 
 # ── the engine half — correct today, no logs required ─────────────────────────────────
@@ -67,57 +181,87 @@ def force_draft_hands(game, hands):
     game["draft_hands"] = [list(hands[0]), list(hands[1])]
 
 
-def force_build_offer(game, seat, insts):
-    """Reorder build_deck so the next draw yields exactly `insts`.
+def force_build_offer(game, seat, cids):
+    """Make this seat's BUILD offer be exactly `cids`, and return the chosen insts.
 
-    engine._begin_build takes build_deck[seat][:BUILD_DRAW] off the top, so we lift the
-    observed three to the front and keep everything else in its existing relative order --
-    unkept cards are appended to the BOTTOM later, so that tail is not arbitrary.
+    Set the OFFER, not the deck. `_begin_build` draws build_offer off the top the moment the
+    phase is entered — reordering build_deck afterwards is a no-op, which is why the first
+    version silently offered whatever the engine's own shuffle had dealt and every build move
+    came back illegal. Any already-drawn offer goes back to the deck first so no card is lost.
+
+    Copies are rules-identical, so any consistent inst assignment works; we do not need to
+    reproduce BGA's own instance identity, only the multiset of card ids.
     """
-    deck = game["build_deck"][seat]
-    missing = [i for i in insts if i not in deck]
-    if missing:
-        raise ValueError(f"seat {seat}: offered cards not in build deck: {missing}")
-    rest = [i for i in deck if i not in insts]
-    game["build_deck"][seat] = list(insts) + rest
+    pool = list(game["build_offer"][seat] or []) + list(game["build_deck"][seat])
+    chosen, taken = [], set()
+    for cid in cids:
+        hit = next((i for i in pool
+                    if i not in taken and game["instances"][i]["cid"] == cid), None)
+        if hit is None:
+            raise ValueError(f"seat {seat}: card {cid} not in offer+deck")
+        taken.add(hit)
+        chosen.append(hit)
+    game["build_offer"][seat] = chosen
+    game["build_deck"][seat] = [i for i in pool if i not in taken]
+    return chosen
 
 
-def replay(path, verbose=False, on_move=None):
+def replay(path, manifest_row, verbose=False, on_move=None):
     """Drive our engine from a log. Returns a dict describing how far it got."""
-    events, _raw = list(tt_inspect.events(path)), None
-    plan = parse_actions(events)
+    events = list(tt_inspect.events(path))
+    try:
+        plan = parse_actions(events, manifest_row)
+    except Exception as e:                            # noqa: BLE001
+        return _stop(None, 0, f"parse: {type(e).__name__}: {e}")
 
     game = engine.new_game(SEATS, seed=0)
-    applied = stopped = 0
+    applied, recorded = 0, None
     for step in plan:
         op = step["op"]
         try:
             if op == "draft_hands":
                 force_draft_hands(game, step["hands"])
-            elif op == "build_offer":
-                force_build_offer(game, step["seat"], step["insts"])
-            elif op == "move":
-                seat, move = step["seat"], step["move"]
+            elif op == "result":
+                recorded = step["winner_seat"]
+            elif op in ("move", "build_offer_cids"):
+                # An unanswered choose_character pending blocks everything after it. Surface
+                # it rather than guessing an option -- a wrong guess would look like a rules
+                # divergence later, which is exactly the failure we are trying to detect.
+                if game.get("pending_kind") == "choose_character":
+                    return _stop(game, applied, "unhandled pending: choose_character")
+                if op == "build_offer_cids":
+                    seat = step["seat"]
+                    insts = force_build_offer(game, seat, step["cids"])
+                    kept = next(i for i in insts
+                                if game["instances"][i]["cid"] == step["kept_cid"])
+                    pos = step["pos"]
+                    legal_pos = engine.legal_build_positions(game, seat)
+                    if pos is None or pos not in legal_pos:
+                        pos = legal_pos[-1] if legal_pos else 0
+                    move = {"kind": "build", "inst": kept, "pos": pos}
+                else:
+                    seat, move = step["seat"], step["move"]
                 legal = engine.legal_moves(game, seat)
                 if move not in legal:
-                    return _stop(game, applied, f"illegal {move!r}; legal={legal[:6]}")
+                    return _stop(game, applied,
+                                 f"illegal {move!r} (phase={game['phase']}); "
+                                 f"legal[:3]={legal[:3]}")
                 if on_move is not None:
                     on_move(game, SEATS[seat], move, seat)
                 engine.apply_move(game, SEATS[seat], move)
                 applied += 1
                 if verbose:
                     print(f"  [{applied:>3}] seat {seat} {move}")
-            elif op == "result":
-                stopped = step["winner_seat"]
-        except Exception as e:                       # noqa: BLE001 — report, don't crash the batch
-            return _stop(game, applied, f"{type(e).__name__}: {e}")
+        except Exception as e:                        # noqa: BLE001
+            return _stop(game, applied, f"{op}: {type(e).__name__}: {e}")
 
     over = engine.is_over(game)
     summary = engine.result_summary(game) if over else {}
+    ours = summary.get("winner")
     return {"over": over, "applied": applied, "stopped": None,
-            "winner": summary.get("winner"), "recorded_winner": stopped,
-            "winner_match": over and summary.get("winner") == stopped,
-            "summary": summary}
+            "winner": ours, "recorded_winner": recorded,
+            "winner_match": bool(over) and ours == recorded,
+            "phase": game["phase"], "summary": summary}
 
 
 def _stop(game, applied, why):
