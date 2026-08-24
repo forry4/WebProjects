@@ -7,10 +7,10 @@ import random
 
 import pytest
 
-from games.spender.ai.az import engine as E
-from games.spender.ai.az import heuristic3 as H3
-from games.spender.ai.az import v_state
-from games.spender.ai.az import vsearch
+from games.spender.ai.serving import engine as E
+from games.spender.ai.serving import heuristic3 as H3
+from games.spender.ai.serving import v_state
+from games.spender.ai.serving import vsearch
 
 
 def _state(seed: int, plies: int):
@@ -87,7 +87,7 @@ def test_serving_roundtrip_produces_legal_move():
 
 
 def _val(s):
-    from games.spender.ai.az import valuation3 as V
+    from games.spender.ai.serving import valuation3 as V
     return V.Valuation(s, H3.W_TEMPO, H3.W_GEM, H3.W_GOLD)
 
 
@@ -181,7 +181,7 @@ def test_freshness_guard_fires_on_stale_reuse():
     """The valuation3 freshness guard must FAIL LOUDLY if a Valuation is reused after its state
     mutates (the lookahead footgun) — single chokepoint = estimated_turns_remaining. Any PLAY move
     changes the (ply, phase, turn) fingerprint, so re-querying the stale Valuation must raise."""
-    from games.spender.ai.az import valuation3 as V
+    from games.spender.ai.serving import valuation3 as V
     s = _state(6, 8)
     guard = 0
     while s.phase != E.PLAY and s.phase != E.OVER and guard < 20:

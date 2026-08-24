@@ -1,0 +1,112 @@
+/* THE BID PAD AND THE SUIT INKS — the chrome the board and the PAPER SCORECARD
+   both draw with.
+ *
+ * It lives in its own file, out of Dissonance.css, for one reason: the
+ * scorecard mounts where the board does not. It is reachable from the OFFLINE
+ * HUB, which has no live room and never loads the board's stylesheet, so a
+ * component that borrows the board's keys has to be able to bring them with
+ * it. Both `Dissonance.jsx` and `scorecard.jsx` compose this string; when the
+ * card is opened from inside a room the rules are simply injected twice,
+ * identically, which costs nothing and cannot drift — there is one copy on
+ * disk.
+ *
+ * APPENDED AFTER Dissonance.css by the board, and that is safe rather than
+ * lucky: nothing later in that sheet targets these selectors at equal
+ * specificity. The four that mention them (`.dis .dis-bidgrid button` inside a
+ * phone @media, the two `.dis-game .dis-table > .dis-auction` blocks,
+ * `.dis-denoms button small`, `.dis-result`/`.dis-clear .dis-suit-*`) are all
+ * strictly more specific, so source order does not decide any of them. Keep it
+ * that way — a new equal-specificity rule for a bid key belongs HERE, not
+ * there. */
+
+.dis-bidgrid {
+  display: flex; flex-wrap: wrap; justify-content: center;
+  gap: 0.35rem; width: 100%; max-width: 420px;
+}
+.dis-bidgrid button { flex: 0 0 calc((100% - 4 * 0.35rem) / 5); }
+/* Bid keys share the panels' lit-surface material: a soft top light, a
+   hairline inner highlight, and a shallow drop — keys on a table, not
+   flat translucent rectangles. The selected key presses IN. */
+.dis-bidgrid button, .dis-denoms button {
+  padding: 0.5rem 0.2rem; border-radius: 9px; font-weight: 700;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.05));
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.14); cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 1px 3px rgba(0, 0, 0, 0.22);
+}
+/* `:not(.on)` IS LOAD-BEARING — without it the hover fill EATS THE SELECTED
+   GREEN, and on a phone it does so permanently. `:hover` latches to the last
+   thing you tapped (the same iOS behaviour the card rules below are guarded
+   for), so the suit you just picked keeps the grey fill for the rest of the
+   auction. It out-specifies `.on` — `:not(:disabled)` contributes its argument,
+   making this (0,3,1) against `.on`'s (0,2,1) — so the green never even lands,
+   while `.on`'s near-black `color` still applies: a dark glyph on a grey
+   button, which is the exact unreadable state --accent was defined to fix.
+   Reported from a phone; measured at rgba(255,255,255,.15) where the green
+   should be. `.dis-valgrid` below only escaped because ITS hover rule ties on
+   specificity and loses on source order — that is luck, not design, so it
+   carries the same guard. */
+.dis-bidgrid button:hover:not(:disabled):not(.on), .dis-denoms button:hover:not(:disabled):not(.on) {
+  background: rgba(255, 255, 255, 0.15);
+}
+.dis-bidgrid button.on, .dis-denoms button.on {
+  background: var(--accent); color: var(--ink); border-color: transparent;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.28);
+}
+.dis-bidgrid button:disabled, .dis-denoms button:disabled { opacity: 0.3; cursor: not-allowed; }
+/* THE DENOMINATIONS ARE THE SAME KEY AS THE LEVELS. There are exactly five of
+   them and the level pad is five wide, so they take the identical fifth-width
+   basis, padding and box — two rows of one keypad rather than two differently
+   sized rows that happen to sit together. Only the GLYPH is larger, because a
+   suit pip at a numeral's size reads small. */
+.dis-denoms {
+  display: flex; gap: 0.35rem; flex-wrap: wrap; justify-content: center;
+  width: 100%; max-width: 420px;
+}
+.dis-denoms button {
+  flex: 0 0 calc((100% - 4 * 0.35rem) / 5);
+  min-width: 0; font-size: 1.1rem;
+}
+
+/* THE SUIT SYMBOL, coloured like a playing card — ♦ and ♥ red, ♣ and ♠ left
+   to the surrounding ink. Only the GLYPH is dyed; the level beside it stays
+   the colour of the text it sits in. `Den` in the JSX is the only thing that
+   emits this class, so every mention of a contract is coloured identically by
+   construction rather than by remembering.
+
+   #ff8a9c, not the card face's #c0233a: this lands on the board's own dark
+   surfaces (#0f0e0c–#242018), where the deeper red goes muddy. There is
+   exactly one LIGHT surface a suit reaches — a selected picker button, filled
+   with the accent — and there the true card red is right and the light one
+   would glare, so it swaps below. That is the whole of the context handling:
+   a "black" suit needs no rule at either place because it is simply the ink
+   already in force. */
+/* THE TRUE CARD INKS on the dark board, made readable by a LIGHT RIM rather
+   than by lightening anything.
+
+   Raw contrast says this cannot work: the board composites to rgb(23,40,31)
+   and the panels to rgb(25,24,22), so #17171a lands near 1.2:1 and vanishes
+   outright — measured, with the picker's ♣/♠ gone and a scorecard line
+   rendering as "Bot 2" with no suit at all. But contrast against the
+   BACKGROUND is the wrong question for a glyph carrying its own edge, and
+   SPENDER already ships this exact problem's answer: its near-black onyx gem
+   (#15151a) stays legible on dark panels because `TokenPill` draws it with
+   `border: 1px solid rgba(255,255,255,.4)` — "light rim so the near-black
+   onyx stays visible". The rim is what the eye catches; the fill stays black.
+
+   So both suits keep the two inks the card FACES use, #c0233a and #17171a,
+   and the rim does the work. No chips, and no repainting the table. */
+.dis-suit-r, .dis-suit-b {
+  text-shadow:
+    0 0 1px rgba(255, 255, 255, 0.95),
+    0 0 2px rgba(255, 255, 255, 0.75),
+    0 0 3px rgba(255, 255, 255, 0.45);
+}
+.dis-suit-r { color: #c0233a; }
+.dis-suit-b { color: #17171a; }
+/* On a LIGHT surface the rim would be a smudge and the ink already reads: a
+   card face, and the accent-filled buttons. */
+.dis-card .dis-suit-r, .dis-card .dis-suit-b,
+.dis-bidgrid button.on .dis-suit-r, .dis-bidgrid button.on .dis-suit-b,
+.dis-denoms button.on .dis-suit-r, .dis-denoms button.on .dis-suit-b,
+.dis-gobtn .dis-suit-r, .dis-gobtn .dis-suit-b { text-shadow: none; }

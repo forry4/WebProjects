@@ -21,9 +21,9 @@ import random
 
 import pytest
 
-from games.spender.ai.az import engine as E
-from games.spender.ai.az import heuristic3 as H3
-from games.spender.ai.az import valuation3 as V3
+from games.spender.ai.serving import engine as E
+from games.spender.ai.serving import heuristic3 as H3
+from games.spender.ai.serving import valuation3 as V3
 
 WHITE, BLUE, GREEN, BLACK = 0, 1, 2, 4
 

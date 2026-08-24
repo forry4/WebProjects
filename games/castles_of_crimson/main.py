@@ -32,6 +32,7 @@ from . import engine
 from . import board
 from . import tiles
 from . import bot
+from . import persist               # at-rest compaction for the state_json blob
 from . import ai as coc_ai          # MCTS opponent (aliased: `ai` is used as a local for the bot pid)
 
 # Expert-tier client-side AI (browser WASM): the compact projection + the
@@ -47,6 +48,8 @@ from core.auth import (
     gen_token, get_user_by_session, validate_reconnect_token, mark_reconnect_token_used,
 )
 from core.config import cors_allowed_origins
+from core import rooms as _rooms
+from core.build_info import build_info
 
 LOG = logging.getLogger("games.castles_of_crimson")
 
@@ -71,7 +74,7 @@ CLIENT_AI_TIERS = ("hard", "expert")
 _CLIENT_AI_MODEL = {"hard": "coc_pv_model_hard.bin", "expert": "coc_pv_model.bin"}
 
 # Expert client-search config. _EXPERT_MODE mirrors the offline gate verdict:
-# "netval" = net policy prior + 20-step rollout + the net VALUE HEAD at the
+# "netval" = net policy prior + 30-step rollout (NETVAL_ROLLOUT_STEPS) + the net VALUE HEAD at the
 # truncation. It beats the plain-"hybrid" (heuristic-truncation) leaf ~0.58-0.61,
 # and the edge GROWS with sims (gated on two fresh seed bases + a scaffold
 # yardstick jump 0.36->0.52) — the campaign's one genuine gain over the bootstrap.
@@ -98,6 +101,10 @@ _PHASE_END_PAUSE = 2.6
 # up — so finishing your turn isn't immediately steamrolled by the opponent view. Matches
 # the client's board-open delay so the board is up before the bot's first move lands.
 _POST_TURN_PAUSE = 1.0
+# Floor before the bot's very first move when NO human turn preceded it (the bot is the
+# start player) — an instant opening move feels robotic. The post-turn/phase pauses above
+# already exceed this in every other case.
+_MIN_BOT_THINK = 0.7
 
 
 def _valid_difficulty(value) -> str:
@@ -117,6 +124,7 @@ coc_app.add_middleware(
 ROOMS: dict[str, dict] = {}
 ROOM_LOCK = asyncio.Lock()
 AI_PID = "bot"
+MAX_PLAYERS = 4        # human-vs-human games seat 2-4 players (vs-bot stays 2)
 
 
 def _valid_board(board_id) -> str:
@@ -131,17 +139,29 @@ def _valid_board(board_id) -> str:
     return board.DEFAULT_BOARD_ID
 
 
+def _valid_max_players(value) -> int:
+    """Host-chosen seat cap for a VS-Friend game, clamped to 2..MAX_PLAYERS. A missing/invalid
+    value defaults to MAX_PLAYERS (permissive) so a client that doesn't send it isn't capped at 2."""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return MAX_PLAYERS
+    return n if 2 <= n <= MAX_PLAYERS else MAX_PLAYERS
+
+
 # ── Shared-identity / DB helpers (thin aliases over the shared core package) ──
-def _db():
-    return get_db_conn()
+# ── Shared room-server primitives (core/rooms.py) ─────────────────────────────
+# These were byte-identical in all four games. Aliased under the historical private
+# names so the rest of this module (and its tests) are unchanged.
+
+normalize_room = _rooms.normalize_room
+_gen_token = _rooms.gen_room_token
+_db = _rooms.db_conn
+_send = _rooms.send_json
 
 
-def _gen_token(n: int = 12) -> str:
-    return gen_token(n)
-
-
-def normalize_room(rid: str) -> str:
-    return (rid or "").upper()
+def _ensure_room_loaded(room_id: str) -> dict | None:
+    return _rooms.ensure_room_loaded(ROOMS, room_id, load_game_to_memory)
 
 
 def coc_init_db() -> None:
@@ -152,15 +172,23 @@ def coc_init_db() -> None:
         status TEXT,
         player1_id TEXT, player1_name TEXT,
         player2_id TEXT, player2_name TEXT,
+        player3_id TEXT, player3_name TEXT,
+        player4_id TEXT, player4_name TEXT,
         host_id TEXT,
         state_json TEXT,
         created_at INTEGER, updated_at INTEGER)""")
+    # Tolerant ALTER for the pre-existing 2-player prod table (columns may already exist).
+    for col in ("player3_id TEXT", "player3_name TEXT", "player4_id TEXT", "player4_name TEXT"):
+        try:
+            cur.execute(f"ALTER TABLE coc_games ADD COLUMN {col}")
+        except Exception:  # noqa: BLE001 — column already present
+            pass
     conn.commit()
     conn.close()
 
 
 coc_init_db()
-# Retention: same policy as Spender (guest 24h / registered 30d, by last activity).
+# Retention: same policy as Spender (guest 24h / registered 30d / open lobbies 48h, by last activity).
 cleanup_stale_games("coc_games")
 
 
@@ -177,23 +205,37 @@ _DB_WRITE_EXEC = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_nam
 _save_conn = None  # persistent write connection; ONLY ever touched by the _DB_WRITE_EXEC thread
 
 
-def _persist_row(room_id, status, p1id, p1name, p2id, p2name, host, state_json, now, created_at) -> None:
-    """Upsert one coc_games row on the dedicated write thread using a reused connection."""
+def _persist_row(room_id, status, seats, host, state_json, now, created_at) -> None:
+    """Upsert one coc_games row on the dedicated write thread using a reused connection.
+
+    `seats` is a list of (player_id, player_name) in seat order (up to 4). The columns
+    are a query index (the authoritative player list is in state_json); seats 2-4 can
+    fill in after creation (late joiners), so UPDATE rewrites them all."""
     global _save_conn
+    ids = [None, None, None, None]
+    names = [None, None, None, None]
+    for i, (pid, pname) in enumerate(seats[:4]):
+        ids[i], names[i] = pid, pname
     try:
         if _save_conn is None:
             _save_conn = _db()
         cur = _save_conn.cursor()
         cur.execute("SELECT id FROM coc_games WHERE id=?", (room_id,))
         if cur.fetchone() is not None:
-            cur.execute("""UPDATE coc_games SET status=?, player2_id=?, player2_name=?, state_json=?, updated_at=?
+            cur.execute("""UPDATE coc_games SET status=?,
+                             player2_id=?, player2_name=?, player3_id=?, player3_name=?,
+                             player4_id=?, player4_name=?, state_json=?, updated_at=?
                            WHERE id=?""",
-                        (status, p2id, p2name, state_json, now, room_id))
+                        (status, ids[1], names[1], ids[2], names[2], ids[3], names[3],
+                         state_json, now, room_id))
         else:
             cur.execute("""INSERT INTO coc_games
-                           (id,status,player1_id,player1_name,player2_id,player2_name,host_id,state_json,created_at,updated_at)
-                           VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                        (room_id, status, p1id, p1name, p2id, p2name, host, state_json, created_at, now))
+                           (id,status,player1_id,player1_name,player2_id,player2_name,
+                            player3_id,player3_name,player4_id,player4_name,
+                            host_id,state_json,created_at,updated_at)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (room_id, status, ids[0], names[0], ids[1], names[1],
+                         ids[2], names[2], ids[3], names[3], host, state_json, created_at, now))
         _save_conn.commit()
     except Exception:  # noqa: BLE001 — a save must never crash; drop the (maybe stale) conn so the next reconnects
         LOG.warning("coc save_game write failed for %s; dropping connection to reconnect next time", room_id,
@@ -206,14 +248,26 @@ def _persist_row(room_id, status, p1id, p1name, p2id, p2name, host, state_json, 
         _save_conn = None
 
 
+def _encode_state(state: dict) -> str:
+    """The ONLY write path into `state_json` — compact, then the shared zlib codec."""
+    return _rooms.encode_state(persist.compact_state(state))
+
+
+def _decode_state(blob) -> dict:
+    """The ONLY read path out of `state_json`. Every read must funnel through here:
+    a compacted blob reaching a caller that skipped `expand_state` would hand it
+    `[id, shape]` pairs where it expects tiles. Rows written before compaction carry
+    no marker and pass through untouched."""
+    return persist.expand_state(_rooms.decode_state(blob))
+
+
 def save_game(room_id: str) -> None:
     """Snapshot the room on the calling thread (fast, no I/O) then persist OFF the
     event loop via the single-thread write executor (fire-and-forget)."""
     room = ROOMS.get(room_id)
     if not room:
         return
-    pids = list(room.get("players", {}).keys())
-    names = list(room.get("players", {}).values())
+    seats = list(room.get("players", {}).items())   # (id, name) in seat order, up to 4
     state = {
         "players": room.get("players", {}),
         "host": room.get("host"),
@@ -223,14 +277,14 @@ def save_game(room_id: str) -> None:
         "vs_ai": room.get("vs_ai", False),
         "ai_player": room.get("ai_player"),
         "ai_difficulty": room.get("ai_difficulty", DEFAULT_DIFFICULTY),
+        "max_players": room.get("max_players"),
+        "same_board": room.get("same_board", False),
         "boards": room.get("boards", {}),
     }
     now = int(time.time())
     _DB_WRITE_EXEC.submit(
-        _persist_row, room_id, room.get("status", "open"),
-        pids[0] if pids else None, names[0] if names else None,
-        pids[1] if len(pids) > 1 else None, names[1] if len(names) > 1 else None,
-        room.get("host"), json.dumps(state), now, now,
+        _persist_row, room_id, room.get("status", "open"), seats,
+        room.get("host"), _encode_state(state), now, now,
     )
 
 
@@ -245,7 +299,7 @@ def load_game_state(room_id: str) -> dict | None:
     if not row or not row["state_json"]:
         return None
     try:
-        return json.loads(row["state_json"])
+        return _decode_state(row["state_json"])
     except Exception:
         return None
 
@@ -259,7 +313,7 @@ def load_game_to_memory(room_id: str) -> bool:
     if not row or not row["state_json"]:
         return False
     try:
-        state = json.loads(row["state_json"])
+        state = _decode_state(row["state_json"])
     except Exception:
         return False
     ROOMS[room_id] = {
@@ -271,22 +325,53 @@ def load_game_to_memory(room_id: str) -> bool:
         "vs_ai": state.get("vs_ai", False),
         "ai_player": state.get("ai_player"),
         "ai_difficulty": state.get("ai_difficulty", DEFAULT_DIFFICULTY),
+        "max_players": state.get("max_players"),
+        "same_board": state.get("same_board", False),
         "boards": state.get("boards", {}),
         "sockets": {},
     }
     return True
 
 
+def _parse_state(row) -> dict:
+    try:
+        return _decode_state(row["state_json"])
+    except Exception:
+        return {}
+
+
+def _ordered_players(state: dict) -> list[dict]:
+    """[{id, name}] in seat order for a parsed room state (2-4 players). Uses the game's
+    seat order once dealt, else the pre-start room player list."""
+    g = state.get("game") if isinstance(state, dict) else None
+    names = (state.get("players") if isinstance(state, dict) else None) or {}
+    if isinstance(g, dict) and g.get("order"):
+        gp = g.get("players") or {}
+        return [{"id": pid, "name": (gp.get(pid) or {}).get("name") or names.get(pid) or "Player"}
+                for pid in g["order"]]
+    return [{"id": pid, "name": nm} for pid, nm in names.items()]
+
+
 def list_open_games() -> list[dict]:
-    maybe_cleanup_games("coc_games")  # throttled (<=1/h): prune stale games during long-awake periods
+    maybe_cleanup_games("coc_games", background=True)  # throttled (<=1/h), non-blocking: prune stale games during long-awake periods
     conn = _db()
     cur = conn.cursor()
-    cur.execute("""SELECT id, player1_id, player1_name, created_at FROM coc_games
+    cur.execute("""SELECT id, player1_id, player1_name, state_json, created_at FROM coc_games
                    WHERE status='open' ORDER BY created_at DESC LIMIT 20""")
     rows = cur.fetchall()
     conn.close()
-    return [{"id": r["id"], "host_id": r["player1_id"], "host_name": r["player1_name"],
-             "created_at": r["created_at"]} for r in rows]
+    out = []
+    for r in rows:
+        state = _parse_state(r)
+        players = _ordered_players(state)
+        host_board = (state.get("boards") or {}).get(state.get("host"))
+        out.append({"id": r["id"], "host_id": r["player1_id"], "host_name": r["player1_name"],
+                    "player_count": len(players) or 1,
+                    "max_players": _valid_max_players(state.get("max_players")),
+                    "same_board": bool(state.get("same_board")),
+                    "host_board": host_board,
+                    "created_at": r["created_at"]})
+    return out
 
 
 def list_user_games(user_id: str) -> list[dict]:
@@ -295,22 +380,22 @@ def list_user_games(user_id: str) -> list[dict]:
     cur.execute("""SELECT id, status, player1_id, player1_name, player2_id, player2_name,
                           state_json, created_at, updated_at
                    FROM coc_games
-                   WHERE (player1_id=? OR player2_id=?) AND status != 'over'
-                   ORDER BY updated_at DESC""", (user_id, user_id))
+                   WHERE (player1_id=? OR player2_id=? OR player3_id=? OR player4_id=?)
+                         AND status != 'over'
+                   ORDER BY updated_at DESC""", (user_id,) * 4)
     rows = cur.fetchall()
     conn.close()
     out = []
     for r in rows:
-        try:
-            state = json.loads(r["state_json"] or "{}")
-        except Exception:
-            state = {}
+        state = _parse_state(r)
         g = state.get("game") or {}
+        players = _ordered_players(state)
         is_p1 = r["player1_id"] == user_id
         your_turn = isinstance(g, dict) and g.get("turn") == user_id
         out.append({
             "id": r["id"], "status": r["status"],
-            "player1_name": r["player1_name"], "player2_name": r["player2_name"],
+            "players": [{**p, "is_you": p["id"] == user_id} for p in players],
+            "player1_name": r["player1_name"], "player2_name": r["player2_name"],  # legacy 2p fields
             "you_are_p1": is_p1, "your_turn": your_turn,
             "created_at": r["created_at"], "updated_at": r["updated_at"],
         })
@@ -332,13 +417,12 @@ def list_active_games() -> list[dict]:
     conn.close()
     out = []
     for r in rows:
-        try:
-            g = (json.loads(r["state_json"] or "{}").get("game") or {})
-        except Exception:
-            g = {}
+        state = _parse_state(r)
+        g = state.get("game") or {}
         out.append({
             "id": r["id"],
-            "player1_id": r["player1_id"], "player1_name": r["player1_name"],
+            "players": _ordered_players(state),
+            "player1_id": r["player1_id"], "player1_name": r["player1_name"],  # legacy 2p fields
             "player2_id": r["player2_id"], "player2_name": r["player2_name"],
             "turn": g.get("turn") if isinstance(g, dict) else None,
             "created_at": r["created_at"], "updated_at": r["updated_at"],
@@ -354,16 +438,16 @@ def list_user_history(user_id: str) -> list[dict]:
     cur.execute("""SELECT id, player1_id, player1_name, player2_id, player2_name,
                           state_json, updated_at
                    FROM coc_games
-                   WHERE (player1_id=? OR player2_id=?) AND status='over'
-                   ORDER BY updated_at DESC LIMIT 30""", (user_id, user_id))
+                   WHERE (player1_id=? OR player2_id=? OR player3_id=? OR player4_id=?)
+                         AND status='over'
+                   ORDER BY updated_at DESC LIMIT ?""",
+                (user_id,) * 4 + (_rooms.HISTORY_LIMIT,))
     rows = cur.fetchall()
     conn.close()
     out = []
     for r in rows:
-        try:
-            g = (json.loads(r["state_json"] or "{}").get("game") or {})
-        except Exception:
-            g = {}
+        state = _parse_state(r)
+        g = state.get("game") or {}
         if not isinstance(g, dict) or not g.get("players"):
             continue
         try:
@@ -371,13 +455,16 @@ def list_user_history(user_id: str) -> list[dict]:
         except Exception:
             scores = {}
         win = g.get("winner")
-        is_p1 = r["player1_id"] == user_id
-        opp_id = r["player2_id"] if is_p1 else r["player1_id"]
-        opp_name = (r["player2_name"] if is_p1 else r["player1_name"]) or "Opponent"
+        players = _ordered_players(state)
+        opps = [p for p in players if p["id"] != user_id]
+        opp_name = ", ".join(p["name"] for p in opps) if opps else "Opponent"
+        top_opp = max(opps, key=lambda p: scores.get(p["id"], 0), default=None)  # best opponent, for the 2-num display
         you_won = (win == user_id) or (isinstance(win, list) and user_id in win)
         out.append({
             "id": r["id"], "opp_name": opp_name,
-            "your_score": scores.get(user_id), "opp_score": scores.get(opp_id),
+            "players": [{**p, "is_you": p["id"] == user_id, "score": scores.get(p["id"])} for p in players],
+            "your_score": scores.get(user_id),
+            "opp_score": scores.get(top_opp["id"]) if top_opp else None,
             "you_won": you_won, "tie": isinstance(win, list),
             "updated_at": r["updated_at"],
         })
@@ -385,23 +472,9 @@ def list_user_history(user_id: str) -> list[dict]:
 
 
 def delete_open_game(game_id: str, user_id: str) -> bool:
-    """Delete an OPEN game the user hosts (lobby 'cancel'). Returns True if a row
-    was removed. Uses an existence check rather than cursor.rowcount: the
-    driver-agnostic core.db wrapper (sqlite3 / libsql) doesn't expose rowcount,
-    and libsql's rowcount semantics are unreliable -- on the prod Turso backend
-    `cur.rowcount` raised, 500ing cancel. SELECT-then-DELETE is correct on both
-    backends (mirrors Spender's delete_open_game)."""
-    conn = _db()
-    cur = conn.cursor()
-    cur.execute("SELECT 1 FROM coc_games WHERE id=? AND player1_id=? AND status='open'",
-                (game_id, user_id))
-    existed = cur.fetchone() is not None
-    if existed:
-        conn.execute("DELETE FROM coc_games WHERE id=? AND player1_id=? AND status='open'",
-                     (game_id, user_id))
-        conn.commit()
-    conn.close()
-    return existed
+    """Cancel an open game this user hosts. SELECT-then-DELETE lives in
+    core.rooms — never cursor.rowcount (absent on libsql; it 500'd prod)."""
+    return _rooms.delete_open_game("coc_games", "player1_id", game_id, user_id)
 
 
 # ── Room helpers ──────────────────────────────────────────────────────────────
@@ -432,6 +505,22 @@ async def broadcast_room(room_id: str, msg: dict[str, Any]) -> None:
 def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]:
     room = ROOMS.get(room_id, {})
     g = room.get("game")
+    if isinstance(g, dict):
+        # Hidden-info redaction for the wire (mirrors Spender/Duel): the ordered draw piles are
+        # future depot tiles, and rng_state lets a client reconstruct every future die for BOTH
+        # players — both hidden in real Castles of Burgundy. The frontend reads none of them (the
+        # visible depots live in `depots`/`boards`). Shallow-copy so the live game dict is untouched.
+        #
+        # `turn_undo` MUST be in this list. It is a whole-game snapshot, so it carries its own
+        # copies of all four keys above and shipping it defeated every one of them — measured at
+        # 100 ordered supply tiles plus rng_state reaching the client on a mid-game broadcast.
+        # This is the same leak class as the 2026-07 audit (Spender `decks`, WW `deck`, the CoC
+        # supplies): redacting a field is not enough while something else nests a copy of it.
+        # The frontend never reads it — the Undo button's enabled state is derived client-side
+        # from whether you have acted this turn (`actedThisTurn`), not from the snapshot.
+        _HIDE = ("supply", "black_supply", "goods_supply", "rng_state", "turn_undo")
+        if any(k in g for k in _HIDE):
+            g = {k: v for k, v in g.items() if k not in _HIDE}
     state = {
         "room_id": room_id,
         "players": room.get("players", {}),
@@ -441,6 +530,8 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
         "vs_ai": room.get("vs_ai", False),
         "ai_player": room.get("ai_player"),
         "ai_difficulty": room.get("ai_difficulty", DEFAULT_DIFFICULTY),
+        "max_players": room.get("max_players") or MAX_PLAYERS,
+        "same_board": room.get("same_board", False),
         "boards": room.get("boards", {}),
         # Only the recipient's OWN reconnect token. Direct replies pass viewer_pid=pid;
         # broadcast_room injects each recipient's token per socket. (Was: every seat's
@@ -626,7 +717,7 @@ async def _schedule_bot_turn(room_id: str) -> None:
         elif game.get("phase") == "playing":
             first_pause = _POST_TURN_PAUSE
         else:
-            first_pause = 0.0
+            first_pause = _MIN_BOT_THINK   # bot-as-start-player (setup): still not instant
 
     try:
         if first_pause:
@@ -734,10 +825,25 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
     await websocket.accept()
     room_id = normalize_room(room)
     pid = player
-
+    # Abuse throttles (core.rooms): cap connects per IP and messages per socket.
+    if await _rooms.reject_if_connecting_too_fast(websocket):
+        return
+    _msg_throttle = _rooms.MessageThrottle()
+    # The `player` path segment is CLIENT-SUPPLIED and NOT trusted: every pid in a room
+    # is broadcast in the public players map, so anyone who can see a game can open a
+    # socket claiming another seat's pid — and then move on its turn (`_handle_move`
+    # only checks whose turn it is) or silently reassign its board (`_handle_join`
+    # rewrites `boards[pid]` on every join). `authed` flips true only via a handshake
+    # that proves ownership: create (minted the seat), join as a brand-new seat, join to
+    # an existing seat with a matching session token, reconnect with the per-seat room
+    # token, or auth_reconnect with a valid server token. Mirrors Where Wolf?'s binding.
+    authed = False
     try:
         while True:
             raw = await websocket.receive_text()
+            if not _msg_throttle.allow():
+                await websocket.close(code=1008)
+                return
             try:
                 msg = json.loads(raw)
             except Exception:
@@ -746,50 +852,38 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
             action = msg.get("action")
 
             if action == "create":
-                await _handle_create(websocket, room_id, pid, msg)
+                authed = await _handle_create(websocket, room_id, pid, msg) or authed
             elif action == "join":
-                await _handle_join(websocket, room_id, pid, msg)
-            elif action == "start":
-                await _handle_start(websocket, room_id, pid)
-            elif action == "move":
-                await _handle_move(websocket, room_id, pid, msg)
+                authed = await _handle_join(websocket, room_id, pid, msg) or authed
             elif action == "reconnect":
-                await _handle_reconnect(websocket, room_id, pid, msg)
+                authed = await _handle_reconnect(websocket, room_id, pid, msg) or authed
             elif action == "auth_reconnect":
-                await _handle_auth_reconnect(websocket, room_id, pid, msg)
-            elif action == "abandon":
-                await _handle_abandon(websocket, room_id, pid)
-            elif action == "client_ai_ready":
-                await _handle_client_ai_ready(websocket, room_id, pid, msg)
-            elif action == "ai_move":
-                await _handle_ai_move(websocket, room_id, pid, msg)
+                authed = await _handle_auth_reconnect(websocket, room_id, pid, msg) or authed
+            elif action in ("start", "move", "abandon", "client_ai_ready", "ai_move"):
+                # Privileged: only a socket that has PROVEN it owns `pid` may act as it.
+                # (`start`/`move` also check host/turn, but pid alone is spoofable — this
+                # is what makes those checks mean anything.)
+                if not authed:
+                    await websocket.send_text(json.dumps(
+                        {"type": "error", "message": "not authenticated for this seat"}))
+                    continue
+                if action == "start":
+                    await _handle_start(websocket, room_id, pid)
+                elif action == "move":
+                    await _handle_move(websocket, room_id, pid, msg)
+                elif action == "abandon":
+                    await _handle_abandon(websocket, room_id, pid)
+                elif action == "client_ai_ready":
+                    await _handle_client_ai_ready(websocket, room_id, pid, msg)
+                else:
+                    await _handle_ai_move(websocket, room_id, pid, msg)
             else:
                 await websocket.send_text(json.dumps({"type": "error", "message": "unknown action"}))
     except WebSocketDisconnect:
         pass
     finally:
-        # Stale-socket guard: only remove if THIS socket is still registered.
-        room = ROOMS.get(room_id)
-        if room and room.get("sockets", {}).get(pid) is websocket:
-            room["sockets"].pop(pid, None)
-            # Disarm the client AI when its tab goes away, so the bot's next
-            # decisions go straight to the server path instead of waiting out the
-            # per-decision watchdog. A reconnecting client re-arms itself.
-            room["client_ai"] = False
-            if not room["sockets"] and room.get("status") != "playing":
-                # keep playing/over games in memory; drop empty open rooms only
-                if room.get("status") == "open" and room.get("game") is None:
-                    ROOMS.pop(room_id, None)
-
-
-def _ensure_room_loaded(room_id: str) -> dict | None:
-    if room_id not in ROOMS:
-        load_game_to_memory(room_id)
-    return ROOMS.get(room_id)
-
-
-async def _send(ws: WebSocket, payload: dict) -> None:
-    await ws.send_text(json.dumps(payload))
+        # Stale-socket guard + client-AI disarm + empty-room cleanup: core/rooms.py.
+        _rooms.release_socket(ROOMS, room_id, pid, websocket, disarm_client_ai=True)
 
 
 async def _handle_create(ws, room_id, pid, msg):
@@ -798,10 +892,12 @@ async def _handle_create(ws, room_id, pid, msg):
     my_board = _valid_board(msg.get("board_id"))
     opp_board = _valid_board(msg.get("opp_board_id"))
     difficulty = _valid_difficulty(msg.get("ai_difficulty"))
+    max_players = _valid_max_players(msg.get("max_players"))   # host-chosen seat cap (2-4; vs-AI is 2)
+    same_board = bool(msg.get("same_board"))                   # force everyone onto the host's board
     async with ROOM_LOCK:
         if room_id in ROOMS or _ensure_room_loaded(room_id):
             await _send(ws, {"type": "error", "message": "room already exists"})
-            return
+            return False
         room = {
             "players": {pid: name},
             "sockets": {pid: ws},
@@ -812,6 +908,8 @@ async def _handle_create(ws, room_id, pid, msg):
             "vs_ai": vs_ai,
             "ai_player": None,
             "ai_difficulty": difficulty,
+            "max_players": 2 if vs_ai else max_players,
+            "same_board": same_board,
             "boards": {pid: my_board},
         }
         ROOMS[room_id] = room
@@ -829,19 +927,37 @@ async def _handle_create(ws, room_id, pid, msg):
     await _send(ws, {"type": "created", "room_id": room_id, "room": mk_room_state(room_id, viewer_pid=pid)})
     if bot_turn:
         asyncio.create_task(_schedule_bot_turn(room_id))
+    return True   # the creator minted this seat → owns it
 
 
 async def _handle_join(ws, room_id, pid, msg):
     name = (msg.get("name") or "Player").strip()[:24] or "Player"
+    # A logged-in user re-entering a seat they ALREADY hold (new device / cleared
+    # storage → no per-seat room token) proves ownership with their session token:
+    # pid == their account id, which an attacker can't forge. Resolved before the lock
+    # (a DB read; mirrors _handle_auth_reconnect validating before ROOM_LOCK).
+    sess = msg.get("session_token")
+    session_uid = (get_user_by_session(sess) or {}).get("id") if sess else None
     async with ROOM_LOCK:
         room = _ensure_room_loaded(room_id)
         if not room:
             await _send(ws, {"type": "error", "message": "no such room"})
-            return
-        if pid not in room["players"]:
-            if room.get("status") != "open" or len([p for p in room["players"] if p != AI_PID]) >= 2:
+            return False
+        if pid in room["players"]:
+            # Re-entry to an EXISTING seat. Identity MUST be proven: unproven, this
+            # would rewrite that seat's `boards[pid]` below (changing someone else's
+            # duchy mid-lobby) and hand the socket their view. `join` carries no room
+            # token (that's `reconnect`), so a matching session is the only proof.
+            if session_uid != pid:
+                await _send(ws, {"type": "error",
+                                 "message": "seat already taken — reconnect to rejoin"})
+                return False
+        else:
+            cap = int(room.get("max_players") or MAX_PLAYERS)
+            if room.get("vs_ai") or room.get("status") != "open" \
+                    or len([p for p in room["players"] if p != AI_PID]) >= cap:
                 await _send(ws, {"type": "error", "message": "room is full"})
-                return
+                return False
             room["players"][pid] = name
             room.setdefault("meta", {})[pid] = {"token": _gen_token()}
         room.setdefault("boards", {})[pid] = _valid_board(msg.get("board_id"))
@@ -851,6 +967,7 @@ async def _handle_join(ws, room_id, pid, msg):
     # injects each recipient's token per socket).
     await _send(ws, {"type": "joined", "room_id": room_id, "room": mk_room_state(room_id, viewer_pid=pid)})
     await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+    return True
 
 
 async def _handle_start(ws, room_id, pid):
@@ -863,14 +980,17 @@ async def _handle_start(ws, room_id, pid):
             await _send(ws, {"type": "error", "message": "only the host can start"})
             return
         humans = [p for p in room["players"]]
-        if len(humans) < 2:
-            await _send(ws, {"type": "error", "message": "need two players"})
+        if not 2 <= len(humans) <= MAX_PLAYERS:
+            await _send(ws, {"type": "error", "message": "need 2-4 players"})
             return
         if room.get("status") != "open":
             await _send(ws, {"type": "error", "message": "already started"})
             return
         room["status"] = "playing"
         boards = {p: _valid_board(room.get("boards", {}).get(p)) for p in humans}
+        if room.get("same_board"):
+            host_board = boards.get(room.get("host")) or _valid_board(None)   # everyone on the host's board
+            boards = {p: host_board for p in humans}
         room["boards"] = boards
         room["game"] = engine.new_game(humans, names=dict(room["players"]), boards=boards)
         save_game(room_id)
@@ -969,15 +1089,16 @@ async def _handle_reconnect(ws, room_id, pid, msg):
         room = _ensure_room_loaded(room_id)
         if not room or pid not in room.get("players", {}):
             await _send(ws, {"type": "error", "message": "invalid token"})
-            return
+            return False
         if room.get("meta", {}).get(pid, {}).get("token") != token:
             await _send(ws, {"type": "error", "message": "invalid token"})
-            return
+            return False
         room["sockets"][pid] = ws
         bot_turn = _bot_should_act(room)
     await _send(ws, {"type": "reconnected", "room": mk_room_state(room_id, viewer_pid=pid)})
     if bot_turn:
         asyncio.create_task(_schedule_bot_turn(room_id))
+    return True   # per-seat room token proves ownership
 
 
 async def _handle_auth_reconnect(ws, room_id, pid, msg):
@@ -985,13 +1106,13 @@ async def _handle_auth_reconnect(ws, room_id, pid, msg):
     info = validate_reconnect_token(token)
     if not info or info.get("room_id") != room_id or info.get("player_id") != pid:
         await _send(ws, {"type": "error", "message": "invalid token"})
-        return
+        return False
     mark_reconnect_token_used(token)
     async with ROOM_LOCK:
         room = _ensure_room_loaded(room_id)
         if not room or pid not in room.get("players", {}):
             await _send(ws, {"type": "error", "message": "no such room"})
-            return
+            return False
         room["sockets"][pid] = ws
         # refresh this player's room reconnect token
         room.setdefault("meta", {}).setdefault(pid, {})["token"] = _gen_token()
@@ -1000,6 +1121,7 @@ async def _handle_auth_reconnect(ws, room_id, pid, msg):
     await _send(ws, {"type": "reconnected", "room": mk_room_state(room_id, viewer_pid=pid)})
     if bot_turn:
         asyncio.create_task(_schedule_bot_turn(room_id))
+    return True   # server-issued reconnect token, scoped to (room_id, pid)
 
 
 async def _handle_abandon(ws, room_id, pid):
@@ -1020,7 +1142,7 @@ async def _handle_abandon(ws, room_id, pid):
 # ── REST ──────────────────────────────────────────────────────────────────────
 @coc_app.get("/health")
 async def health():
-    return {"status": "ok", "service": "castles_of_crimson", "version": "1.0"}
+    return {"status": "ok", "service": "castles_of_crimson", "version": "1.0", **build_info()}
 
 
 @coc_app.get("/boards")

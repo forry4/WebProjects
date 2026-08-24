@@ -22,9 +22,27 @@ on:
       - 'games/spender/**'
       - 'games/castles_of_crimson/**'
       - 'games/wherewolf/**'
+      - 'games/spender_duel/**'
+      - 'games/dontminion/**'
+      - 'games/dissonance/**'
+      - 'games/rag_tag/**'
       - 'books/**'
       - 'shared/**'
       - '.github/workflows/deploy-pages.yml'
+      # Docs never reach the bundle — nothing in the build imports markdown, and the
+      # per-package CLAUDE.md files live INSIDE the globs above, so without this every
+      # docs edit rebuilt and republished a byte-identical site. Must be a trailing
+      # negative pattern rather than `paths-ignore`: GitHub rejects both filters on one
+      # event, and later patterns override earlier ones.
+      - '!**/*.md'
+      # Python test packages don't reach the bundle either, and they live inside the
+      # same globs — so a test-only commit republished a byte-identical site. Not
+      # merely wasted minutes: the build stamps a fresh `__BUILD_ID__` + version.json,
+      # and shared/update-nudge.js reads that on tab-focus, so every open tab was
+      # prompted to Refresh for a change no browser can observe.
+      # This does NOT match `webapp/test/` (singular) on purpose — smoke.mjs and
+      # screens.mjs ARE the frontend gates, and editing a gate must re-run it.
+      - '!**/tests/**'
   workflow_dispatch:   # manual "Run workflow" button
 
 # Grant the deploy job the OIDC + Pages permissions the official action needs.
@@ -33,15 +51,23 @@ permissions:
   pages: write
   id-token: write
 
-# Never cancel an in-flight Pages deploy; queue the next one instead so a rapid
-# second push waits rather than aborting a publish half-done.
-concurrency:
-  group: pages
-  cancel-in-progress: false
+# Concurrency is split PER JOB (below), not set here, because the two jobs want
+# opposite policies and a workflow-level group can only pick one:
+#   * build (the gates) IS cancellable — its only output is the artifact, and once
+#     a newer push exists, finishing the old gates proves nothing anyone will ship.
+#     Cancelling it is what lets a rapid follow-up push start its own gates
+#     immediately instead of queueing behind ~2 minutes of a superseded run.
+#   * deploy is NEVER cancelled — aborting a publish half-done is how a live site
+#     ends up serving a stale bundle, so deploys still strictly queue.
+# The visible cost: a superseded push shows a "cancelled" build run on main. That
+# is the feature working, not a failure — the newer run carries the coverage.
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    concurrency:
+      group: pages-build
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
 
@@ -53,22 +79,91 @@ jobs:
         working-directory: webapp
         run: npm install
 
+      # Cache the browser DOWNLOAD (~170MB), which is what made this step 22s on a
+      # cold runner. Keyed on the lockfile because that is what pins Playwright's
+      # version, and each version wants a specific browser revision — a stale key
+      # would restore a revision the pin does not name, which is exactly the
+      # "gate stops being runnable" failure PLAYWRIGHT_CHROMIUM_PATH exists for.
+      #
+      # The install step below is deliberately UNCONDITIONAL: `playwright install`
+      # is idempotent, so on a cache hit it skips the download and the step costs
+      # ~1s. That keeps one code path instead of a hit/miss branch whose
+      # rarely-taken side is the one that breaks the deploy gate.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('webapp/package-lock.json') }}
+
       # Gate the deploy: build the app, load it in a headless browser, and fail if
       # the page is blank / throws (e.g. a stray backtick in the CSS template). This
       # runs BEFORE the real Build step so its throwaway build can't ship.
+      #
+      # NO `--with-deps`, on purpose. The apt half cannot be cached (each run is a
+      # fresh VM, so system packages never persist — conditioning it on the browser
+      # cache would be incoherent), and it spent ~6s per run installing libraries
+      # ubuntu-latest already ships: the image preinstalls Google Chrome, which
+      # pulls in the same shared libraries Playwright's Chromium links against.
+      # If a future runner image ever drops them, the failure is LOUD and immediate
+      # — the smoke step's browser launch dies with a missing-.so error before
+      # anything can deploy — and the fix is putting `--with-deps` back on this line.
       - name: Install browser for smoke test
         working-directory: webapp
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
 
       - name: Smoke test (app must render, no blank page)
         working-directory: webapp
         run: npm run smoke
 
+      # The REAL render gate. `smoke` never leaves the loading screen (the shell pings
+      # the backend before it routes, and smoke has no backend), so it has never once
+      # rendered a game — a mount-time crash in any game passes smoke green. This boots
+      # the actual backend and asserts each game screen mounts its own markup.
+      # Verified by injecting a runtime throw into WhereWolf: smoke PASSED, this FAILED.
+      - name: Set up Python (for the screens gate's backend)
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          # Caches the pip DOWNLOAD dir, keyed on the requirements file itself.
+          cache: 'pip'
+          cache-dependency-path: games/spender/requirements.txt
+
+      - name: Install backend deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r games/spender/requirements.txt
+
+      # `screens` builds the app itself, and it must — a build that FAILS leaves the
+      # previous working dist/ in place, so skipping it would let a broken change
+      # sail through green. The smoke step above just built the SAME bundle (same
+      # command, same env), so this hands that one over rather than repeating it.
+      # It is opt-in AND verified: screens re-builds anyway unless dist/ is newer
+      # than every source file it is built from, so the invariant holds by
+      # construction and not by trusting whoever set the variable.
+      - name: Game-screen render gate (real backend)
+        working-directory: webapp
+        env:
+          SCREENS_REUSE_BUILD: '1'
+        run: npm run screens
+
       - name: Build
         working-directory: webapp
         env:
           VITE_WS_URL: wss://splendid-nelz.onrender.com/ws
+          # Stamps the bundle AND the emitted version.json with this commit, so a
+          # tab still running an older build can notice and offer a refresh
+          # (shared/update-nudge.js). Absent locally -> 'dev' -> nudge disabled.
+          GITHUB_SHA: ${{ github.sha }}
         run: npm run build
+
+      # SPA deep-link fallback: GitHub Pages has no rewrite rules, so an unknown path
+      # (/duel, /spender/ABCD12) serves 404.html — make that a copy of the built app
+      # (AFTER build, so it carries the same hashed asset tags). Pages returns it with
+      # HTTP status 404, which browsers render fine (known crawler caveat, accepted).
+      # The Cloudflare staging worker doesn't need this (single-page-application mode).
+      - name: SPA deep-link fallback (404.html)
+        working-directory: webapp
+        run: cp dist/index.html dist/404.html
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
@@ -78,6 +173,11 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    # Deploys strictly queue and are never cancelled — see the concurrency note at
+    # the top of this file.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

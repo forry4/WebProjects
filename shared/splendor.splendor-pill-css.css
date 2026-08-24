@@ -1,0 +1,7 @@
+.player-tokens{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px}
+.token-pill{display:flex;align-items:center;gap:3px;padding:2px 7px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;font-weight:700}
+.player-bonuses{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;margin-bottom:6px}
+.bonus-pill{display:flex;align-items:center;gap:3px;padding:2px 7px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;font-weight:700;border:1px solid}
+.reserved-label{font-size:.62rem;color:var(--text-dim);font-family:'Cinzel','Cinzel Fallback',serif;letter-spacing:.06em;margin-bottom:4px;text-transform:uppercase}
+.reserved-row{display:flex;gap:4px;flex-wrap:wrap}
+.gem-total{display:inline-block;font-size:.66rem;color:var(--text);font-family:'Cinzel','Cinzel Fallback',serif;font-weight:600;letter-spacing:.03em;margin-top:3px;background:var(--surface3);border:1.5px solid #7a6e58;padding:1px 8px;border-radius:8px;box-shadow:0 0 0 1px rgba(0,0,0,.5)}

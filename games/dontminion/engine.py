@@ -1,0 +1,6056 @@
+"""Dontminion engine — pure rules for Dominion (Base 2E + Intrigue 2E).
+
+No I/O, no FastAPI. The game dict is JSON-safe (no sets, RNG persisted as lists)
+so it survives save/reconnect. Public API (the frozen contract — see
+.claude-plans/i-want-to-add-luminous-pebble.md §9 and games/dontminion/CLAUDE.md):
+
+    new_game(player_ids, expansions, seed=None, names=None, kingdom=None) -> game
+    apply_move(game, pid, move) -> (ok, err)
+    legal_moves(game, pid) -> list[move]
+    sample_decision(game, pid, rng) -> decision payload
+    is_over(game) / winners(game) / score_game(game)
+    player_view(game, pid) -> per-recipient redacted dict
+    cost(game, card) -> int
+
+Moves are dicts keyed on "type": play_action / play_treasure / play_all_treasures /
+buy / end_phase / decision. Pauses for input are FRAMES on the game["pending"] stack;
+pending_pid / pending_kind mirror the top frame. Auto frames (parked continuations)
+are executed by _drive() so at rest the top frame is always a decision frame or the
+stack is empty. Card effects live in effects_*.py and register EFFECTS/STAGES; they
+may only touch the game through the kernel helpers exported here.
+"""
+
+import copy
+import itertools
+import random
+from collections import Counter
+
+from .cards import (
+    CARDS, KINGDOM, PILES, REWARDS, KNIGHTS, RUINS, RUINS_EACH, SHELTERS,
+    CASTLES, EMPIRES_SPLITS, SPLIT_EACH,
+    LANDSCAPES, BUYABLE_LANDSCAPE_KINDS, TRAVELLERS, TRAVELLER_PILE,
+    ARTIFACTS, CAPITALISM_CARDS, HORSE_PILE,
+    artifacts_for as cards_artifacts_for,
+    uses_horses as cards_uses_horses,
+    traveller_chain as cards_traveller_chain,
+    pile_size, REQUIREMENTS, REQUIREMENT_ORDER,
+    grants as cards_grant, overpays as cards_overpay, potion_of as cards_potion,
+    debt_of as cards_debt, landscape_debt as cards_landscape_debt,
+    expansion_of as cards_expansion, printed_cost as cards_printed_cost,
+    landscape_pool as cards_landscape_pool, landscape_kind as cards_landscape_kind,
+)
+
+BASIC_CARDS = ("Copper", "Silver", "Gold", "Estate", "Duchy", "Province", "Curse")
+_DRIVE_CAP = 500
+_ENUM_CAP = 200
+
+# Game-dict shape version. BUMP THIS whenever a phase adds a key the kernel
+# reads, and add the matching step to migrate(). The server migrates at LOAD,
+# so kernel code may assume the CURRENT shape — no defensive .get() for keys
+# migrate guarantees (lazily-built transients like dur_setup stay lazy).
+SCHEMA = 14
+#   1 = Base + Intrigue
+#   2 = Seaside      (durations/mats/watchers/extra turns)
+#   3 = Prosperity   (VP tokens, Platinum/Colony, Charlatan's Curse rule)
+#   4 = card RENAMES (Harem -> Farm) — the first genuine TRANSFORM step
+#   5 = Hinterlands  (per-turn counters for Crossroads/Fool's Gold/Cauldron)
+#   6 = the PILE MODEL (game["piles"]: ordered/non-supply piles, attachments)
+#   7 = Cornucopia & Guilds (Coffers, the setup-chosen Bane/Ferryman piles,
+#       Footpad's game rule, per-seat set-asides + start-of-turn abilities)
+#   8 = Alchemy (the cost VECTOR's second money pool, game["potions"])
+#   9 = Dark Ages (game["shelters"] — the Shelter starting decks)
+#  10 = the LANDSCAPE kernel (ph. 6H): game["landscapes"], the Tavern mat and
+#       the Adventures token stores (seat["tavern"] / seat["tokens"])
+#  11 = the DEBT vector (ph. 7H): game["debt"] — a fill-only bump, the v10 shape
+#       plus one public per-player counter
+#  12 = Empires (ph. 8): seat["cleanup_return"] — cards set aside to go back to
+#       their PILE at Clean-up (Encampment). Also a fill-only bump; every other
+#       key this set reads was added by v10/v11
+#  13 = Renaissance (ph. 9): game["villagers"] (the second spendable mat),
+#       game["artifacts"] (the unique pass-around objects) and game["fleet"]
+#       (the after-game-end round, None until it triggers). Fill-only
+#  14 = Menagerie (ph. 10): seat["exile"] (the Exile mat — a real OWNED zone
+#       that scores), game["last_turn_trashes"] (Goatherd) and
+#       game["mouse_card"] (Way of the Mouse's set-aside card). Fill-only
+
+# Cards renamed by the publisher, old -> current. We ship current names (user
+# directive), so a persisted save written under an old name must be rewritten
+# at load: the string lives inside real decks, hands, supplies, trash, pending
+# frames and undo snapshots, so nothing short of a deep rewrite is correct.
+# EVERY future rename adds a line here AND bumps SCHEMA.
+_RENAMES = {
+    "Harem": "Farm",      # compendium: "In 2023 this card was renamed 'Farm'"
+}
+
+
+# Every key new_game creates that the kernel later reads by direct index, with
+# the value an OLD save should inherit. migrate fills these by PRESENCE, not by
+# schema version — see the comment in migrate() for why the version gate can't
+# be trusted for fills. Factories keep the defaults unshared.
+_GAME_FILLS = {
+    "turn_number": lambda g: 1,
+    "log_depth": lambda g: 0,
+    "undo_stack": lambda g: [],
+    # Seaside
+    "watchers": lambda g: [],
+    "last_turn_pid": lambda g: None,
+    "last_turn_gains": lambda g: {},
+    "extra_turn": lambda g: False,
+    # Prosperity
+    "vp_tokens": lambda g: {p: 0 for p in g.get("players", [])},
+    "colony": lambda g: False,
+    "curse_is_treasure": lambda g: False,
+    # the pile model (ph. 3H). Every pile a pre-3H save can hold is an
+    # ordinary Supply pile of the card it is named after, so the whole model
+    # rebuilds from the count index — and it stays a FILL, not a transform,
+    # because a game that already has `piles` must keep the one it has.
+    "nonsupply": lambda g: {},
+    "piles": lambda g: {c: _plain_pile(c) for c in g.get("supply", {})},
+    # Cornucopia & Guilds (ph. 4)
+    "coffers": lambda g: {p: 0 for p in g.get("players", [])},
+    "potions": lambda g: 0,
+    "bane": lambda g: None,             # Young Witch's extra Supply pile
+    "ferryman_pile": lambda g: None,    # Ferryman's extra NON-Supply pile
+    "footpad_draw": lambda g: False,    # Footpad's game-wide when-gain rule
+    # Dark Ages (ph. 6): did this game deal Shelters instead of Estates? Read
+    # by nothing at runtime but the view and the tests — it is a SETUP record,
+    # and an old save that never had one played without them.
+    "shelters": lambda g: False,
+    # the LANDSCAPE kernel (ph. 6H): the Events/Projects/… dealt to THIS game,
+    # name -> {"kind", + per-landscape state}. Public table info. An old save
+    # was dealt none, and none exists to deal until ph. 7.
+    "landscapes": lambda g: {},
+    # the DEBT vector (ph. 7H): Debt tokens per player, PUBLIC, game-level like
+    # coffers/vp_tokens. No shipped card or Event costs Debt until Empires
+    # (ph. 8), so an old save owes none — but the buy gate reads it on every
+    # buy, so it has to exist rather than be defaulted at each read site.
+    "debt": lambda g: {p: 0 for p in g.get("players", [])},
+    # Renaissance (ph. 9): the Villagers mat (Coffers' exact game-level shape),
+    # the Artifact holders ({name: pid|None} for the artifacts THIS game keeps
+    # available — an old save was dealt none), and the Fleet round (None until
+    # the game-end check trips with a Fleet cube on the table).
+    "villagers": lambda g: {p: 0 for p in g.get("players", [])},
+    "artifacts": lambda g: {},
+    "fleet": lambda g: None,
+    # Menagerie (ph. 10): how many cards each player trashed on their LAST
+    # completed turn (Goatherd — the `last_turn_gains` shape, a COUNT because
+    # that is all the card asks), and Way of the Mouse's set-aside card.
+    "last_turn_trashes": lambda g: {},
+    "mouse_card": lambda g: None,
+}
+_SEAT_FILLS = {
+    "aside": list,
+    # ph. 6H: the Tavern mat (Reserve cards wait here to be CALLED — public,
+    # they lie face up) and the Adventures per-seat tokens (-1 Card, -$1,
+    # Journey). Per-PILE tokens ride the pile model's `attach` instead.
+    "tavern": list, "tokens": dict,
+    # Seaside zones + mats
+    "duration": list, "dur_aside": list,
+    "island": list, "village_mat": list,
+    # C&G: cards set aside to be played at the start of your next turn
+    # (Farmhands), and the seat-level start-of-turn abilities that play them
+    "set_aside": list, "start_fx": list, "cleanup_aside": list,
+    # Empires (ph. 8): set aside now, RETURNED TO ITS PILE at Clean-up
+    # (Encampment). Distinct from cleanup_aside, which goes to the discard.
+    "cleanup_return": list,
+    # Menagerie (ph. 10): the EXILE MAT. A real OWNED zone — "cards on your
+    # Exile mat are yours" — so it joins owned_cards, both conservation
+    # censuses and the score. Public, like the Tavern mat.
+    "exile": list,
+}
+
+
+def migrate(game):
+    """Bring a persisted game up to SCHEMA, in place. Called by the server on
+    every load; live prod games predate every later phase, so each phase's new
+    keys need an entry in _GAME_FILLS/_SEAT_FILLS (and a test in test_migrate.py).
+
+    Fills are UNCONDITIONAL, deliberately — do not put them behind `v < N`.
+    A stamp only partitions shapes if it was bumped in the same commit that
+    added the key, and ours wasn't: prod carries `schema = 2` games written
+    across the whole Seaside AND Prosperity eras, some predating keys added
+    later under that same stamp (found by replaying real prod saves: two live
+    games had schema 2 and no `last_turn_gains`, which a version-gated migrate
+    skips and the kernel then KeyErrors on at end of turn). setdefault is
+    idempotent, so an unconditional fill is never wrong and costs one lookup.
+    The version gate is reserved for genuine TRANSFORMS — a value whose meaning
+    or shape changed, where re-running the step could corrupt a current game.
+    The rename step below is the first, and it is gated soundly because SCHEMA
+    was bumped in the same commit that added it (the condition the fills above
+    could not rely on). It happens to be idempotent too, so a missed gate would
+    cost time, not correctness.
+    """
+    if not isinstance(game, dict) or "seats" not in game:
+        return game
+    v = game.get("schema", 1)
+    for key, factory in _GAME_FILLS.items():
+        if key not in game:
+            game[key] = factory(game)
+    for seat in game["seats"].values():
+        for key, factory in _SEAT_FILLS.items():
+            if key not in seat:
+                seat[key] = factory()
+    ctx = game.setdefault("turn_ctx", _fresh_turn_ctx())
+    for key, val in _fresh_turn_ctx().items():
+        ctx.setdefault(key, val)
+    if v < 4:                                   # pre-rename saves
+        _apply_renames(game, _RENAMES)
+    game["schema"] = SCHEMA
+    return game
+
+
+def _apply_renames(game, mapping):
+    """Rewrite renamed card names EVERYWHERE in a persisted game.
+
+    A card name is not confined to a tidy list of zones — it is a bare string
+    in decks, hands, discards, in-play, aside, mats, duration entries and their
+    riders, trash, the supply's KEYS, the kingdom list, last_turn_gains, every
+    open pending frame's constraint and data, every undo snapshot (which are
+    whole game dicts), and the log. Missing any one of them would leave a live
+    game holding a card the kernel no longer knows, so this walks the whole
+    structure instead of enumerating zones.
+
+    The one thing it must not touch is player identity — a DISPLAY NAME equal
+    to a renamed card is entirely possible (someone can call themselves "Farm").
+    Identity is protected POSITIONALLY, by which key holds it, not by comparing
+    against the pid set: a value-blind guard would also refuse to rename the
+    real card whenever a player shared its name, quietly leaving the game
+    holding a card the kernel no longer knows."""
+    # keys whose VALUE is a pid, or a list of pids — never a card
+    pid_valued = {"turn", "pid", "pending_pid", "last_turn_pid", "host", "owner",
+                  "actor", "gainer", "players", "winners", "private_to",
+                  "immune", "_outpost", "_cur_dur", "_actor"}
+    # keys whose dict KEYS are pids (values still recursed — last_turn_gains
+    # maps pid -> cards). "names" is skipped WHOLESALE: user-chosen text.
+    pid_keyed = {"seats", "vp", "vp_tokens", "scores", "last_turn_gains", "meta"}
+
+    def walk(node, rename_keys=True):
+        if isinstance(node, str):
+            return mapping.get(node, node)
+        if isinstance(node, list):
+            return [walk(x) for x in node]
+        if isinstance(node, dict):
+            out = {}
+            for k, val in node.items():
+                nk = mapping.get(k, k) if rename_keys else k
+                if k == "names" or k in pid_valued:
+                    out[nk] = val                      # identity: untouched
+                else:
+                    out[nk] = walk(val, rename_keys=k not in pid_keyed)
+            return out
+        return node
+
+    game.update(walk(game))
+    return game
+
+
+# --- RNG (persisted as lists so the game dict stays JSON-safe) ---------------
+
+def _make_rng(game):
+    rng = random.Random()
+    st = game.get("rng_state")
+    if st is not None:
+        rng.setstate((st[0], tuple(st[1]), st[2]))
+    return rng
+
+
+def _save_rng(game, rng):
+    st = rng.getstate()
+    game["rng_state"] = [st[0], list(st[1]), st[2]]
+
+
+# --- logging -----------------------------------------------------------------
+
+def _log(game, pid, event, private_to=None, **kw):
+    entry = dict(kw)
+    d = game.get("log_depth", 0)
+    if d:
+        entry["d"] = min(d, 3)
+    if private_to is not None:
+        entry["private_to"] = list(private_to)
+    # Core fields are set LAST so an event kwarg can never clobber them. A
+    # draw kwarg named n= used to overwrite the SEQUENCE n with the card count
+    # — every draw entry shared n, the client keyed lines on it, and React's
+    # reconciler visibly scrambled the log. Counts are the `count` kwarg now.
+    entry["n"] = len(game["log"])
+    entry["pid"] = pid
+    entry["event"] = event
+    game["log"].append(entry)
+
+
+# log_depth tracks how deep inside a card's resolution we are, so the client can
+# indent sub-effects under the play that caused them (the Dominion-online look).
+# Incremented around every effect/stage dispatch; always 0 at rest (try/finally),
+# so snapshots/saves never carry a stale depth.
+
+def _push_depth(game):
+    game["log_depth"] = game.get("log_depth", 0) + 1
+
+
+def _pop_depth(game):
+    game["log_depth"] = max(0, game.get("log_depth", 1) - 1)
+
+
+# --- frame machinery ---------------------------------------------------------
+
+def _sync_pending(game):
+    top = game["pending"][-1] if game["pending"] else None
+    game["pending_pid"] = top["pid"] if top else None
+    game["pending_kind"] = top["kind"] if top else None
+
+
+def _push_frame(game, frame):
+    game["pending"].append(frame)
+    _sync_pending(game)
+
+
+def _pop_frame(game):
+    frame = game["pending"].pop()
+    _sync_pending(game)
+    return frame
+
+
+def push_choose_cards(game, pid, card, stage, cards, mn, mx, purpose, data=None):
+    cards = list(cards)
+    mn = max(0, min(mn, len(cards)))
+    mx = max(mn, min(mx, len(cards)))
+    _push_frame(game, {"kind": "choose_cards", "pid": pid, "card": card, "stage": stage,
+                       "constraint": {"cards": cards, "min": mn, "max": mx, "purpose": purpose},
+                       "data": data or {}})
+
+
+def push_choose_pile(game, pid, card, stage, piles, data=None):
+    piles = list(piles)
+    if not piles:
+        raise ValueError("push_choose_pile with no piles — pusher must guard")
+    _push_frame(game, {"kind": "choose_pile", "pid": pid, "card": card, "stage": stage,
+                       "constraint": {"piles": piles}, "data": data or {}})
+
+
+def push_choose_option(game, pid, card, stage, options, pick=1, distinct=True, data=None):
+    _push_frame(game, {"kind": "choose_option", "pid": pid, "card": card, "stage": stage,
+                       "constraint": {"options": list(options), "pick": pick, "distinct": distinct},
+                       "data": data or {}})
+
+
+def push_order_cards(game, pid, card, stage, cards, data=None):
+    _push_frame(game, {"kind": "order_cards", "pid": pid, "card": card, "stage": stage,
+                       "constraint": {"cards": list(cards)}, "data": data or {}})
+
+
+def push_place_in_deck(game, pid, card, stage, deck_card, data=None):
+    deck_len = len(game["seats"][pid]["deck"])
+    _push_frame(game, {"kind": "place_in_deck", "pid": pid, "card": card, "stage": stage,
+                       "constraint": {"card": deck_card, "deck_len": deck_len}, "data": data or {}})
+
+
+def push_name_card(game, pid, card, stage, data=None):
+    # A PILE NAME IS NOT A CARD NAME: "'Knight', 'Loot', 'Ruins', 'Castle' and
+    # 'Shelter' are types, not names" — you can't name the Knights pile, so an
+    # ordered pile's key is filtered out of the offer (its cards are named by
+    # their own names, which is what pile_top would give you).
+    _push_frame(game, {"kind": "name_card", "pid": pid, "card": card, "stage": stage,
+                       "constraint": {"cards": sorted(c for c in game["supply"]
+                                                      if c in CARDS)},
+                       "data": data or {}})
+
+
+def push_auto(game, pid, card, stage, data=None):
+    _push_frame(game, {"kind": "auto", "pid": pid, "card": card, "stage": stage,
+                       "constraint": None, "data": data or {}})
+
+
+def _run_stage(game, card, stage, pid, frame, choice):
+    """THE stage entry point. Binds `_actor` so resource helpers credit the
+    player whose stage is running, not whoever's turn it is — the two differ
+    for any reaction resolving on an opponent's turn."""
+    prev = game.get("_actor")
+    game["_actor"] = pid
+    _push_depth(game)
+    try:
+        _stage_fn(card, stage)(game, pid, frame, choice)
+    finally:
+        _pop_depth(game)
+        if prev is None:
+            game.pop("_actor", None)
+        else:
+            game["_actor"] = prev
+
+
+def _run_ability(game, pid, fn):
+    """Run `fn(game, pid)` as pid's ability — the same `_actor` binding and log
+    depth `_run_stage` gives a stage. Every non-stage dispatch point (a card's
+    on_play, a Command's borrowed ability, a landscape's ability) goes through
+    here so none of them can drift from the others."""
+    prev = game.get("_actor")
+    game["_actor"] = pid
+    _push_depth(game)
+    try:
+        fn(game, pid)
+    finally:
+        _pop_depth(game)
+        if prev is None:
+            game.pop("_actor", None)
+        else:
+            game["_actor"] = prev
+
+
+def _stage_fn(card, stage):
+    fn = KERNEL_STAGES.get((card, stage))
+    if fn is None and stage.startswith("__"):
+        # a KERNEL stage usable by ANY card ("*"): the frame keeps the card's
+        # own name so the prompt still reads "Sentry", but the handler is the
+        # kernel's. Card-name-agnostic shared shapes live here.
+        fn = KERNEL_STAGES.get(("*", stage))
+    if fn is None:
+        from . import effects
+        fn = effects.STAGES.get((card, stage))
+    if fn is None:
+        raise KeyError(f"dontminion: no stage handler for {card!r}/{stage!r}")
+    return fn
+
+
+def _effect_fn(card):
+    from . import effects
+    fn = effects.EFFECTS.get(card)
+    if fn is None:
+        raise KeyError(f"dontminion: no effect registered for {card!r}")
+    return fn
+
+
+def _drive(game):
+    """Run auto frames until the top of the stack is a decision frame (or empty)."""
+    for _ in range(_DRIVE_CAP):
+        if not game["pending"] or game["pending"][-1]["kind"] != "auto":
+            return
+        frame = _pop_frame(game)
+        _run_stage(game, frame["card"], frame["stage"], frame["pid"], frame, None)
+    raise RuntimeError("dontminion: _drive exceeded iteration cap (runaway auto frames)")
+
+
+# --- undo (one MOVE at a time; gated on HIDDEN INFORMATION, the Duel model) ---
+# A snapshot is pushed before each of the turn player's own moves, so undo can
+# be pressed repeatedly — walking back move by move until the start of the turn
+# ("nothing to undo") or until something revealed information that can't be
+# un-seen.
+#
+# The gate is the STACK ITSELF, not a sticky flag: a reveal CLEARS the stack
+# (you can never rewind across new information), but moves made AFTER it are
+# snapshotted again and stay undoable. A sticky "this turn revealed something"
+# flag used to block every later snapshot, so one +1 Card (Upgrade, Laboratory,
+# a start-of-turn Duration draw...) killed undo for the WHOLE turn — including
+# ordinary, fully-reversible buys.
+
+_UNDO_CAP = 30  # snapshots per turn — a runaway backstop, far above real turns
+
+
+def _mark_revealed(game):
+    """This turn exposed information that can't be un-seen (a draw, a look, a
+    reveal, a pass, an opponent's choice): nothing before this point may be
+    rewound. Later moves are undoable again — the empty stack is the gate.
+    `turn_revealed` stays as a display/telemetry signal only."""
+    game["turn_revealed"] = True
+    game["undo_stack"] = []
+
+
+def _arm_undo(game):
+    game["turn_revealed"] = False
+    game["undo_stack"] = []
+
+
+def _push_undo(game):
+    """Snapshot the game before a (turn player's) move. Snapshots exclude the
+    stack itself (else they'd nest) and THE LOG — which is append-only, so a
+    snapshot only needs its LENGTH and undo restores by truncating. Copying it
+    put up to _UNDO_CAP copies of a growing log inside every save blob (and
+    into the deepcopy on every single move). JSON-safe so they survive
+    save/reconnect; stripped from player_view (they hold every hidden zone)."""
+    snap = copy.deepcopy({k: v for k, v in game.items()
+                          if k not in ("undo_stack", "log")})
+    snap["_log_len"] = len(game["log"])
+    game["undo_stack"].append(snap)
+    if len(game["undo_stack"]) > _UNDO_CAP:
+        game["undo_stack"].pop(0)
+
+
+def _undo_move(game, pid):
+    if pid != game["turn"]:
+        return False, "not your turn"
+    stack = game.get("undo_stack") or []
+    if not stack:
+        return False, "nothing to undo"
+    snap = stack.pop()
+    # the log is not in the snapshot: truncate it back to its recorded length
+    # (append-only ⇒ everything after the snapshot belongs to the undone move)
+    log = game["log"][:snap.pop("_log_len", len(game["log"]))]
+    game.clear()
+    game.update(snap)
+    game["log"] = log
+    game["undo_stack"] = stack   # the remaining, earlier snapshots
+    _log(game, pid, "undo")
+    return True, None
+
+
+# --- THE PILE MODEL -----------------------------------------------------------
+# `supply = {name: count}` could only ever say "a pile of N copies of the card
+# it is named after". Five later sets need more than that (ordered Ruins and
+# Knights, split piles and Castles, ROTATING piles, per-pile Traits and
+# Adventures tokens) and six need gain sources that are not in the Supply at
+# all (Rewards, Spoils/Madman/Mercenary, Horses, Spirits, Loot).
+#
+# So a pile is an OBJECT — but its COUNT deliberately stays in a flat
+# {name: count} index, because that is the shape ~60 read sites across five
+# effects modules, both bots, the client and a hundred tests already speak.
+# There are two such indexes, identical in shape:
+#
+#   game["supply"]    — the BUYABLE piles. Untouched by this phase: still the
+#                       same dict, still hand-writable, so `g["supply"]["Curse"]
+#                       = 0` in a test or a fixture is still exactly right.
+#   game["nonsupply"] — the piles that are not in the Supply. Never buyable,
+#                       never counted for the three-empty-piles game end.
+#
+# and one metadata record per pile:
+#
+#   game["piles"][name] = {
+#     "supply":   bool,           # which index holds this pile's count
+#     "face":     card_name,      # the card whose cost/types this pile SHOWS.
+#                                 #   == name for an ordinary pile; the top card
+#                                 #   for an ordered one, and it is RETAINED
+#                                 #   when the pile empties so cost()/types_of()
+#                                 #   stay total (an empty pile still has a
+#                                 #   price on the board)
+#     "contents": [card, ...]|None,  # ORDERED piles only, top first. None means
+#                                 #   "index[name] copies of `name`" — no list of
+#                                 #   identical strings to keep in step
+#     "members":  [card, ...],    # every card name that belongs to this pile —
+#                                 #   how a RETURNED card finds its way home
+#                                 #   once the pile is empty and `contents` can
+#                                 #   no longer answer it
+#     "attach":   {},             # per-pile attachments (Adventures tokens,
+#                                 #   Empires' gathered VP, Plunder's Traits)
+#   }
+#
+# EXACTLY ONE AUTHORITY PER COUNT, which is the whole point of splitting it
+# this way: an ordinary pile's count is its index entry, and an ORDERED pile's
+# count is len(contents) — for those the index is a MIRROR, written only by
+# _pile_take/_pile_return so the enumeration sites keep working, and never
+# read by pile_count(). The soak asserts the mirror. Storing the count on the
+# pile object instead would have made every existing `g["supply"][x] = 0` a
+# silent desync, in tests today and in every future card batch.
+#
+# The reason non-supply piles live in a SEPARATE index rather than a flag
+# inside `supply`: every "piles costing up to $4" enumeration in card code
+# reads `game["supply"]`, and "gain a card from the Supply" must never offer a
+# Spoils. Out of that dict they are excluded by construction, in every module,
+# with no call site to remember. Card code reaches them through gain_from().
+
+def _plain_pile(name, supply=True):
+    return {"supply": supply, "face": name, "contents": None,
+            "members": [name], "attach": {}}
+
+
+def _pile_index(game, pile):
+    """The count map holding this pile — see THE PILE MODEL."""
+    return game["supply"] if pile["supply"] else game["nonsupply"]
+
+
+def add_pile(game, name, count=None, contents=None, supply=False, members=None):
+    """Create a pile at SETUP time. `contents` (top first) makes it ORDERED —
+    Ruins, Knights, split piles, Castles; otherwise it is `count` copies of a
+    card named `name`. Defaults to a NON-supply pile, which is what every
+    caller outside new_game wants (Rewards, Spoils, Horses, Spirits, Loot):
+    never buyable, never counted for the game end."""
+    if name in game["piles"]:
+        raise ValueError(f"pile {name!r} already exists")
+    # Every pile FACE has to be a real card, because cost()/types_of() price a
+    # pile through its face and player_view prices every pile on every wire
+    # build. Catching it here names the pile; catching it there is a KeyError
+    # deep in a view the client is waiting on.
+    unknown = [c for c in (contents if contents is not None else [name])
+               if c not in CARDS]
+    if unknown:
+        raise ValueError(f"pile {name!r} holds unknown cards: {unknown}")
+    if contents is not None:
+        contents = list(contents)
+        if not contents:
+            raise ValueError("an ordered pile must start with cards in it")
+        pile = {"supply": supply, "face": contents[0], "contents": contents,
+                "members": list(members) if members else sorted(set(contents)),
+                "attach": {}}
+        n = len(contents)
+    else:
+        pile = _plain_pile(name, supply)
+        n = int(count or 0)
+    game["piles"][name] = pile
+    _pile_index(game, pile)[name] = n
+    return pile
+
+
+def pile_count(game, name):
+    """How many cards are left in a pile. THE reader — never index the count
+    maps directly for an ordered pile, whose index entry is only a mirror."""
+    p = game["piles"].get(name)
+    if p is None:
+        return 0
+    if p["contents"] is not None:
+        return len(p["contents"])
+    return _pile_index(game, p).get(name, 0)
+
+
+def is_supply_pile(game, name):
+    p = game["piles"].get(name)
+    return bool(p and p["supply"])
+
+
+def pile_face(game, name):
+    """The card whose cost and types this pile SHOWS — total, even for an empty
+    ordered pile (it keeps the last card's face, so the board still prices it).
+    A plain card name is its own face, so this is safe to call on anything."""
+    p = game["piles"].get(name)
+    return p["face"] if p else name
+
+
+def pile_top(game, name):
+    """The card a gain or buy from this pile would actually yield, or None if
+    the pile is empty. For an ordinary pile that is the pile's own name; for an
+    ordered one it is the top card, which is what the pile costs and is."""
+    p = game["piles"].get(name)
+    if p is None or pile_count(game, name) <= 0:
+        return None
+    return p["contents"][0] if p["contents"] is not None else name
+
+
+def pile_types(game, name):
+    """A pile's OWN types — the randomizer's, not its top card's.
+
+    "Some abilities and setup rules refer to the type or cost of a pile.
+    Normally this is the same as that of the cards in the pile. But split piles
+    instead follow the RANDOMIZER card" (compendium, SPLIT PILES: PILE TYPE AND
+    COST § IV). Three of the five Empires splits show a Treasure once the
+    bottom half surfaces — Rocks, Plunder, Fortune — while the pile itself stays
+    an ACTION pile: "you can put your +$1 token on the Catapult/Rocks pile, and
+    then get +$1 when you play a Catapult OR A ROCKS".
+
+    So this is NOT `types_of(pile)`, which resolves through the FACE and is the
+    right answer for buying (a Fortune on top really does cost {$8,8D} and
+    really is a Treasure). Use this one for anything that asks what KIND of pile
+    something is: Defiled Shrine's and Obelisk's setup, every Adventures token
+    ("an Action Supply pile"), Trade Route, the Young Witch Bane. A pile whose
+    name is a card has no randomizer of its own, so it answers from the card."""
+    d = PILES.get(name)
+    if d is not None:
+        return list(d["types"])
+    return types_of(game, name)
+
+
+def pile_has_type(game, name, t):
+    return t in pile_types(game, name)
+
+
+def pile_of(game, card):
+    """Which pile `card` belongs to — how a returned card (exchange, Spoils
+    going home) finds its way back. None if the card came from nowhere we own.
+
+    A pile of the card's own name wins over an ordered pile listing it. Nothing
+    real is ambiguous here (a card in an ordered pile — a Ruin, a Knight, half
+    of a split pile — never also has a Supply pile of its own), so this only
+    fixes an order for a situation the sets cannot produce."""
+    p = game["piles"].get(card)
+    if p is not None and p["contents"] is None:
+        return card
+    for name, pile in game["piles"].items():
+        if pile["contents"] is not None and card in pile["members"]:
+            return name
+    return None
+
+
+def supply_piles(game):
+    """Sorted names of the buyable piles — the Supply."""
+    return sorted(game["supply"])
+
+
+def pile_cards(game):
+    """Every REAL card sitting in a pile, as a {name: count} map. The pile NAME
+    is not a card for an ordered pile ("Knights" is nothing you can own), so
+    the conservation census has to ask this rather than count the index — and
+    it has to reach the non-supply piles, which the index does not hold."""
+    out = {}
+    for name, p in game["piles"].items():
+        if p["contents"] is not None:
+            for c in p["contents"]:
+                out[c] = out.get(c, 0) + 1
+        else:
+            n = pile_count(game, name)
+            if n:
+                out[name] = out.get(name, 0) + n
+    return out
+
+
+# --- Adventures TOKENS (ph. 6H storage; ph. 7 places them) -------------------
+#
+# Two homes, because there are two kinds. A token that sits ON A PILE (+Card,
+# +Action, +Buy, +$, -$2 cost, Trashing, Estate) rides the pile model's
+# `attach`, which already ships on the wire — so the client sees them for free.
+# A token that sits in front of a PLAYER (-1 Card, -$1, Journey) is a seat key.
+#
+# `attach["tokens"] = {pid: [kind, ...]}`. Each player has ONE token of each
+# kind, so moving one always takes it off wherever it was: "if you move a token
+# that is already on a pile, it is moved from that pile" — which is what makes
+# move_token, not a bare pile_attach, the only writer.
+
+TOKEN_KINDS = ("+card", "+action", "+buy", "+coin", "-cost", "trashing", "estate")
+
+
+def _any_pile_tokens(game):
+    """Is there a token on ANY pile? cost() asks this first so the ordinary
+    board (every board before ph. 7) pays one cheap scan of empty `attach`
+    dicts instead of a pile_of lookup on every price it computes."""
+    return any("tokens" in p["attach"] for p in game["piles"].values())
+
+
+def pile_tokens(game, pile, pid=None):
+    """Tokens on a pile — every player's, or one player's list."""
+    p = game["piles"].get(pile)
+    toks = p["attach"].get("tokens", {}) if p else {}
+    return list(toks.get(pid, [])) if pid is not None else toks
+
+
+def token_pile(game, pid, kind):
+    """Which pile holds pid's token of this kind (None if it is off the board)."""
+    for name, p in game["piles"].items():
+        if kind in p["attach"].get("tokens", {}).get(pid, ()):
+            return name
+    return None
+
+
+def move_token(game, pid, kind, pile):
+    """Put pid's `kind` token on `pile`, taking it off whatever pile had it.
+
+    "Tokens may be put on an empty pile" — so this checks the pile EXISTS, not
+    that it has cards in it. False if there is no such pile (a card naming one
+    that this board did not deal)."""
+    if pile not in game["piles"]:
+        return False
+    old = token_pile(game, pid, kind)
+    if old is not None:
+        toks = game["piles"][old]["attach"]["tokens"]
+        toks[pid].remove(kind)
+        if not toks[pid]:
+            del toks[pid]
+        if not toks:
+            del game["piles"][old]["attach"]["tokens"]
+    game["piles"][pile]["attach"].setdefault("tokens", {}) \
+        .setdefault(pid, []).append(kind)
+    _log(game, pid, "move_token", token=kind, pile=pile,
+         **({"from": old} if old else {}))
+    return True
+
+
+def seat_token(game, pid, kind, default=None):
+    """A token in front of a PLAYER rather than on a pile (-1 Card, -$1,
+    Journey). Lazy by nature — absence is the common case — so unlike the
+    zones this is read through a default."""
+    return game["seats"][pid]["tokens"].get(kind, default)
+
+
+def set_seat_token(game, pid, kind, value):
+    toks = game["seats"][pid]["tokens"]
+    if value is None:
+        toks.pop(kind, None)
+    else:
+        toks[kind] = value
+    _log(game, pid, "seat_token", token=kind, value=value)
+
+
+def take_seat_token(game, pid, kind):
+    """Take a token you may already have — "if you already have this token, an
+    effect that makes you take it does nothing" (the −$1 and −1 Card tokens).
+    Returns True only if it actually moved, which is what an "if you do" reads."""
+    if game["seats"][pid]["tokens"].get(kind):
+        return False
+    set_seat_token(game, pid, kind, True)
+    return True
+
+
+def flip_journey(game, pid):
+    """Turn the Journey token over and return its NEW face (True = face up).
+
+    "It starts face up", and Ranger/Giant/Pilgrimage each turn it over "no
+    matter if it has been turned over by another card or Event earlier" — one
+    token per player, shared by all three. Stored as the DOWN state so the
+    default (absent) is the face-up start, which is what an old save and a
+    fresh seat both mean."""
+    down = not game["seats"][pid]["tokens"].get("journey_down")
+    set_seat_token(game, pid, "journey_down", True if down else None)
+    return not down
+
+
+def pile_attach(game, name, key, value):
+    """Put something ON a pile (an Adventures token, a Trait, gathered VP).
+    Public table state — it ships in the pile view."""
+    game["piles"][name]["attach"][key] = value
+
+
+def pile_attachment(game, name, key, default=None):
+    p = game["piles"].get(name)
+    return p["attach"].get(key, default) if p else default
+
+
+def _pile_counter(game, name, key, n):
+    """Add n to a numeric pile attachment, deleting it at zero so an untouched
+    pile ships no key at all (the same tidiness `move_token` keeps). Returns the
+    new total; total on an unknown pile, which stays a no-op returning 0."""
+    p = game["piles"].get(name)
+    if p is None:
+        return 0
+    total = p["attach"].get(key, 0) + n
+    if total:
+        p["attach"][key] = total
+    else:
+        p["attach"].pop(key, None)
+    return total
+
+
+def pile_vp(game, name):
+    """VP tokens sitting ON a Supply pile (Aqueduct, Defiled Shrine, and the
+    gathering piles, which gather onto themselves). Public — it rides `attach`,
+    which already ships in the pile view."""
+    return pile_attachment(game, name, "vp", 0)
+
+
+def add_pile_vp(game, name, n):
+    """Put n VP tokens on a pile. False if there is no such pile (a landmark
+    naming one this board did not deal)."""
+    if name not in game["piles"] or n <= 0:
+        return False
+    _pile_counter(game, name, "vp", n)
+    _log(game, None, "pile_vp", pile=name, count=n, total=pile_vp(game, name))
+    return True
+
+
+def take_pile_vp(game, pid, name, n=None):
+    """Move VP tokens off a pile onto pid (n=None takes them all). Returns how
+    many actually moved — an empty pile gives nothing, which is what "take the
+    VP from it" means when someone got there first."""
+    k = pile_vp(game, name) if n is None else min(n, pile_vp(game, name))
+    if k <= 0:
+        return 0
+    _pile_counter(game, name, "vp", -k)
+    add_vp_tokens(game, pid, k)
+    return k
+
+
+def pile_debt(game, name):
+    """Debt tokens sitting ON a Supply pile (Tax puts one on every pile)."""
+    return pile_attachment(game, name, "debt", 0)
+
+
+def add_pile_debt(game, name, n=1):
+    if name not in game["piles"] or n <= 0:
+        return False
+    _pile_counter(game, name, "debt", n)
+    _log(game, None, "pile_debt", pile=name, count=n, total=pile_debt(game, name))
+    return True
+
+
+def take_pile_debt(game, pid, name, n=None):
+    """Move a pile's Debt tokens onto pid (Tax: the buyer takes them). Returns
+    how many moved. Goes through add_debt, so it logs and is public."""
+    k = pile_debt(game, name) if n is None else min(n, pile_debt(game, name))
+    if k <= 0:
+        return 0
+    _pile_counter(game, name, "debt", -k)
+    add_debt(game, pid, k)
+    return k
+
+
+def _pile_take(game, name):
+    """Remove the top card from a pile and return its NAME (None if empty).
+    THE take — with _pile_return it is the only writer of an ordered pile's
+    contents, and the only thing that keeps that pile's index mirror honest."""
+    p = game["piles"].get(name)
+    n = pile_count(game, name)
+    if p is None or n <= 0:
+        return None
+    if p["contents"] is not None:
+        card = p["contents"].pop(0)
+        if p["contents"]:
+            p["face"] = p["contents"][0]     # else keep the last face
+    else:
+        card = name
+    _pile_index(game, p)[name] = n - 1
+    return card
+
+
+def _pile_return(game, card):
+    """Put a card back on its pile (Trader's exchange; Spoils going home).
+    False if we can't tell which pile it belongs to — nothing happens then,
+    rather than conjuring a new buyable pile out of the card's name, which is
+    what the old `supply[card] = supply.get(card, 0) + 1` would have done."""
+    name = pile_of(game, card)
+    if name is None:
+        return False
+    p = game["piles"][name]
+    n = pile_count(game, name)
+    if p["contents"] is not None:
+        p["contents"].insert(0, card)
+        p["face"] = card
+    _pile_index(game, p)[name] = n + 1
+    return True
+
+
+def take_from_pile_aside(game, pid, pile):
+    """Take a pile's top card into pid's SET-ASIDE zone without gaining it —
+    Inheritance's "set aside a non-Command Action card from the Supply". Not a
+    gain ("this is not considered gaining a card"), so it emits nothing; the
+    card is still counted as one of yours at the end of the game, which
+    `owned_cards` gives for free."""
+    card = _pile_take(game, pile)
+    if card is None:
+        return None
+    game["seats"][pid]["set_aside"].append(card)
+    _log(game, pid, "set_aside_supply", card=card)
+    return card
+
+
+def return_to_pile(game, pid, card, zone="in_play"):
+    """Move a card a player holds back onto its own pile — Spoils, Madman and
+    Mercenary "return this to its pile" (ph. 6), Encampment (ph. 8). Not a
+    trash and not a discard: it emits nothing and the card leaves play."""
+    seat = game["seats"][pid]
+    if card not in seat[zone]:
+        return False
+    if not _pile_return(game, card):
+        return False
+    seat[zone].remove(card)
+    _log(game, pid, "return_to_pile", card=card)
+    return True
+
+
+def _priced(game, name):
+    """Resolve a name that may be a PILE into the card whose printed cost and
+    types apply — "the cost and types of a pile are those of its top card".
+    A real card name is itself, so every cost/type query can call this."""
+    if name in CARDS:
+        return name
+    p = game["piles"].get(name)
+    return p["face"] if p is not None else name
+
+
+# --- kernel zone helpers (importable by card modules) ------------------------
+
+def draw(game, pid, n):
+    """Draw up to n cards (shuffle-on-empty per the rules). Returns the drawn list.
+
+    THE −1 CARD TOKEN (Adventures) sits ON THE DECK and eats the first card of
+    the next draw: "when drawing, this token works as a card on your deck (that
+    you remove instead of put in your hand)". Two consequences the compendium
+    is explicit about and this encodes: an otherwise-empty deck does NOT
+    reshuffle to satisfy a 1-card draw that the token absorbs, and the token
+    comes off even when there is nothing left to draw at all. It is removed
+    only by DRAWING — a reveal or a look leaves it there, which is why this
+    lives in draw() and not in look_top()."""
+    seat = game["seats"][pid]
+    drawn = []
+    if n > 0 and seat["tokens"].get("-card"):
+        del seat["tokens"]["-card"]
+        _log(game, pid, "minus_card_token")
+        n -= 1
+    for _ in range(n):
+        if not seat["deck"]:
+            if not seat["discard"]:
+                break
+            rng = _make_rng(game)
+            pile = seat["discard"][:]
+            rng.shuffle(pile)
+            _apply_shuffle_pick(game, pid, pile)
+            seat["deck"] = pile
+            seat["discard"] = []
+            _save_rng(game, rng)
+            _log(game, pid, "shuffle")
+        drawn.append(seat["deck"].pop(0))
+    seat["hand"].extend(drawn)
+    if drawn:
+        _mark_revealed(game)
+        # card names are per-field redacted in player_view (owner-only pre-over)
+        _log(game, pid, "draw", count=len(drawn), cards=list(drawn))
+    return drawn
+
+
+def look_top(game, pid, n):
+    """Move up to n cards from the top of the deck to the seat's aside zone.
+
+    Aside cards are excluded from any mid-look shuffle (they are not in the
+    deck or discard), matching the reveal/look rules. Returns the moved list.
+    """
+    seat = game["seats"][pid]
+    moved = []
+    for _ in range(n):
+        if not seat["deck"]:
+            if not seat["discard"]:
+                break
+            rng = _make_rng(game)
+            pile = seat["discard"][:]
+            rng.shuffle(pile)
+            _apply_shuffle_pick(game, pid, pile)
+            seat["deck"] = pile
+            seat["discard"] = []
+            _save_rng(game, rng)
+            _log(game, pid, "shuffle")
+        moved.append(seat["deck"].pop(0))
+    seat["aside"].extend(moved)
+    if moved:
+        _mark_revealed(game)
+    return moved
+
+
+# --- STAR CHART (ph. 9): "When shuffling, you may pick one of the cards to go
+# on top." The pick is a REAL DECISION, honoured at every shuffle point the
+# frame stack can reach:
+#   * the Clean-up hand draw (the card's flagship use — guarantee a key card
+#     into your next hand), via final_draw below;
+#   * any card code's FINAL draw, via final_draw (new-set code must use it for
+#     a draw that ends its ability — the frozen-API rule);
+#   * whole-deck shuffles (shuffle_into_deck — Inn/Donate-class), which push
+#     the pick frame directly after shuffling.
+# A shuffle in the MIDDLE of an ability that continues afterwards (a Smithy
+# draw flipping the deck, a look_top) shuffles uniformly and LOGS the skip —
+# a documented deviation (B9), because a decision cannot be inserted into a
+# synchronous caller without deferring the rest of that caller: the ~100
+# existing draw sites would each need the CPS rewrite the ledger row schedules
+# for ph. 15 (Stash, the next "when shuffling" consumer). A skipped pick is
+# never silent (the lost_track rule).
+
+def _star_chart_pick_applies(game, pid):
+    """May pid pick at a shuffle right now? (Cube on Star Chart; the choice
+    set — the cards being shuffled — is the caller's concern.)"""
+    return bool(game["landscapes"]) and project_owned(game, "Star Chart", pid)
+
+
+def _apply_shuffle_pick(game, pid, pile):
+    """Inside a shuffle: honour a pick the owner already made (the transient
+    parked by _k_star_pick), or log the skip when an owner shuffles where no
+    pick could be offered. The pick moves AFTER the rng.shuffle, so the
+    entropy spend is identical picked, declined or skipped — which is what
+    keeps the determinism soak honest."""
+    t = game.pop("_shuffle_pick", None)
+    if t is not None and t.get("pid") == pid:
+        card = t.get("card")
+        if card is not None and card in pile:
+            pile.remove(card)
+            pile.insert(0, card)
+        return
+    if t is not None:
+        game["_shuffle_pick"] = t          # someone else's pending pick
+    if _star_chart_pick_applies(game, pid):
+        # the deviation, visibly: the owner shuffled mid-ability, where the
+        # pick cannot be offered — indistinguishable at the table from a
+        # trigger that failed to fire, so the engine says it (lost_track rule)
+        _log(game, pid, "star_chart_skip")
+
+
+def final_draw(game, pid, n):
+    """Draw n with the Star Chart pick honoured — for a draw that ENDS its
+    ability (nothing may run after this in the calling stage: the draw may
+    park a decision frame and complete inside it). Kernel Clean-up uses it for
+    the hand draw; card code uses it for any final draw. Where no pick
+    applies, it is exactly draw()."""
+    seat = game["seats"][pid]
+    m = n - (1 if (n > 0 and seat["tokens"].get("-card")) else 0)
+    if not _star_chart_pick_applies(game, pid) or m <= len(seat["deck"]) \
+            or not seat["discard"]:
+        return draw(game, pid, n)
+    # a shuffle is coming: ask first, then the pick frame's stage draws
+    push_choose_cards(game, pid, "Star Chart", "__star_pick",
+                      sorted(seat["discard"]), 0, 1, "put on top of your shuffled deck",
+                      data={"n": n, "mode": "draw"})
+    return []
+
+
+def _k_star_pick(game, pid, frame, choice):
+    picked = (choice.get("cards") or [None])[0]
+    if picked is not None:
+        # the pick is the owner's private information until the cards show
+        _log(game, pid, "star_chart", card=picked, private_to=[pid])
+    if frame["data"]["mode"] == "draw":
+        game["_shuffle_pick"] = {"pid": pid, "card": picked}
+        draw(game, pid, frame["data"]["n"])
+        game.pop("_shuffle_pick", None)   # a -1 Card token can eat the shuffle
+    else:
+        # "deck": the deck was already shuffled (shuffle_into_deck) — move the
+        # picked card to the top
+        deck = game["seats"][pid]["deck"]
+        if picked is not None and picked in deck:
+            deck.remove(picked)
+            deck.insert(0, picked)
+
+
+def gain(game, pid, pile, dest="discard", via_buy=False, overpay=0, **extra):
+    """Gain the top card of a pile. `pile` is a pile NAME — for every ordinary
+    pile that is the card's own name, which is why every existing call site
+    reads as "gain this card"; for an ordered pile (Knights, a split pile) the
+    card you actually get is its top one, and that is what lands in your zone,
+    logs, and rides the `gain` event as the subject. Returns False (nothing
+    happens) if the pile is empty.
+
+    WOULD-GAIN interception (the replacement protocol, Trader-class): if any
+    TRIGGERS entry with on="would_gain"/from="hand" matches for the GAINER, the
+    physical gain is parked as a __gain/resolve auto frame with the reaction
+    windows on top; a replacement stage calls cancel_pending_gain() and
+    performs its own effect instead. Callers see True ("a gain is underway") —
+    no current call site branches on the difference, and new card code must
+    not either.
+
+    `**extra` rides the `gain` EVENT, so a card can mark a gain it caused and
+    read that mark back in its own when-gain condition. Port needs exactly one
+    bit of that ("when you gain a Port DUE TO PORT'S WHEN-GAIN, the when-gain
+    doesn't trigger again"), and a transient on the game dict would not do:
+    the would-gain protocol can PARK the physical gain, so the emit may happen
+    long after the call returned."""
+    got = pile_top(game, pile)
+    if got is None:
+        return False
+    from . import effects
+    would = [(rc, s) for rc, specs in getattr(effects, "TRIGGERS", {}).items()
+             for s in specs if s["on"] == "would_gain" and s.get("from") == "hand"]
+    for rcard, spec in would:
+        when = spec.get("when")
+        if rcard in game["seats"][pid]["hand"] and (when is None or when(game, pid,
+                {"actor": pid, "subject": got, "dest": dest, "via_buy": via_buy})):
+            verb = "Reveal" if spec.get("mode") == "reveal" else "Play"
+            push_auto(game, pid, "__gain", "resolve",
+                      data={"pid": pid, "card": pile, "dest": dest,
+                            "via_buy": via_buy, "overpay": overpay,
+                            "extra": dict(extra), "cancelled": False})
+            push_choose_option(game, pid, rcard, spec["stage"],
+                               options=[{"id": "react", "label": f"{verb} {rcard} ({got} gain)"},
+                                        {"id": "decline", "label": "Don't react"}],
+                               data={"card": got, "gainer": pid, "dest": dest})
+            return True
+    return _gain_now(game, pid, pile, dest, via_buy, overpay, **extra)
+
+
+def gain_from(game, pid, pile, dest="discard"):
+    """Gain from a NON-SUPPLY pile — Rewards (ph. 4), Spoils/Madman/Mercenary
+    (ph. 6), Horses (ph. 10), Spirits (ph. 11), Loot (ph. 13). Mechanically the
+    same physical gain as any other (it IS a gain: Watchtower reacts to it,
+    when-gain abilities fire), so it shares one code path; the name exists so a
+    card SAYS it is reaching outside the Supply, and so a reader can tell that
+    from a Supply gain at the call site rather than by knowing the pile."""
+    return gain(game, pid, pile, dest=dest)
+
+
+def _gain_now(game, pid, pile, dest, via_buy=False, overpay=0, **extra):
+    """The physical gain — pile decrement, placement, bookkeeping, emit."""
+    card = _pile_take(game, pile)
+    if card is None:
+        return False
+    seat = game["seats"][pid]
+    if dest == "discard":
+        seat["discard"].append(card)
+    elif dest == "hand":
+        seat["hand"].append(card)
+    elif dest == "deck":
+        seat["deck"].insert(0, card)
+    elif dest == "dur_aside":
+        seat.setdefault("dur_aside", []).append(card)   # Blockade gains straight to set-aside
+    elif dest == "set_aside":
+        seat["set_aside"].append(card)     # ph. 10, Reap: gained face up, played next turn
+    elif dest == "exile":
+        seat["exile"].append(card)         # ph. 10: a GAIN that lands on the mat
+    else:
+        raise ValueError(f"bad gain dest {dest!r}")
+    # WAYFARER (ph. 10) reads "the last card gained this turn by ANY player,
+    # other than a Wayfarer" — which `_turn_gains` cannot answer, because that
+    # list exists for Smugglers and records only the TURN PLAYER's own gains.
+    if card != "Wayfarer":
+        game["turn_ctx"]["last_gain"] = card
+    if pid == game["turn"]:
+        # Smugglers: what a player gained during THEIR OWN turn
+        game.setdefault("_turn_gains", []).append(card)
+        if game["phase"] == "buy":
+            game["turn_ctx"]["buy_gains"] += 1        # Merchant Guild counts these
+            if has_type(game, card, "victory"):
+                game["turn_ctx"]["gained_victory_in_buy"] = True   # Treasury's gate
+    _log(game, pid, "gain", card=card, dest=dest)
+    # via_buy rides the event: Hoard fires only on BOUGHT gains, Mint on any.
+    # overpay rides it too — the `$N+` cards' overpay ability IS a when-gain
+    # ability (2022 retiming), so it reads its amount off the event.
+    emit(game, "gain", actor=pid, subject=card, dest=dest, via_buy=via_buy,
+         overpay=overpay, **extra)
+    return True
+
+
+def cancel_pending_gain(game):
+    """A would-gain replacement stage (Trader's 'instead') cancels the parked
+    physical gain. Returns the parked frame's data (card/dest) or None."""
+    for f in reversed(game["pending"]):
+        if f["card"] == "__gain" and f["stage"] == "resolve" and not f["data"]["cancelled"]:
+            f["data"]["cancelled"] = True
+            return dict(f["data"])
+    return None
+
+
+def _k_gain_resolve(game, pid, frame, choice):
+    d = frame["data"]
+    if not d["cancelled"]:
+        _gain_now(game, d["pid"], d["card"], d["dest"], d.get("via_buy", False),
+                  d.get("overpay", 0), **d.get("extra", {}))
+
+
+def gain_from_trash(game, pid, card, dest="discard"):
+    """Gain a card OUT OF THE TRASH (Lurker, Graverobber, Rogue). It really is
+    a gain — "When-gain abilities will trigger" (compendium, Graverobber 4) —
+    so it emits like any other, and "it's possible to gain non-Kingdom cards
+    from the trash". `dest` is the zone it lands in: Graverobber's is the
+    DECK."""
+    if card not in game["trash"]:
+        return False
+    game["trash"].remove(card)
+    seat = game["seats"][pid]
+    if dest == "deck":
+        seat["deck"].insert(0, card)
+    elif dest == "hand":
+        seat["hand"].append(card)
+    else:
+        seat["discard"].append(card)
+    if pid == game["turn"]:
+        game.setdefault("_turn_gains", []).append(card)   # Smugglers
+        if game["phase"] == "buy":
+            game["turn_ctx"]["buy_gains"] += 1
+            if has_type(game, card, "victory"):
+                game["turn_ctx"]["gained_victory_in_buy"] = True
+    _log(game, pid, "gain_from_trash", card=card, dest=dest)
+    emit(game, "gain", actor=pid, subject=card, dest=dest, via_buy=False, overpay=0)
+    return True
+
+
+def from_trash(game, pid, card, dest="hand"):
+    """Take a card out of the trash WITHOUT gaining it — Fortress' "when you
+    trash this, put it into your hand" ("This is not gaining it. It was still
+    trashed"), and Lich's discard later. Emits nothing, by that definition.
+    False if the card is no longer in the trash (the lose-track case)."""
+    if card not in game["trash"]:
+        return False
+    game["trash"].remove(card)
+    seat = game["seats"][pid]
+    if dest == "hand":
+        seat["hand"].append(card)
+    elif dest == "discard":
+        seat["discard"].append(card)
+    else:
+        raise ValueError(f"bad from_trash dest {dest!r}")
+    _log(game, pid, "from_trash", card=card, dest=dest)
+    return True
+
+
+def deck_to_discard(game, pid):
+    """Put your whole deck into your discard pile (Scavenger). NOT a discard
+    for trigger purposes — "this doesn't trigger cards that say WHEN YOU
+    DISCARD THIS" — so it never goes through discard(). It does expose
+    information (the bottom of the deck becomes the visible discard top), so it
+    locks undo like any other reveal."""
+    seat = game["seats"][pid]
+    n = len(seat["deck"])
+    if not n:
+        return 0
+    seat["discard"].extend(seat["deck"])
+    seat["deck"] = []
+    _mark_revealed(game)
+    _log(game, pid, "deck_to_discard", count=n)
+    return n
+
+
+def exchange(game, pid, card, into, zone="discard"):
+    """Return `card` to its pile and take `into` from ITS pile — Trader's 2020
+    reaction. NOT a gain: "even if you exchanged it, you DID gain the card (and
+    triggered any when-gain ability). You DIDN'T gain the Silver." So this
+    emits nothing; a `gain` event here would double-fire every when-gain
+    watcher on the card being handed back.
+
+    "You return the card to its pile no matter where you gained it from. You
+    place the Silver in your discard pile no matter where you gained the card
+    to." Returns False if `into` is empty (nothing happens), if the card isn't
+    where we expect (lose-track), or if it belongs to no pile we know — the
+    last of which used to CREATE a pile keyed on the card's name."""
+    if pile_top(game, into) is None:
+        return False
+    seat = game["seats"][pid]
+    if card not in seat[zone]:
+        return False                    # lost track of it; the exchange fails
+    if pile_of(game, card) is None:
+        return False                    # came from no pile; nothing to return to
+    seat[zone].remove(card)
+    _pile_return(game, card)
+    got = _pile_take(game, into)
+    seat["discard"].append(got)          # always the discard pile
+    _log(game, pid, "exchange", card=card, into=got)
+    return True
+
+
+def shuffle_into_deck(game, pid, cards, zone="discard"):
+    """Shuffle `cards` from a zone into the deck (Inn's on-gain). Shuffles the
+    deck EVEN WHEN `cards` IS EMPTY — "if you shuffle zero cards into your
+    deck, you still shuffle" — which matters because the shuffle itself
+    randomises deck order.
+
+    A Star Chart owner's pick frame parks HERE (ph. 9): "this also works when
+    you shuffle your existing deck with Annex, Donate, Famine or Inn" — the
+    whole shuffled deck is the choice set, and nothing has been drawn off it
+    yet, so a pick after the fact is exact. CALLER CONTRACT: anything that
+    must happen after this shuffle (Donate's draw-5) goes in a continuation
+    pushed BEFORE the call, or it runs before the pick resolves."""
+    seat = game["seats"][pid]
+    for c in cards:
+        seat[zone].remove(c)
+    seat["deck"].extend(cards)
+    rng = _make_rng(game)
+    rng.shuffle(seat["deck"])
+    _save_rng(game, rng)
+    _mark_revealed(game)                 # deck order changed under the player
+    _log(game, pid, "shuffle_into_deck", count=len(cards))
+    if seat["deck"] and _star_chart_pick_applies(game, pid):
+        # sorted: the constraint ships to the owner, who knows the SET of
+        # cards but must not learn the freshly shuffled ORDER from it
+        push_choose_cards(game, pid, "Star Chart", "__star_pick",
+                          sorted(seat["deck"]), 0, 1,
+                          "put on top of your shuffled deck",
+                          data={"mode": "deck"})
+    return list(cards)
+
+
+def trash(game, pid, cards, zone="hand", **extra):
+    """Trash cards from a zone. `**extra` rides the `trash` EVENT, so a card
+    can mark a trash it caused and read the mark back in its own trigger — the
+    exact twin of `gain(**extra)` (ph. 7, Port), and needed for the same
+    reason: the emit can resolve long after the call returned, so a transient
+    on the game dict would not do.
+
+    Sewers is the consumer: "when you trash a card OTHER THAN WITH THIS, you
+    may trash a card from your hand" — without a mark on the event, Sewers'
+    own trash is indistinguishable from any other and it chains until the hand
+    is empty."""
+    seat = game["seats"][pid]
+    for c in cards:
+        seat[zone].remove(c)
+        game["trash"].append(c)
+    if cards:
+        _log(game, pid, "trash", cards=list(cards))
+        # ph. 10: the live per-turn count Goatherd reads back as
+        # `last_turn_trashes` — "+1 Card per card THE PLAYER TO YOUR RIGHT
+        # TRASHED on their last turn", and ch. VII Goatherd 2 repeats it:
+        # "Goatherd counts how many times your right-hand player trashed a
+        # card."
+        #
+        # So it counts trashes BY that player, not trashes during their turn.
+        # The distinction is real and it runs the wrong way: when they play a
+        # Bandit, Swindler, Knight or Old Witch, the card is trashed by the
+        # VICTIM (that is how those cards are worded — "each other player …
+        # trashes"), so an attack that makes YOU trash must not pay THEIR
+        # Goatherd. Counting the turn instead of the trasher shipped in the
+        # ph.-10 kernel with a confident comment and no citation; the audit
+        # asked for the source and there wasn't one.
+        if pid == game["turn"]:
+            game["turn_ctx"]["trashes"] = \
+                game["turn_ctx"].get("trashes", 0) + len(cards)
+        # same simultaneity rule as discard (the Steward ruling: "both cards
+        # must be trashed simultaneously, and on-trash effects resolved
+        # afterwards") — one pool per player across the batch. Dark Ages' seam.
+        emit_batch(game, "trash", pid, cards, **extra)
+
+
+def trash_from_supply(game, card, pid=None):
+    """Trash the top card of a Supply pile — Lurker, Gladiator, Salt the Earth.
+
+    `pid` is who did the trashing, and passing it EMITS the trash. A card
+    trashed out of the Supply really is trashed: its own on-trash ability
+    fires and the trasher gets the benefit, and Tomb's "when you trash a card,
+    +1 VP" is explicit that it "triggers even when you trash a card from the
+    Supply (with Gladiator, Lurker or Salt the Earth)". The argument is
+    optional so an existing caller that has no actor to name (a test fixture
+    staging the trash pile) keeps its silent behaviour."""
+    got = _pile_take(game, card)
+    if got is None:
+        return False
+    game["trash"].append(got)
+    if pid is not None:
+        _log(game, pid, "supply_trash", card=got)
+        emit(game, "trash", actor=pid, subject=got)
+    return True
+
+
+def discard(game, pid, cards, zone="hand", public=False):
+    """Discard named cards from a zone. Names are logged for every discard —
+    faithful to the table, where cards land face-up on the pile one at a time
+    (the pile can't be browsed later, but the event itself is public).
+
+    Emits `discard` per card AFTER the whole batch has moved, not inline per
+    card. That ordering is load-bearing under the 2022 rules change (you now
+    discard all at once rather than one at a time), and the compendium's
+    Tunnel ruling turns on it: discarding your hand to Minion while holding
+    Tunnel + Watchtower lets you reveal the Tunnel for its Gold, but the
+    Watchtower has already left your hand by the time you do.
+
+    Clean-up does NOT come through here — `_end_turn` moves in_play and hand
+    to the discard pile directly — so the when-discard reactions
+    (Tunnel/Trail/Weaver, all "other than during a Clean-up phase") correctly
+    cannot fire there. Scheme, which triggers ON the Clean-up discard, will
+    need its own emit at that site."""
+    seat = game["seats"][pid]
+    for c in cards:
+        seat[zone].remove(c)
+        seat["discard"].append(c)
+    if cards:
+        _log(game, pid, "discard", cards=list(cards), count=len(cards))
+        # ONE batch, ONE pool: the cards were discarded simultaneously, so
+        # their when-discard abilities are concurrent and the owner orders
+        # them (Trail + Tunnel in one Militia discard) — never list order
+        emit_batch(game, "discard", pid, cards, zone=zone)
+
+
+def topdeck(game, pid, card, zone="hand", public=False):
+    seat = game["seats"][pid]
+    seat[zone].remove(card)
+    seat["deck"].insert(0, card)
+    if public:
+        _log(game, pid, "topdeck", card=card)
+    else:
+        _log(game, pid, "topdeck")
+
+
+def reveal(game, pid, cards, source):
+    """Reveals are information events only — cards stay where they are.
+
+    Since ph. 9 a reveal is also a trigger occurrence (Patron: "when something
+    causes you to reveal this (using the word 'reveal')…"). The emit is a
+    BATCH — the cards are revealed simultaneously, so two revealed Patrons'
+    abilities land in one pool — and fires for the cards' OWNER (pid, the
+    player whose zone they came from), which is who Patron pays. The word
+    "reveal" is the whole rule: a draw, a look or a discard shows cards
+    without revealing them, which is why the emit lives HERE and nowhere else.
+    With no consumer registered the pools stay empty and nothing parks — a
+    Patron-less board is byte-identical (the 6H before_play discipline)."""
+    _mark_revealed(game)
+    _log(game, pid, "reveal", cards=list(cards), source=source)
+    emit_batch(game, "reveal", pid, list(cards), source=source)
+
+
+def take_aside(game, pid, cards, dest="hand"):
+    """Move looked-at/set-aside cards out of the aside zone (Library keeps,
+    Patrol pockets victory cards, Sea Chart puts its match into hand, ...)."""
+    seat = game["seats"][pid]
+    for c in cards:
+        seat["aside"].remove(c)
+        if dest == "hand":
+            seat["hand"].append(c)
+        elif dest == "discard":
+            seat["discard"].append(c)
+        else:
+            raise ValueError(f"bad take_aside dest {dest!r}")
+    # A card entering the HAND is a visible effect the player wants logged —
+    # Sea Chart's "put it into your hand", Wishing Well's match, Library's keep,
+    # Patrol's pocketed Victory cards were all SILENT. Card names are per-field
+    # redacted (owner-only pre-over), exactly like draw.
+    if dest == "hand" and cards:
+        _log(game, pid, "to_hand", count=len(cards), cards=list(cards))
+
+
+def to_hand(game, pid, card, zone="discard"):
+    """Move a card the player ALREADY has into their hand — Villa's when-gain
+    "put it into your hand", Settlers fishing a Copper out of the discard pile.
+
+    Distinct from `gain(dest="hand")`, which is a gain: this card is already
+    yours and no trigger fires for it moving. Returns False when the card is
+    not where the caller thought (the lose-track guard's job is the caller's:
+    "when you put Villa into your hand, cards like Watchtower lose track of
+    it", and the reverse is just as real)."""
+    seat = game["seats"][pid]
+    if card not in seat[zone]:
+        return False
+    seat[zone].remove(card)
+    seat["hand"].append(card)
+    _log(game, pid, "to_hand", count=1, cards=[card])
+    return True
+
+
+def deck_from_aside(game, pid, order):
+    """Return aside cards to the top of the deck in the given order
+    (order[0] ends up on top) — Sentry/Patrol put-backs."""
+    seat = game["seats"][pid]
+    for c in order:
+        seat["aside"].remove(c)
+    seat["deck"] = list(order) + seat["deck"]
+
+
+def deck_insert(game, pid, card, position, zone="hand"):
+    """Put a card from a zone anywhere in the deck (0 = top) — Secret Passage."""
+    seat = game["seats"][pid]
+    seat[zone].remove(card)
+    seat["deck"].insert(position, card)
+    _log(game, pid, "deck_insert")
+
+
+# --- the TAVERN MAT and CALLING (ph. 6H — Adventures' Reserve cards) ---------
+#
+# A Reserve card is PLAYED like any Action, and its play ability puts it on its
+# owner's Tavern mat instead of leaving it in play. It waits there until a
+# timed window lets its owner CALL it, which is a different thing from playing
+# it. The mat is public — the cards lie face up (p28).
+
+def to_tavern(game, pid, card, zone="in_play"):
+    """Put a card on pid's Tavern mat — "when you play a Reserve card, it is put
+    on your Tavern mat", which the card's own on_play does at the end of its
+    ability. False (and nothing moved) if the card is not where it says it is,
+    the lose-track rule's usual shape."""
+    seat = game["seats"][pid]
+    if card not in seat[zone]:
+        return False
+    seat[zone].remove(card)
+    seat["tavern"].append(card)
+    if zone == "in_play" and pid == game["turn"]:
+        # IT LEFT PLAY, and a called Reserve is the one class in the pool that
+        # comes BACK. "'Still in play' means the Action card can't have left
+        # play after you played it, EVEN IF IT HAS ENTERED PLAY AGAIN … if you
+        # play a Duplicate or Royal Carriage and call it the same turn, you
+        # still can't replay it with Scepter" (Scepter 5). A presence check
+        # cannot see that, which is standing-row B5 — and Scepter is where the
+        # row stopped being unreachable. Recorded as a MULTISET of names, so
+        # two Royal Carriages with only one called still leave one legal
+        # target ("a card name is not a card COPY").
+        game["turn_ctx"].setdefault("left_play", []).append(card)
+    _log(game, pid, "to_tavern", card=card)
+    return True
+
+
+def continuously_in_play(game, pid, card):
+    """How many copies of `card` have been in play CONTINUOUSLY since they
+    were played this turn — i.e. what Scepter's "still in play" asks. Copies
+    that left and returned (a called Reserve) do not count."""
+    on_table = game["seats"][pid]["in_play"].count(card)
+    return on_table - game["turn_ctx"].get("left_play", []).count(card)
+
+
+def on_tavern(game, pid, card):
+    """Is this card on pid's mat right now? (The `when` of every call window.)"""
+    return card in game["seats"][pid]["tavern"]
+
+
+# --- THE EXILE MAT (ph. 10 — Menagerie) --------------------------------------
+#
+# "Exiling a card means putting it on your Exile mat. Cards on your Exile mat
+# are YOURS, but Exiling cards from the Supply is NOT considered gaining cards.
+# Neither is discarding cards from your Exile mat." (ch. IV EXILE)
+#
+# So the mat is a real owned zone — it scores, it joins `owned_cards` and both
+# conservation censuses — while sitting outside the gain/discard economy in one
+# direction only: coming IN is not a gain, going OUT to the discard IS a
+# discard for triggers ("when you discard cards from your Exile mat,
+# when-discard abilities such as Faithful Hound, Trail, Tunnel, Village Green
+# and Weaver trigger"), which is why that direction goes through `discard()`.
+
+def exile(game, pid, cards, zone="hand"):
+    """Put cards on pid's Exile mat. `zone="supply"` takes the top card of the
+    named pile instead — "Exiling cards from the Supply is not considered
+    gaining cards", so NO `gain` emit, the `exchange` discipline (a gain here
+    would fire every when-gain watcher in the game for a card nobody gained).
+
+    Emits `exile` per card, which Invest consumes ("when another player gains
+    OR INVESTS IN a copy of it, +2 Cards")."""
+    seat = game["seats"][pid]
+    moved = []
+    for c in cards:
+        if zone == "supply":
+            got = _pile_take(game, c)
+            if got is None:
+                continue
+            moved.append(got)
+        else:
+            if c not in seat[zone]:
+                continue
+            seat[zone].remove(c)
+            moved.append(c)
+    if not moved:
+        return []
+    seat["exile"].extend(moved)
+    _log(game, pid, "exile", cards=list(moved), source=zone)
+    emit_batch(game, "exile", pid, moved, source=zone)
+    return moved
+
+
+def discard_from_exile(game, pid, cards):
+    """Off the mat into the discard pile. A REAL discard for triggers, so it
+    routes through `discard()` — only the INBOUND direction is exempt from the
+    gain/discard economy."""
+    return discard(game, pid, list(cards), zone="exile", public=True)
+
+
+def on_exile(game, pid, card):
+    """How many copies of `card` pid has in Exile. The `when` of the mat's own
+    ability and of every "a copy of it in Exile" reader."""
+    return game["seats"][pid]["exile"].count(card)
+
+
+def call_card(game, pid, card):
+    """CALL a card off the Tavern mat: it moves to play, and the ability the
+    caller runs next is the card's CALL ability.
+
+    "This is NOT playing it, so you don't resolve the play ability, it doesn't
+    cost an Action, and it doesn't trigger before-play or after-play abilities"
+    (p28) — which is exactly why this is its own helper rather than a detour
+    through play_action_card: no `actions_played` bump, no `before_play` emit,
+    no `action_resolved`, and no attack window even for an Attack-typed
+    Reserve.
+
+    "It's discarded from play in Clean-up that turn" — THAT turn, not the
+    caller's, which the all-seats clean-up sweep (ph. 3) already handles for a
+    call made on an opponent's turn (a Duplicate on their gain)."""
+    seat = game["seats"][pid]
+    if card not in seat["tavern"]:
+        return False
+    seat["tavern"].remove(card)
+    seat["in_play"].append(card)
+    _log(game, pid, "call", card=card)
+    return True
+
+
+def discard_from_tavern(game, pid, card):
+    """Take a card OFF the mat to the discard pile without calling it (Wine
+    Merchant's end-of-buy-phase discard). It goes through `discard()`, so it is
+    a discard for triggers — unlike a call, which moves it to play."""
+    if card not in game["seats"][pid]["tavern"]:
+        return False
+    discard(game, pid, [card], zone="tavern")
+    return True
+
+
+def pass_card(game, giver, receiver, card):
+    """Masquerade hand-to-hand pass: identity visible only to giver+receiver."""
+    _mark_revealed(game)
+    game["seats"][giver]["hand"].remove(card)
+    game["seats"][receiver]["hand"].append(card)
+    _log(game, giver, "pass", private_to=[giver, receiver], card=card, to=receiver)
+    _log(game, giver, "pass_public", to=receiver)
+
+
+# The +X counters always belong to the turn player (they're turn-scoped), so the
+# "plus" log lines carry game["turn"] no matter which card path granted them.
+
+# Actions/Buys/Coins are ONE set of counters, belonging to whoever's turn it
+# is: "each turn always starts like this: your Action pool has 1 Action, your
+# Buy pool has 1 Buy, and your money pool is empty" (compendium ch. II). So a
+# bonus earned OFF-TURN — a reaction that plays itself, a when-gain trigger on
+# an opponent's turn — has no pool to land in and is simply lost; the pools it
+# would join are reset before that player next acts.
+#
+# `pid` is therefore not optional bookkeeping: without it these credited the
+# CURRENT TURN PLAYER, i.e. an off-turn reaction handed its bonus to the
+# attacker. Latent until a card grants resources off-turn (Hinterlands' Trail
+# and Nomads are the first), and silently wrong the moment one does.
+def _acting(game, pid=None):
+    """WHO the resource is for. Card code says `add_actions(game, 2)` without a
+    pid, so the kernel has to know: `_actor` is the player whose effect/stage is
+    currently running, which is NOT always the turn player (a reaction that
+    plays itself runs during an opponent's turn). Falls back to the turn player
+    when nothing is running."""
+    if pid is not None:
+        return pid
+    return game.get("_actor") or game["turn"]
+
+
+def _grant(game, pid, key, n, log_key):
+    if n == 0:
+        return False
+    pid = _acting(game, pid)
+    if pid != game["turn"]:
+        # earned on someone else's turn: no pool to add to
+        _log(game, pid, "off_turn_bonus", **{log_key: n})
+        return False
+    game[key] += n
+    if n > 0:
+        _log(game, game["turn"], "plus", **{log_key: n})
+    return True
+
+
+def add_actions(game, n, pid=None):
+    # SNOWY VILLAGE (ph. 10): "ignore any further +Actions you get this turn"
+    # — the grant is DROPPED, not zeroed later, so a Village played after it
+    # gives nothing. It binds the turn player only (an off-turn bonus already
+    # evaporates in `_grant`), and ph. 9's Villagers obey it too because
+    # spending one is "+1 Action" and routes through here.
+    if n > 0 and game["turn_ctx"].get("ignore_actions") \
+            and _acting(game, pid) == game["turn"]:
+        _log(game, game["turn"], "actions_ignored", count=n)
+        return
+    _grant(game, pid, "actions", n, "actions")
+
+
+def add_buys(game, n, pid=None):
+    _grant(game, pid, "buys", n, "buys")
+
+
+def add_cards(game, n, pid=None, final=False):
+    """**+N CARDS — the PRINTED bonus, and the twin of `add_coins`.**
+
+    This is NOT the same thing as `draw()`, and the difference is the whole
+    reason it exists. Card code has always called `draw()` for three different
+    printed things: "+3 Cards" (Smithy), "draw 2 cards" (a card that says draw
+    without a plus) and "draw until you have 6" (Library). Way of the
+    Chameleon changes exactly ONE of them — "all +Cards you get this turn are
+    +$ instead, and vice versa (keeping their values)… Only card drawing
+    denoted with '+' is changed to +$. For instance 'draw 2 cards' is
+    unchanged" — and nothing at the call site could tell them apart.
+
+    So: **card code granting a printed "+N Cards" calls THIS; a card that
+    draws without a printed plus calls `draw()`.** The AST guard
+    `test_every_plus_cards_grant_uses_add_cards` holds the line, with an
+    explicit allowlist of the genuine non-"+" draws — otherwise the next set's
+    Smithy silently opts out of Chameleon and nothing fails.
+
+    Off-turn it still draws: drawing is not a per-turn POOL (a Caravan Guard
+    reaction draws on someone else's turn), which is why this does not go
+    through `_grant`. The Chameleon swap only applies to the turn player,
+    since a swapped +Cards becomes +$ and $ off-turn evaporates by rule.
+
+    `final=True` is ph. 9's `final_draw` — a printed +Cards that ENDS its
+    ability, where a Star Chart owner gets their pick at the shuffle it may
+    cause. The two compose cleanly and the order matters: **a SWAPPED +Cards
+    draws nothing at all**, so it can cause no shuffle and needs no pick.
+    Without this argument a printed plus had to choose between the two Ways'
+    seams, and four ph.-9 cards (Lackeys, Scholar, Mountain Village, Road
+    Network) silently sat outside Chameleon."""
+    if n <= 0:
+        return []
+    who = _acting(game, pid)
+    if final and not (who == game["turn"] and game["turn_ctx"].get("chameleon")):
+        return final_draw(game, who, n)
+    if who == game["turn"] and game["turn_ctx"].get("chameleon"):
+        # "+Cards … are +$ instead (keeping their values)". Straight to
+        # _grant, NOT add_coins: the swap is one-way per grant, and routing
+        # through add_coins would bounce it back here. The −$1 token still
+        # applies to the RESULT ("a Militia gives +2 Cards and will trigger
+        # your −1 Card token but not your −$ token" — read the other way for
+        # a card that printed +$), so the token handling is duplicated here
+        # deliberately rather than skipped.
+        if game["seats"][who]["tokens"].get("-coin"):
+            del game["seats"][who]["tokens"]["-coin"]
+            _log(game, who, "minus_coin_token")
+            n -= 1
+        _log(game, who, "chameleon_swap", got="coins", count=n)
+        _grant(game, who, "coins", n, "coins")
+        return []
+    return draw(game, who, n)
+
+
+def add_coins(game, n, pid=None):
+    """n may be NEGATIVE (Souk deducts per card in hand). The money pool floors
+    at $0 — "your money pool can never go below $0, but if you had any $ before
+    playing Souk, you might lose more than $X when deducting".
+
+    **The Chameleon swap runs the other way too** — "and vice versa" — but
+    only for a POSITIVE printed +$: "−$, as on Poor House or Souk, is not
+    changed by this Way"."""
+    if n > 0 and _acting(game, pid) == game["turn"] \
+            and game["turn_ctx"].get("chameleon"):
+        who = _acting(game, pid)
+        _log(game, who, "chameleon_swap", got="cards", count=n)
+        draw(game, who, n)        # the −1 Card token applies inside draw()
+        return
+    if n < 0:
+        if _acting(game, pid) != game["turn"]:
+            return
+        game["coins"] = max(0, game["coins"] + n)
+        _log(game, game["turn"], "minus", coins=-n)
+        return
+    # THE −$1 TOKEN (Adventures) eats the next $ you get: "your −$1 token is
+    # only removed when you get $1 or more, not when you get $0" — so a +$0 (a
+    # Miser with an empty mat, a Soldier with no other Attack in play) leaves
+    # it in place. It is applied to the whole grant, not per coin.
+    who = _acting(game, pid)
+    if n > 0 and who == game["turn"] and game["seats"][who]["tokens"].get("-coin"):
+        del game["seats"][who]["tokens"]["-coin"]
+        _log(game, who, "minus_coin_token")
+        n -= 1
+    _grant(game, pid, "coins", n, "coins")
+
+
+def add_coffers(game, n, pid=None):
+    """+x Coffers — Coin tokens onto a player's Coffers mat (Guilds/C&G).
+
+    Deliberately NOT routed through _grant: the per-turn pools evaporate off
+    turn because "on another player's turn you always start with empty pools",
+    but Coffers are a MAT. They persist across turns by their whole nature, so
+    a Coffers earned on someone else's turn is simply kept — the off-turn rule
+    does not apply and applying it would silently eat the tokens."""
+    if n == 0:
+        return
+    pid = _acting(game, pid)
+    game["coffers"][pid] = game["coffers"].get(pid, 0) + n
+    # `count`, not `n` — _log stamps the log SEQUENCE into entry["n"] last, so
+    # an `n=` kwarg never survives (the client was rendering the sequence)
+    _log(game, pid, "coffers", count=n, total=game["coffers"][pid])
+
+
+def add_villagers(game, n, pid=None):
+    """+x Villagers — tokens onto the Villagers half of a player's mat
+    (Renaissance). Coffers' exact shape and NOT _grant for the same reason: a
+    mat persists, so a Villager earned on someone else's turn (Silk Merchant's
+    when-trash under an attack) is kept, never evaporated."""
+    if n == 0:
+        return
+    pid = _acting(game, pid)
+    game["villagers"][pid] = game["villagers"].get(pid, 0) + n
+    _log(game, pid, "villagers", count=n, total=game["villagers"][pid])
+
+
+def add_debt(game, pid, n):
+    """Take n Debt tokens (Empires). PUBLIC, per player, an unlimited pool.
+
+    "+xD" / "take x Debt" is real card text (Capital, Tax; Rising Sun reuses the
+    term), so this is public API rather than a buy-flow internal. There is
+    deliberately no remove_debt twin: paying Debt off is the `spend` MOVE below
+    — a player decision, timed and repeatable — and a card that lets you pay it
+    off (Capital's "you may pay it off") does so by offering that same choice."""
+    if n <= 0:
+        return
+    game["debt"][pid] = game["debt"].get(pid, 0) + n
+    _log(game, pid, "debt", count=n, total=game["debt"][pid])
+
+
+def _spend_coffers(game, pid, n):
+    """n Coffers off the mat -> +$n."""
+    game["coffers"][pid] -= n
+    add_coins(game, n, pid)
+
+
+def _spend_debt(game, pid, n):
+    """Pay off n Debt at $1 per token. NOT add_coins(-n): that clamps at $0 and
+    logs an off-turn bonus, and the amount is already capped by `avail`."""
+    game["coins"] -= n
+    game["debt"][pid] -= n
+
+
+def _spend_villagers(game, pid, n):
+    """n Villagers off the mat -> +n Actions.
+
+    Through `add_actions`, not a raw increment: spending a Villager IS "+1
+    Action", so Snowy Village's "ignore any further +Actions you get this
+    turn" has to eat it — which it only can if this goes through the one
+    grant path. The tokens come off the mat either way, as they would at the
+    table."""
+    game["villagers"][pid] -= n
+    add_actions(game, n, pid)
+
+
+# THE SPENDABLE REGISTRY — one entry per "counter you spend during your turn"
+# (the `spend` move surface, ph. 4). `avail` is how many you may spend RIGHT
+# NOW, `apply` performs it; `spendable` and `_h_spend` are then generic, which
+# is what the ph. 4 comment promised when it named Villagers (ph. 9), Favors
+# (ph. 12) and this Debt payoff as the three cards it was built for.
+#
+# Debt's `avail` is capped by your money as well as by your tokens, because the
+# payoff costs $1 each — and coins only exist as a pool on your own turn, which
+# `spendable`'s turn/actor gate already enforces. avail == 0 therefore
+# enumerates NO move, which is what keeps a $0 player from looping on it.
+_SPENDABLES = {
+    "coffers": {"avail": lambda game, pid: game["coffers"].get(pid, 0),
+                "apply": _spend_coffers},
+    "debt": {"avail": lambda game, pid: min(game["coins"], game["debt"].get(pid, 0)),
+             "apply": _spend_debt},
+    # Villagers (ph. 9) are ACTION-PHASE-ONLY — "Villager tokens can be spent
+    # at any time in your Action phase. Each spent Villager gives you +1
+    # Action" (COFFERS AND VILLAGERS § IV). Coffers' "at any time during your
+    # turn" is the 2022 change and VILLAGERS NEVER GOT IT, so the phase gate
+    # lives in `avail` — which also keeps a mid-ability spend legal exactly
+    # when the ability is resolving in the Action phase ("you can even spend
+    # Coffers or Villagers in the middle of resolving an ability"), and makes
+    # a Buy-phase ability offer NO villager moves at all.
+    "villagers": {"avail": lambda game, pid: (game["villagers"].get(pid, 0)
+                                              if game["phase"] == "action" else 0),
+                  "apply": _spend_villagers},
+}
+
+
+def spendable(game, pid):
+    """What pid may spend right now, as {kind: count}. THE reader — legal_moves,
+    the handler and the client all go through it (the manual_treasures lesson:
+    an enumerator and a handler that disagree hand the bot a no-op move).
+
+    Coffers are spendable "AT ANY TIME during your turn" (the 2022 rules
+    change; before, only the first part of the Buy phase) — INCLUDING in the
+    middle of resolving an ability. Until ph. 7 this additionally required no
+    open decision, because every card the compendium names for mid-ability
+    spending (Black Market, Capital City, Diadem, Fortune, Storyteller) was one
+    we did not ship, and the restriction was therefore unreachable. Adventures
+    ships STORYTELLER, and it is the exact case: it pays all of your $ for
+    cards, so Coffers spent while its prompt is open are real cards drawn, and
+    the compendium says outright that "you may do both in the middle of
+    resolving Storyteller".
+
+    So the restriction is gone. What replaces it is narrower and is about the
+    ACTOR, not about decisions existing: while a frame is open, only the player
+    it belongs to may act at all, so spending is offered to the pending player
+    (when that is the turn player) rather than to whoever's turn it is. Without
+    that, `apply_move`'s pending gate would refuse the move it had just
+    offered.
+
+    The same timing covers the Debt payoff: "you may pay off Debt at any time
+    during your turn", explicitly including "in the middle of resolving an
+    ability" (DEBT § IV — the 2024 rules change; before it, payoff was confined
+    to the second part of the Buy phase, which is what the 2016 rulebook and
+    every card-list site still describe)."""
+    if game["over"] or pid != game["turn"]:
+        return {}
+    if game["pending_pid"] is not None and game["pending_pid"] != pid:
+        return {}          # someone else is deciding; you cannot act at all
+    out = {}
+    for kind, spec in _SPENDABLES.items():
+        have = spec["avail"](game, pid)
+        if have > 0:
+            out[kind] = have
+    return out
+
+
+def _h_spend(game, pid, move):
+    """The generic spend move — one surface for every "spendable counter" the
+    later sets add (Debt payoff ph. 7H/8, Villagers ph. 9, Favors ph. 12), so
+    each one is a `_SPENDABLES` entry rather than a new move type.
+
+    Paying off Debt does NOT use up a Buy and is NOT buying, so this handler
+    touches neither `game["buys"]` nor `turn_ctx["bought"]` — a player who pays
+    their Debt off in the Buy phase may still play their Treasures."""
+    what = move.get("what")
+    avail = spendable(game, pid)
+    if what not in avail:
+        return False, "nothing to spend"
+    try:
+        n = int(move.get("n", 1))
+    except (TypeError, ValueError):
+        return False, "bad amount"
+    if not 1 <= n <= avail[what]:
+        return False, f"you don't have {n} {what}"
+    # `count`, not `n`: _log sets entry["n"] to the log SEQUENCE last, so an
+    # `n=` kwarg is silently overwritten (see its comment).
+    _log(game, pid, "spend", what=what, count=n)
+    _SPENDABLES[what]["apply"](game, pid, n)
+    return True, None
+
+
+def add_potions(game, n, pid=None):
+    """+Potions into the money pool. Same per-turn pool discipline as coins —
+    a Potion produced on someone else's turn has no pool to land in."""
+    _grant(game, pid, "potions", n, "potions")
+
+
+def add_vp_tokens(game, pid, n):
+    """VP tokens (Prosperity+): per-player, only ever gained, scored at game
+    end, public. The pool is unlimited."""
+    if n > 0:
+        game["vp_tokens"][pid] = game["vp_tokens"].get(pid, 0) + n
+        _log(game, pid, "vp_tokens", count=n)
+
+
+def take_artifact(game, pid, name):
+    """Take an Artifact (Renaissance) — "you take the Artifact card from
+    another player if they have it", and taking one you already hold is a
+    no-op transfer that still logs (the reader can see the Flag Bearer traded
+    hands even when nothing moved). Artifacts are game-level PUBLIC objects:
+    "State and Artifact cards never belong to any player and are never
+    considered to be in play" — they sit in front of you, not in a zone.
+    Only artifacts this game keeps available exist in `game["artifacts"]`;
+    taking an inactive one is a bug, so it raises rather than conjuring."""
+    if name not in game["artifacts"]:
+        raise ValueError(f"artifact {name!r} is not in this game")
+    prev = game["artifacts"][name]
+    game["artifacts"][name] = pid
+    _log(game, pid, "artifact", name=name,
+         **({"from_pid": prev} if prev is not None and prev != pid else {}))
+
+
+def holds_artifact(game, pid, name):
+    """Does pid hold this Artifact right now? Total on unknown names (a board
+    without the granting card simply has nobody holding it)."""
+    return game["artifacts"].get(name) == pid
+
+
+def opponents(game, pid):
+    """All other players, in turn order starting after pid."""
+    order = game["players"]
+    i = order.index(pid)
+    return order[i + 1:] + order[:i]
+
+
+def count_empty_piles(game):
+    """The three-empty-piles game end counts SUPPLY piles only — a spent
+    non-supply pile (Spoils, Horses) is not an empty Supply pile. Non-supply
+    piles are already out of this dict, so this is the pre-3H code unchanged."""
+    return sum(1 for v in game["supply"].values() if v == 0)
+
+
+def estate_token_card(game, pid=None):
+    """The card pid's Estate token sits on (Inheritance), or None. With no pid,
+    the TURN PLAYER's — which is the one that matters, because Inheritance
+    changes every Estate in the game but only during its owner's turns."""
+    if pid is None:
+        pid = game["turn"]
+    seat = game["seats"].get(pid)
+    return seat["tokens"].get("estate") if seat else None
+
+
+def types_of(game, card):
+    """THE type query — card code must never read CARDS[x]["types"] directly
+    for a rules decision. Game-wide type injections live here: Charlatan in
+    the kingdom makes Curse also a Treasure for the whole game (2E rule).
+    Accepts a PILE name too, resolving to the pile's face (an ordered pile is
+    the type of its top card)."""
+    card = _priced(game, card)
+    types = CARDS[card]["types"]
+    if card == "Curse" and game["curse_is_treasure"]:
+        return types + ["treasure"]
+    # INHERITANCE (ph. 7): "during your turns, Estates are Action–Victory–
+    # Command cards with the play ability 'play the card with your Estate
+    # token, leaving it there'". ALL Estates in the game change, not just the
+    # token owner's — an opponent's, one in play, one in the Supply, one in the
+    # trash — and only while it is that owner's turn. Keyed on game["turn"], so
+    # types_of keeps its two-argument signature, exactly like the -$2 token in
+    # cost(). Excluded once the game is OVER: "Estates are not Action cards
+    # when you score for Vineyards, as it's not your turn at the end of the
+    # game".
+    if card == "Estate" and not game["over"] and estate_token_card(game):
+        types = types + ["action", "command"]
+        # ...and the two injections COMPOSE: "if you have your Estate token on
+        # an Action card which CAPITALISM changes into a Treasure, all your
+        # Estates are also Treasures" (Estate token, p179). The Capitalism
+        # clause below cannot see this on its own — it asks about the literal
+        # name, and "Estate" is not in CAPITALISM_CARDS; the card that matters
+        # is the one the token sits on.
+        if estate_token_card(game) in CAPITALISM_CARDS and _capitalism_on(game):
+            types = types + ["treasure"]
+        return types
+    # CAPITALISM (ph. 9): "During your turns, Actions with +$ amounts in their
+    # text are also Treasures." The Inheritance signature trick again — keyed
+    # on the TURN player owning the cube, changing every copy EVERYWHERE
+    # (hands, Supply, trash, in play, opponents' zones), reverting off-turn
+    # and at `over` ("Cards are not changed by Capitalism when you score for
+    # Keep, as it's not your turn at the end of the game"). Membership is the
+    # static text-derived set (cards.CAPITALISM_CARDS).
+    if card in CAPITALISM_CARDS and not game["over"] \
+            and "treasure" not in types and _capitalism_on(game):
+        return types + ["treasure"]
+    return types
+
+
+def _capitalism_on(game):
+    """Is Capitalism changing types right now? (Dealt, and the TURN player has
+    a cube on it.) The `landscapes` guard keeps the common no-landscape board
+    at one dict check."""
+    return bool(game["landscapes"]) and project_owned(game, "Capitalism",
+                                                      game["turn"])
+
+
+def capitalism_changed(game, card):
+    """Is this card an Action that Capitalism is CURRENTLY making a Treasure?
+    THE reader for the play surface: such a card is playable as a Treasure in
+    the owner's Buy phase (routed through the full Action-play machinery) but
+    must never be auto-played by play_all_treasures — it draws, attacks or
+    prompts like the Action it is."""
+    card = _priced(game, card)
+    return (card in CAPITALISM_CARDS
+            and "treasure" not in CARDS[card]["types"]
+            and not game["over"] and _capitalism_on(game))
+
+
+def has_type(game, card, t):
+    return t in types_of(game, card)
+
+
+def manual_treasures():
+    """Treasures play_all_treasures must SKIP — the interactive ones (Anvil,
+    War Chest) that push a decision frame, so they'd have to be answered
+    mid-autoplay. THE reader of the registry: legal_moves, the handler, and
+    the catalog all go through here so they can never disagree (they did:
+    legal_moves offered play_all for a hand of nothing but manual treasures,
+    which the handler then no-op'd, and the bot preferring that move spun the
+    scheduler's whole iteration cap)."""
+    from . import effects
+    return getattr(effects, "MANUAL_TREASURES", set())
+
+
+def autoplay_last():
+    """Treasures play_all_treasures must play AFTER the rest, because their
+    value depends on what is already in play (Bank: +$1 per Treasure in play,
+    counting itself). Hand order is arbitrary from the player's side, so
+    leaving Bank where it fell silently cost up to 40% of a turn's coins —
+    measured $6 vs $10 on the same five-card hand.
+
+    Membership means "later is never worse", so the button needs no judgement
+    from the player. A treasure where playing EARLY might genuinely be right
+    belongs in MANUAL_TREASURES instead — the button must not choose for them.
+    (Highwayman-class effects, where the choice depends on game STATE rather
+    than the card, need a predicate; see the ledger in EXPANSIONS.md.)"""
+    from . import effects
+    return getattr(effects, "AUTOPLAY_LAST", set())
+
+
+def coins_of(game, card):
+    """Printed coin value under game rules (Charlatan's Curse plays for $1)."""
+    card = _priced(game, card)
+    if card == "Curse" and game["curse_is_treasure"]:
+        return 1
+    return CARDS[card]["coins"]
+
+
+def _cost_override(game, card):
+    """AN ABSOLUTE COST, replacing the whole normal calculation (ph. 10).
+
+    `DYN_COSTS` is a REDUCTION subtracted inside `cost()`, which serves
+    Destrier and Fisherman exactly — but Wayfarer is not a reduction: "after
+    any player gains a card (other than Wayfarer) on a given turn, Wayfarer
+    gets THE SAME COST", and "cost reduction only affects Wayfarer's default
+    cost of $6. If Wayfarer is copying the cost of another card, only cost
+    reduction ON THAT CARD applies (which Wayfarer would copy), not cost
+    reduction on Wayfarer itself." So it bypasses `bridges`, Canal, Quarry,
+    the -$2 Ferry token and every other reduction — and it is a VECTOR,
+    since "Wayfarer can have a cost with Potion or Debt in it".
+
+    `effects.COST_OVERRIDE[card] = fn(game) -> {"coins","potions","debt"} |
+    None`, where None means "use the normal path" (Wayfarer's own $6, with
+    reductions applied as usual). Consulted at the TOP of all three readers.
+
+    RECURSION GUARD: Wayfarer copying a Destrier asks `cost()` again. The
+    re-entry flag makes an override that asks about itself fall through to the
+    printed path rather than loop."""
+    from . import effects
+    fns = getattr(effects, "COST_OVERRIDE", None)
+    if not fns:
+        return None
+    fn = fns.get(_priced(game, card))
+    if fn is None or game.get("_cost_over"):
+        return None
+    game["_cost_over"] = True
+    try:
+        return fn(game)
+    finally:
+        game.pop("_cost_over", None)
+
+
+def cost(game, card):
+    """THE single cost function — every reduction applies here, min 0.
+
+    Takes a card name or a PILE name: a pile costs what its face card costs
+    (its top card, retained when the pile empties so the board keeps a price).
+
+    THERE IS NO WHILE-IN-PLAY COST-MODIFIER SEAM, and that is a finding rather
+    than an omission. `effects.COST_MODS` used to be one — {source_card: fn ->
+    reduction per copy}, summed over every copy on every table — and it was
+    deleted post-ph. 10 with ZERO entries after twelve expansions, because the
+    2022 errata pass converted while-in-play cost reduction to TURN-SCOPED
+    across the whole game. Every reducer we ship routes elsewhere: Bridge,
+    Highway, Bridge Troll, Renown and Quarry into `turn_ctx` counters
+    (turn-scoped is what makes the discount survive the card leaving play),
+    Ferry onto a pile's `attach` tokens, Canal onto a Project cube, Peddler and
+    Destrier into `DYN_COSTS` (a card's OWN cost), Wayfarer into
+    `COST_OVERRIDE` (an absolute vector). The seam outlived its mechanic by
+    three phases because each card that declined it recorded a LOCAL note
+    ("Highway is not a COST_MODS card", "Renown is Bridge, not a while-in-play
+    modifier") and nobody read them together.
+
+    If a future set does print one, rebuild it deliberately — but check the
+    errata first: the roadmap has already predicted this consumer twice and
+    both times was describing a pre-2022 card."""
+    # The Adventures -$2 token (Ferry) sits on a PILE, so it is read before
+    # _priced collapses a pile name into its face card. "Cards from that pile
+    # cost $2 less ON YOUR TURNS" — it keys on whose turn it is, NOT on who is
+    # asking, which is what lets cost(game, card) keep its two-argument
+    # signature and its ~60 call sites.
+    over = _cost_override(game, card)
+    if over is not None:
+        return over["coins"]
+    discount = 0
+    if _any_pile_tokens(game):
+        pile = card if card in game["piles"] else pile_of(game, card)
+        if pile is not None:
+            toks = game["piles"][pile]["attach"].get("tokens", {})
+            discount = 2 * list(toks.get(game["turn"], ())).count("-cost")
+    card = _priced(game, card)
+    c = CARDS[card]["cost"] - game["turn_ctx"]["bridges"] - discount
+    # CANAL (ph. 9): "During your turns, cards cost $1 less." A Project is
+    # never in play and has no copies, so a per-copy while-in-play modifier
+    # cannot express it — it is a flat -$1 keyed on the TURN player owning
+    # the cube, the Ferry-token/
+    # Inheritance signature trick ("during your opponent's turn, costs are
+    # reduced if your OPPONENT has a cube on Canal, but not if only you have
+    # one"). It applies in Clean-up too (Improve): "cost reductions for this
+    # turn, or from cards in play, still apply in Clean-up".
+    if game["landscapes"] and project_owned(game, "Canal", game["turn"]):
+        c -= 1
+    # Quarry (2022): a TURN-scoped discount — survives the Quarry leaving play
+    if game["turn_ctx"].get("quarries") and "action" in CARDS[card]["types"]:
+        c -= 2 * game["turn_ctx"]["quarries"]
+    from . import effects
+    # dynamic SELF-costs (Peddler-class): the priced card's own cost rule
+    dyn = getattr(effects, "DYN_COSTS", {}).get(card)
+    if dyn is not None:
+        c -= dyn(game)
+    return max(0, c)
+
+
+def potion_cost(game, card):
+    """The POTION component of a cost (Alchemy) — the second dimension of the
+    cost VECTOR. Cost reductions only ever touch the COIN component, so this is
+    the printed value; Bridge does not make a Golem cost fewer Potions.
+
+    The one dynamic source is ph. 10's `COST_OVERRIDE`, which is not a
+    reduction: Wayfarer COPIES another card's whole cost, and "Wayfarer can
+    have a cost with Potion or Debt in it"."""
+    over = _cost_override(game, card)
+    if over is not None:
+        return over["potions"]
+    return cards_potion(_priced(game, card))
+
+
+def debt_cost(game, card):
+    """The DEBT component of a cost (Empires) — the THIRD dimension of the cost
+    vector, and the exact twin of potion_cost. "Debt functions like another kind
+    of cost, just like Potion" and "cards that reduce $ costs (like Bridge)
+    don't affect Debt costs" (DEBT § IV), so this is the PRINTED value: nothing
+    in `cost()`'s discount stack — Bridge, Quarry, Ferry's −$2 token, Peddler's
+    dynamic self-cost — reaches it. The one dynamic source is ph. 10's
+    `COST_OVERRIDE` (Wayfarer copies a whole cost, Debt component included)."""
+    over = _cost_override(game, card)
+    if over is not None:
+        return over["debt"]
+    return cards_debt(_priced(game, card))
+
+
+# THE COST VECTOR (compendium, POTIONS § IV + DEBT § IV). A cost is {coins,
+# potions, debt}: a printed cost of just {Potion} is {$0, 1P, 0D}, {4D} is
+# {$0, 0P, 4D}, and a plain $3 is {$3, 0P, 0D}. Three rules follow, and they
+# live HERE rather than in thirty batch call sites — which is the whole reason
+# cost_le/cost_eq/cost_lt were introduced in ph. 2:
+#
+#   "up to $3"        -> coins <= 3 AND potions == 0 AND debt == 0
+#   "exactly $1 more" -> "the same cost plus $1", so {$3,P} is exactly $1 more
+#                        than {$2,P} but NOT than {$2}
+#   "lower than"      -> no component higher and at least one lower, so {$4,P}
+#                        and {$5} are INCOMPARABLE — neither is lower
+#
+# Debt obeys all three the same way Potion does, which the compendium states
+# outright: "Both {$4} and {4D} are lower than {$4, 4D}. However, {$5} is not
+# lower than {$4, 4D} (nor vice versa)."
+#
+# The number forms below are "…$N", which by the first rule means no Potion and
+# no Debt. When the reference is a CARD rather than a number, use the *_card
+# forms — that is where the second and third rules actually bite.
+
+def cost_le(game, card, coins):
+    """'costing up to $coins' — the ONLY way card code may bound a cost against
+    a number. A card with a Potion OR Debt in its cost is NEVER "up to $N"."""
+    return (potion_cost(game, card) == 0 and debt_cost(game, card) == 0
+            and cost(game, card) <= coins)
+
+
+def cost_eq(game, card, coins):
+    """'costing exactly $coins' against a NUMBER (Stonemason's overpay). For
+    "exactly $N more than THIS card", use cost_eq_card — the two differ the
+    moment a Potion or a Debt is involved."""
+    return (potion_cost(game, card) == 0 and debt_cost(game, card) == 0
+            and cost(game, card) == coins)
+
+
+def cost_lt(game, card, coins):
+    """'costing LESS than $coins'. Distinct from cost_le: "cheaper" excludes an
+    equal cost. For "cheaper than THIS card", use cost_lt_card."""
+    return (potion_cost(game, card) == 0 and debt_cost(game, card) == 0
+            and cost(game, card) < coins)
+
+
+def cost_ge(game, card, coins):
+    """'costing $coins or MORE' — a LOWER bound, which reads the coin component
+    alone. The Potion (and now Debt) rule the other three enforce ("up to $N"
+    excludes every Potion and Debt card) is a rule about UPPER bounds: a {$3,P}
+    card is not "up to $3", but nothing about it is below $3 either, so Sage
+    finds it. A range like Knights' "from $3 to $6" is written as cost_ge +
+    cost_le, and the upper half is what (correctly) keeps them out. Recorded as
+    an open ambiguity in CLAUDE.md (A5, which Debt inherits unchanged) — the
+    compendium states the rule for upper bounds only."""
+    return cost(game, card) >= coins
+
+
+def cost_eq_card(game, card, ref, delta=0):
+    """'costing exactly $delta more than `ref`' — Remake, Upgrade, Develop,
+    Farmland, Swindler (delta 0). "Costing exactly $1 more" means "having the
+    same cost plus $1", so the POTION and DEBT components must MATCH."""
+    return (potion_cost(game, card) == potion_cost(game, ref)
+            and debt_cost(game, card) == debt_cost(game, ref)
+            and cost(game, card) == cost(game, ref) + delta)
+
+
+def cost_le_card(game, card, ref, delta=0):
+    """'costing up to $delta more than `ref`' — Remodel, Expand, Butcher.
+    "Up to $2 more than {$3,2D}" means "up to {$5,2D}": neither the potion nor
+    the debt component may be HIGHER than the reference's."""
+    return (potion_cost(game, card) <= potion_cost(game, ref)
+            and debt_cost(game, card) <= debt_cost(game, ref)
+            and cost(game, card) <= cost(game, ref) + delta)
+
+
+def cost_lt_card(game, card, ref):
+    """'a cheaper card than `ref`' — Border Village, Berserker, Haggler,
+    Stonemason. A vector is LOWER only if no component is higher and at least
+    one is lower, so {$4,P} is not cheaper than {$5} (nor the reverse), and
+    neither {$5} nor {$4,4D} is lower than the other."""
+    c1, p1, d1 = cost(game, card), potion_cost(game, card), debt_cost(game, card)
+    c2, p2, d2 = cost(game, ref), potion_cost(game, ref), debt_cost(game, ref)
+    return (c1 <= c2 and p1 <= p2 and d1 <= d2
+            and (c1 < c2 or p1 < p2 or d1 < d2))
+
+
+# --- the DURATION kernel (Seaside; reused by later expansions) ----------------
+# A Duration card sets up abilities that fire after this turn. Model:
+#  * While being played it sits in in_play like any card; its effect registers
+#    future work on a per-physical-card SETUP ENTRY via add_duration_fx /
+#    add_watcher (Throne Room replays add to the SAME entry, doubling the fx).
+#  * At that player's clean-up, entries with registered work move (card +
+#    riders) into seat["duration"] — still "in play" on the table — everything
+#    else is discarded. An effect that registered nothing ("failed to set up",
+#    e.g. Haven with an empty hand) is discarded normally.
+#  * At the owner's next turn START, each entry's fx run as auto frames (they
+#    may push decisions — Sailor's trash), its watchers expire, and the entry
+#    is marked done; done entries are discarded at that turn's clean-up.
+#  * WATCHERS are cross-player triggers fired by gain()/treasure plays
+#    (Monkey, Corsair, Blockade). GAIN_REACTIONS (effects.py registry) are
+#    reveal-windows offered from hand when someone gains (Pirate).
+
+def _dur_setup_list(game, pid):
+    return game["seats"][pid].setdefault("dur_setup", [])
+
+
+def _current_dur_entry(game):
+    ptr = game.get("_cur_dur")
+    if not ptr:
+        return None
+    pid, idx = ptr
+    lst = _dur_setup_list(game, pid)
+    return lst[idx] if idx < len(lst) else None
+
+
+def duration_handle(game):
+    """An opaque handle naming the duration entry of the card BEING PLAYED —
+    capture it during on_play to register fx on that same physical card from a
+    LATER WINDOW (ph. 9, Cargo Ship: "once this turn, when you gain a card…",
+    which fires long after the play returned, by which time `_cur_dur` has
+    moved on to whatever was played since).
+
+    It is the ph.-7H `_restore_cur_dur` lesson generalised: any deferral of
+    duration work owes its pointer. Returns None when nothing is being played
+    or the card is not a Duration, which is a meaningful answer — a card
+    played without moving into play has no entry to name."""
+    ptr = game.get("_cur_dur")
+    return list(ptr) if ptr else None
+
+
+def _dur_entry_for(game, pid, card, handle=None):
+    """The setup entry the ability being registered belongs to — the one named
+    by `handle`, else the one for the physical card currently being played,
+    else a fresh one."""
+    entry = None
+    if handle is not None:
+        pid_h, idx = handle
+        lst = _dur_setup_list(game, pid_h)
+        if idx < len(lst) and lst[idx]["card"] == card:
+            entry = lst[idx]
+    if entry is None and handle is None:
+        entry = _current_dur_entry(game)
+    if entry is None or entry["card"] != card:
+        entry = {"card": card, "fx": [], "watchers": 0, "riders": []}
+        _dur_setup_list(game, pid).append(entry)
+        game["_cur_dur"] = [pid, len(_dur_setup_list(game, pid)) - 1]
+    return entry
+
+
+def add_duration_fx(game, pid, card, stage, data=None, forever=False, handle=None):
+    """Register a next-turn ability on the duration card currently being
+    played. Card code calls this from on_play (or a later stage of the same
+    play — the pointer stays live for the whole resolution).
+
+    `handle` names a specific physical card's entry (see `duration_handle`),
+    for a registration that happens in a LATER WINDOW rather than during the
+    play. Without it such a call mints a SECOND entry for one physical card,
+    which promotes twice at Clean-up and conjures a copy — the ph.-7H bug in a
+    new place.
+
+    `forever=True` is "at the start of EACH of your turns FOR THE REST OF THE
+    GAME" (Hireling): the fx is not consumed at the turn start and the entry is
+    never marked done, so the card stays on the table permanently. It is a flag
+    on the ENTRY rather than the fx because "this stays in play" is a property
+    of the physical card — a throne-roomed Hireling doubles the fx on one
+    entry, which is exactly the "+2 Cards at the start of each turn" the
+    compendium describes."""
+    entry = _dur_entry_for(game, pid, card, handle)
+    if forever:
+        entry["forever"] = True
+    entry["fx"].append({"stage": stage, "data": data or {}})
+
+
+def add_watcher(game, pid, card, event, stage=None, data=None, until="owner_turn_start",
+                immune=None, commutes=False):
+    """Register a cross-player trigger. events: "gain" (any player gains),
+    "play_treasure" (any treasure play), "protect" (Lighthouse — no stage, the
+    attack wrap consults it). until: "owner_turn_start" (default, the Duration
+    contract) or "turn_end" (this-turn triggers like Sailor's). The stage runs
+    as an auto frame with data + {"actor", "subject", "owner"} when fired.
+    immune: explicit per-play immunity override for watchers registered from a
+    LATER stage of an attack play (Blockade) — by default the current play's
+    _atk_immune transient is captured.
+    commutes: this watcher's stage is decision-free AND order-independent
+    (Collection's +1 VP) — the ability pool auto-runs it instead of offering
+    it in the what-resolves-first prompt. Declare it only when resolving the
+    stage can never change what any other pending ability does."""
+    # A LANDSCAPE OWNER GETS NO DURATION ENTRY (ph. 10, Invest). The entry
+    # exists for exactly one job — keep the PLAYED CARD on the table while its
+    # watcher lives — and a landscape has no physical card to keep. Minting one
+    # anyway CONJURES A CARD: an entry carrying watchers is promoted at
+    # Clean-up into `seat["duration"]`, where `owned_cards` counts its `card`
+    # as a card the player owns, so the very next scoring pass does
+    # `CARDS["Invest"]` and raises. Travelling Fair (ph. 7) is the only earlier
+    # landscape watcher and escaped this purely by being `until="turn_end"`,
+    # which never increments `watchers` and so is never promoted — a
+    # rest-of-the-game one cannot. Found by the ph.-10 card batch.
+    entry = _dur_entry_for(game, pid, card) if card in CARDS else None
+    if entry is not None:
+        if until == "forever":
+            # a REST-OF-THE-GAME ability (Champion). The entry must never be
+            # marked done, or the next clean-up discards the card out from
+            # under it.
+            entry["forever"] = True
+        if until != "turn_end":
+            # only CROSS-TURN watchers keep the card on the table; a this-turn
+            # watcher (Collection/Hoard/Tiara's 2022 "this turn, when..."
+            # class) dies with the turn — the card discards at its own
+            # clean-up, and may even be trashed from play mid-turn without
+            # stranding the entry
+            entry["watchers"] += 1
+    # A watcher registered during an Attack's play ability carries that play's
+    # immunity set: a player who Moat-revealed (or was Lighthouse-protected)
+    # when Corsair/Blockade was PLAYED is immune to its delayed effects too —
+    # emit() never fires the watcher for an immune actor.
+    game["watchers"].append({"event": event, "owner": pid, "card": card,
+                             "stage": stage, "data": data or {}, "until": until,
+                             **({"commutes": True} if commutes else {}),
+                             "immune": list(immune if immune is not None
+                                            else game.get("_atk_immune", []))})
+
+
+def mark_duration_rider(game, pid, duration_card, rider_card):
+    """A card (Throne Room) that played a persisting Duration stays on the
+    table with it — attach it to the most recent setup entry for that card.
+    Riding an entry that ends up registering nothing is harmless: the entry
+    doesn't persist and the rider is discarded normally with it."""
+    for entry in reversed(_dur_setup_list(game, pid)):
+        if entry["card"] == duration_card:
+            entry["riders"].append(rider_card)
+            return True
+    return False
+
+
+def set_aside_duration(game, pid, cards, zone="hand"):
+    """Move cards into the seat's duration set-aside (Haven, Blockade) —
+    contents owner-only on the wire, still owned for scoring/conservation."""
+    seat = game["seats"][pid]
+    for c in cards:
+        seat[zone].remove(c)
+        seat.setdefault("dur_aside", []).append(c)
+
+
+def take_dur_aside(game, pid, cards, dest="hand"):
+    seat = game["seats"][pid]
+    for c in cards:
+        seat["dur_aside"].remove(c)
+        if dest == "hand":
+            seat["hand"].append(c)
+        elif dest == "discard":
+            seat["discard"].append(c)
+        else:
+            raise ValueError(f"bad take_dur_aside dest {dest!r}")
+
+
+def to_island(game, pid, cards, zone="hand"):
+    """Island mat: set aside until game end (still yours for scoring)."""
+    seat = game["seats"][pid]
+    for c in cards:
+        seat[zone].remove(c)
+        seat.setdefault("island", []).append(c)
+    if cards:
+        _log(game, pid, "island", cards=list(cards))
+
+
+def to_village_mat(game, pid, cards, zone="hand"):
+    seat = game["seats"][pid]
+    for c in cards:
+        seat[zone].remove(c)
+        seat.setdefault("village_mat", []).append(c)
+    if cards:
+        _log(game, pid, "village_mat", count=len(cards))
+
+
+def take_village_mat(game, pid):
+    """Native Village: the whole mat into your hand."""
+    seat = game["seats"][pid]
+    taken = seat["village_mat"]
+    seat["hand"].extend(taken)
+    seat["village_mat"] = []
+    if taken:
+        _log(game, pid, "village_take", count=len(taken))
+    return taken
+
+
+def set_aside(game, pid, cards, zone="hand", until=None):
+    """Move cards to pid's own SET-ASIDE zone — Farmhands' "set aside an Action
+    or Treasure from your hand". Distinct from Seaside's `dur_aside`, which
+    hangs off a Duration entry on the table: this one belongs to the seat and
+    outlives any card in play (the Farmhands itself goes to the discard).
+
+    `until="cleanup"` sets the card aside only for THIS turn — Joust's "discard
+    the Province in Clean-up". Both zones are set-aside rather than in play, so
+    nothing there counts for Horn of Plenty or Shop; they differ only in who
+    takes the card back and when."""
+    dest = "cleanup_aside" if until == "cleanup" else "set_aside"
+    seat = game["seats"][pid]
+    for c in cards:
+        seat[zone].remove(c)
+        seat[dest].append(c)
+    if cards:
+        _mark_revealed(game)             # the owner learns where a card went
+        _log(game, pid, "set_aside", count=len(cards), private_to=[pid],
+             cards=list(cards))
+    return list(cards)
+
+
+def return_at_cleanup(game, pid, card, zone="in_play"):
+    """Set a card aside now and RETURN IT TO ITS PILE at Clean-up — Encampment's
+    "set this aside, and return it to the Supply at the start of Clean-up".
+
+    A separate zone from `cleanup_aside` (ph. 4) because the destination is
+    different, not the timing: that one goes to the owner's DISCARD (Joust's
+    Province), this one leaves the player's deck entirely. It is a seat zone
+    rather than a game-level list because the sweep runs at ONE seat's
+    Clean-up and "if you somehow play Encampment during another player's turn
+    and set it aside, you return it in THAT player's Clean-up phase" — which is
+    exactly what the all-seats half of the sweep already does for in-play
+    cards.
+
+    The card is still OWNED while it waits (it is your card until it goes
+    back), so `owned_cards` counts it and the conservation census sees it."""
+    seat = game["seats"][pid]
+    seat[zone].remove(card)
+    seat["cleanup_return"].append(card)
+    _log(game, pid, "set_aside_return", card=card)
+
+
+def finish_duration(game, pid, card):
+    """End a `forever` duration entry: its fx stop repeating and the card
+    discards at the next Clean-up like any spent Duration.
+
+    Archive is why this exists. "Now and at the start of your next TWO turns"
+    is neither the one-shot `add_duration_fx` nor ph. 7's rest-of-the-game
+    `forever` — it is a repeat that ENDS, and it ends on a condition the card
+    itself owns ("Archive will only stay in play as long as it has cards set
+    aside"). So the entry rides `forever=True` to survive the turn start, and
+    its own stage calls this the moment the set-aside runs out.
+
+    The MOST RECENT matching entry, so two Archives finish independently."""
+    for entry in reversed(game["seats"][pid]["duration"]
+                          + _dur_setup_list(game, pid)):
+        if entry["card"] == card and entry.get("forever"):
+            entry["forever"] = False
+            entry["fx"] = []
+            entry["done"] = True
+            return True
+    return False
+
+
+def return_to_action_phase(game, pid):
+    """"…and if it's your Buy phase, return to your Action phase" — Villa.
+
+    The phase has only ever advanced, and this is the first card that walks it
+    back. "You return to your Action phase, keeping the Actions, Buys and $ you
+    had left, plus the +1 Action from Villa", so nothing is reset — including
+    `turn_ctx["bought"]`, which is CLEARED: that flag exists to stop Treasures
+    being played after a buy, and re-entering the Buy phase gives you its
+    treasure half again.
+
+    Only on your own turn ("if you gain Villa when it's not your turn, the +1
+    Action is not usable, and you don't get an Action phase")."""
+    if game["over"] or pid != game["turn"] or game["phase"] != "buy":
+        return False
+    # A BUY PHASE IS ENDING, and "at the end of your Buy phase" means exactly
+    # that: "if you have several Buy phases due to Cavalry, Villa or Voyage,
+    # Exploration triggers each time, CHECKING THE BUY PHASE THAT JUST ENDED"
+    # (Exploration 4). Four shipped cards read the same boundary — Merchant
+    # Guild, Treasury and Hermit all print "in it", and Wine Merchant fires
+    # per Buy phase — so the emit belongs here as well as at the Clean-up
+    # transition.
+    #
+    # `final=False` says this is NOT the last one of the turn, and it exists
+    # for the three cards that use this event to APPROXIMATE Clean-up timing
+    # (Alchemist, Herbalist, Scheme — each printed "when you discard it from
+    # play"; deviation B1). They must fire once, at the real end of the turn.
+    # They cannot simply move to `cleanup_start`: `_end_turn` discards done
+    # Duration entries BEFORE emitting it, and a Duration finishing at this
+    # Clean-up is a legal Scheme target, so the seam that looks right loses
+    # the card. This is the cost of the approximation, now visible.
+    # `buy_gains` rides the EVENT, and it has to: emit() only PARKS the
+    # ability pool, so a consumer reading the live counter reads it AFTER the
+    # reset below and Merchant Guild pays 0 — silently, since its join-time
+    # filter saw the pre-reset value and let it into the pool. Same discipline
+    # as `gain(**extra)` and `trash(**extra)`: a mark on the occurrence, never
+    # a transient the resolution has to race.
+    emit(game, "buy_phase_end", actor=pid, final=False,
+         buy_gains=game["turn_ctx"]["buy_gains"])
+    game["phase"] = "action"
+    game["turn_ctx"]["bought"] = False
+    # ...and the PER-BUY-PHASE counters restart with the new phase, after the
+    # emit that reads them. `buy_gains` feeds Merchant Guild's "+1 Coffers per
+    # card you gained in it" and Exploration's "if you didn't gain any cards
+    # during it"; `gained_victory_in_buy` is Treasury's gate.
+    game["turn_ctx"]["buy_gains"] = 0
+    game["turn_ctx"]["gained_victory_in_buy"] = False
+    _log(game, pid, "phase", phase="action")
+    return True
+
+
+def take_set_aside(game, pid, cards, dest="hand"):
+    seat = game["seats"][pid]
+    taken = []
+    for c in cards:
+        if c in seat["set_aside"]:
+            seat["set_aside"].remove(c)
+            taken.append(c)
+    if dest is not None:
+        seat[dest].extend(taken)
+    return taken
+
+
+def add_start_fx(game, pid, card, stage, data=None):
+    """Register an ability that resolves at the START of pid's next turn, with
+    no Duration on the table to hang it off (Farmhands sets one up from its
+    when-gain, and can do it on an OPPONENT's turn). It joins the same ability
+    pool as the duration fx and the turn_start reactions, so the player orders
+    all of them together — they are simultaneous."""
+    game["seats"][pid]["start_fx"].append(
+        {"card": card, "stage": stage, "data": data or {}})
+
+
+def request_extra_turn(game, pid, source="Outpost", no_buy=False):
+    """Flag an extra turn after this one. The _end_turn gate applies the
+    official can't-take-three-turns rule (2023: every extra-turn card was
+    changed to prevent a third turn in a row).
+
+    Two sources so far and they are NOT interchangeable: Outpost also draws 3
+    instead of 5 and has a duration entry to spend, while Mission's turn is one
+    "during which you can't buy cards". Keeping Outpost's own transient
+    untouched matters because a save caught mid-turn can be holding it."""
+    if source == "Outpost":
+        game["_outpost"] = pid
+    elif source == "Seize the Day":
+        # ph. 10: its own slot, because it is the ONE source that can stack
+        # with another (see `_end_turn`) — sharing `_extra_turn_req` with
+        # Mission would let one silently overwrite the other.
+        game["_seize"] = pid
+    else:
+        game["_extra_turn_req"] = {"pid": pid, "no_buy": bool(no_buy)}
+
+
+# --- THE TRIGGER BUS ----------------------------------------------------------
+# One event system for every ability that fires off another change. The kernel
+# emits a small vocabulary of events; two consumer layers answer:
+#   1. WATCHERS — dynamic per-play instances registered by card effects
+#      (add_watcher: Monkey, Corsair, Blockade, Sailor, Lighthouse-protect).
+#   2. effects.TRIGGERS — the STATIC registry: {card: [spec, ...]} where
+#      spec = {"on": event, "from": source, ...}:
+#        "hand"    — a reaction window (play/decline) offered to each holder in
+#                    turn order (Pirate; Watchtower/Sheepdog later);
+#                    needs "stage", optional "when"(game, pid, ctx).
+#        "in_play" — evaluated on the ACTOR's table; runs "push"(game, pid)
+#                    once if they have a copy in play (Treasury;
+#                    Hoard/Goons-class later); optional "when".
+#        "self"    — fires when the event's SUBJECT is this card ("when you
+#                    gain this" — the entire Hinterlands theme; Dark Ages
+#                    on-trash); needs "stage", optional "when".
+# Emitted today: "gain", "buy", "play_treasure", "trash", "buy_phase_end".
+# Adding a future set's timing = new emit() call site (one line) + registry
+# entries — never another bespoke kernel mechanism.
+
+# How a from="hand" reaction (or an attack-window reaction) SHOWS ITSELF, by
+# the spec's `mode`. It is the card's own instruction: Watchtower reveals,
+# Guard Dog plays itself, Market Square discards itself, Hovel trashes itself.
+# The stage still performs the move — this only names it in the prompt.
+_REACT_VERB = {"reveal": "Reveal", "play": "Play",
+               "discard": "Discard", "trash": "Trash",
+               # ph. 6H: a Reserve card CALLED off the Tavern mat. Not a play —
+               # see engine.call_card for everything that does not follow.
+               "call": "Call"}
+# where an offered reaction's card is, in words, per zone
+_REACT_WHERE = {"hand": "your hand", "tavern": "your Tavern mat"}
+
+
+def emit(game, event, actor=None, subject=None, **extra):
+    """Fire an event AFTER the triggering change has been applied.
+
+    ONE occurrence can hand a player several abilities — the gained card's own
+    when-gain, a reaction in hand, a standing watcher. Each player's consumers
+    are collected into ONE ability pool (p23 §2: THE PLAYER picks what resolves
+    first, re-offered after each), and the pools are pushed in reversed turn
+    order so the current player's resolves first, then each other player's in
+    turn order (p23 §3 — cross-player order is NOT a choice)."""
+    pools = {}
+    _emit_collect(game, pools, event, actor, subject, **extra)
+    _park_pools(game, pools)
+
+
+def emit_batch(game, event, actor, subjects, **extra):
+    """One SIMULTANEOUS batch — a multi-card discard or trash. The cards moved
+    at once ("unless that effect is explicitly sequential, they are discarded
+    at the same time"), so every card's consumers trigger together and land in
+    ONE pool per player: with Trail + Tunnel discarded to a Militia, their
+    owner picks which reacts first. Per-card emit() here would order them by
+    LIST position instead — the pre-phase-3 accident (ledger B4) where the
+    order came from the player's clicks in the discard picker, reversed.
+    Gains stay per-emit on purpose: those resolve one at a time by rule."""
+    pools = {}
+    for subject in subjects:
+        _emit_collect(game, pools, event, actor, subject, **extra)
+    _park_pools(game, pools)
+
+
+def _park_pools(game, pools):
+    order = game["players"]
+    i = order.index(game["turn"]) if game["turn"] in order else 0
+    for p in reversed(order[i:] + order[:i]):
+        if p in pools:
+            park_abilities(game, p, [a for bucket in pools[p] for a in bucket])
+
+
+def _emit_collect(game, pools, event, actor=None, subject=None, **extra):
+    """Collect one occurrence's consumers into per-player pools.
+
+    Trigger conditions (in hand? in play? `when`?) are evaluated HERE, at the
+    occurrence (p25 §3); the deferred runners re-check only card PRESENCE at
+    resolution (the lose-track rule) and log `lost_track` when it fails.
+
+    Bucket order inside a pool = self, in_play, hand, watchers — the exact pop
+    order of the pre-pool fixed-order engine, so the FIRST option is always the
+    historical default and a single consumer behaves byte-identically."""
+    ctx = {"actor": actor, "subject": subject, **extra}
+
+    def add(pid, bucket, card, stage, data, commutes=False):
+        d = {"card": card, "stage": stage, "data": data}
+        if commutes:
+            d["commutes"] = True     # decision-free + order-independent: the
+        pools.setdefault(pid, ([], [], [], []))[bucket].append(d)   # pool auto-runs it
+
+    from . import effects
+    for card, specs in getattr(effects, "TRIGGERS", {}).items():
+        for si, spec in enumerate(specs):
+            if spec["on"] != event:
+                continue
+            src = spec.get("from", "hand")
+            when = spec.get("when")
+            if src == "self":
+                if subject == card and (when is None or when(game, actor, ctx)):
+                    # **extra carries the emit's context (gain's via_buy/dest,
+                    # discard's zone) — actor/subject stay authoritative.
+                    add(actor, 0, card, spec["stage"],
+                        {**extra, "actor": actor, "subject": subject},
+                        commutes=spec.get("commutes", False))
+            elif src == "in_play":
+                if actor is not None and card in game["seats"][actor]["in_play"] \
+                        and (when is None or when(game, actor, ctx)):
+                    # deferred: the pool may resolve other abilities first, so
+                    # the push runs via __inplay_push, which re-finds THIS spec
+                    # (by index) and re-checks the card is still on the table
+                    add(actor, 1, card, "__inplay_push",
+                        {"event": event, "spec": si, "ctx": ctx})
+            elif src == "game":
+                # A GAME-WIDE rule: "in games using this, ..." (Footpad). It
+                # binds every player whether or not anyone owns a copy, so the
+                # test is the SUPPLY, not a zone — the same shape as
+                # Charlatan's Curse rule, but on the trigger bus rather than a
+                # game-dict flag, because this one has to resolve in order with
+                # the other abilities the same gain triggered.
+                #
+                # `supply`, not `kingdom`: a set-up EXTRA pile (Young Witch's
+                # Bane) is in the game without being one of the dealt 10, and
+                # "in games using this" plainly covers it.
+                if actor is not None and card in game["supply"] \
+                        and (when is None or when(game, actor, ctx)):
+                    add(actor, 0, card, spec["stage"],
+                        {**extra, "actor": actor, "subject": subject},
+                        commutes=spec.get("commutes", False))
+            elif src == "landscape":
+                # A LANDMARK's ability (ph. 7H): the from:"game" shape, keyed on
+                # the landscape having been DEALT instead of on a Supply pile.
+                # "A Landmark's ability is always active for all players", so
+                # nobody owns it — the ability goes to the event's ACTOR
+                # (Aqueduct: "when YOU gain a Treasure") and lands in that
+                # player's pool like any other consumer, displaying under the
+                # landmark's own name. `card` here is a LANDSCAPE name, which
+                # can never collide with a card name: they are different tables
+                # and the merge in effects.py refuses a duplicate key either way.
+                #
+                # A PROJECT (ph. 9) is the same source with OWNERSHIP: "A
+                # Project's ability is active for players who have a Project
+                # cube on the card", so its consumers are filtered to cube
+                # owners — and the recipient is not always the actor. The
+                # spec's optional `recipients` key names the scoping:
+                #   "owner-actor" (default) — fires for the event's actor iff
+                #       they own a cube (Academy: "when YOU gain an Action
+                #       card"; Guildhall, Sewers, Innovation);
+                #   "owners-not-actor" — fires for every cube owner EXCEPT the
+                #       actor (Road Network: "when ANOTHER player gains a
+                #       Victory card, +1 Card" — each such owner draws, in the
+                #       middle of the actor's resolution if need be).
+                # A landmark ignores the key: it has no owners to scope by.
+                if card in game["landscapes"]:
+                    st = game["landscapes"][card]
+                    if st["kind"] == "project":
+                        owners = st["bought_by"]
+                        if spec.get("recipients") == "owners-not-actor":
+                            targets = [p for p in game["players"]
+                                       if p in owners and p != actor]
+                        else:
+                            targets = [actor] if actor in owners else []
+                    else:
+                        targets = [actor] if actor is not None else []
+                    for p in targets:
+                        if when is None or when(game, p, ctx):
+                            add(p, 0, card, spec["stage"],
+                                {**extra, "actor": actor, "subject": subject,
+                                 "owner": p},
+                                commutes=spec.get("commutes", False))
+            elif src == "artifact":
+                # An ARTIFACT's ability (ph. 9): "the Artifact's ability
+                # applies to you while you have it" — fires for the event's
+                # ACTOR iff they hold the named artifact (Treasure Chest at
+                # their buy_phase_start, Horn on their cleanup_discard of a
+                # Border Guard, Key at their turn_start). `card` is an
+                # ARTIFACTS name — its own table, like a landscape's.
+                if actor is not None and game["artifacts"].get(card) == actor \
+                        and (when is None or when(game, actor, ctx)):
+                    add(actor, 0, card, spec["stage"],
+                        {**extra, "actor": actor, "subject": subject},
+                        commutes=spec.get("commutes", False))
+            elif src in ("hand", "tavern"):
+                # `tavern` is the same OFFER shape as a hand reaction, on the
+                # other public per-seat zone: a timed window in which the owner
+                # may CALL a Reserve card off their mat (p28). Every Reserve
+                # call in Adventures is a window like this — start of your
+                # turn, on a gain, after resolving an Action, end of the Buy
+                # phase — which is why calling is not a free move: it has to be
+                # ordered in the ability pool against everything else the same
+                # occurrence triggered.
+                default_mode = "call" if src == "tavern" else "play"
+                verb = _REACT_VERB.get(spec.get("mode") or default_mode, "Play")
+                for p in game["players"]:
+                    if spec.get("who") == "actor" and p != actor:
+                        continue          # when-YOU-x reactions (Watchtower-class)
+                    if card in game["seats"][p][src] and (when is None or when(game, p, ctx)):
+                        add(p, 2, card, "__offer_window",
+                            {"stage": spec["stage"], "verb": verb, "zone": src,
+                             "extra": {**extra, "gained": subject, "gainer": actor}})
+    _collect_token_abilities(game, pools, event, actor, subject, add)
+    _collect_exile_abilities(game, pools, event, actor, subject, add)
+    whens = getattr(effects, "WATCHER_WHENS", {})
+    for w in list(game["watchers"]):
+        if w["event"] != event or not w.get("stage"):
+            continue
+        if actor is not None and actor in w.get("immune", []):
+            continue          # immune to the attack PLAY that set this watcher
+        # a watcher whose ability would no-op for THIS occurrence (Monkey on
+        # anyone but the right-hand neighbour) never joins the pool — a prompt
+        # ordering a no-op against a real ability is worse than noise, it
+        # implies the no-op will do something
+        when = whens.get((w["card"], w["stage"]))
+        if when is not None and not when(game, w, ctx):
+            continue
+        add(w["owner"], 3, w["card"], w["stage"],
+            {**w["data"], **extra, "actor": actor, "subject": subject,
+             "owner": w["owner"]}, commutes=w.get("commutes", False))
+
+
+# The pile tokens whose ability is a plain bonus when you play a card from
+# their pile: "when you play a card from that pile, you first get ...". They are
+# BEFORE-PLAY abilities, in the same class as Urchin and Champion (p33), which
+# is why they join the same pool rather than being applied inside the play.
+_TOKEN_BONUS = {"+card": ("cards", 1), "+action": ("actions", 1),
+                "+buy": ("buys", 1), "+coin": ("coins", 1)}
+
+
+def _collect_exile_abilities(game, pools, event, actor, subject, add):
+    """THE EXILE MAT'S OWN WHEN-GAIN ABILITY (ph. 10) — the kernel contributing
+    to a pool on its own behalf, the `_collect_token_abilities` shape.
+
+    "When you gain a card, you may discard all other copies from your mat."
+    The mat is not a card, not a landscape and not an artifact, so it can have
+    no registry entry — but its ability is CONCURRENT with everything else the
+    gain triggered (ch. VI lists it beside Watchtower, Sheepdog and Sleigh), so
+    it has to arrive through the pool rather than inline.
+
+    "OTHER copies" is the boundary Gatekeeper 6 pins: "your Exile mat only
+    allows you to discard 'other copies', meaning not the one you just
+    gained" — irrelevant here because the gained card is in a deck zone, not on
+    the mat, but it is why this counts what is ON THE MAT and never subtracts.
+    Gated on there being a copy there at all, so an ordinary board pays one
+    list lookup."""
+    if event != "gain" or actor is None or subject is None:
+        return
+    if not game["seats"][actor]["exile"].count(subject):
+        return
+    add(actor, 0, "__exile", "discard_copies",
+        {"card": subject, "actor": actor})
+
+
+def _k_exile_discard_copies(game, pid, frame, choice):
+    """The mat's ability, offered. "You can't choose to just discard some of
+    them" — so it is a yes/no, never a choose_cards."""
+    card = frame["data"]["card"]
+    n = game["seats"][pid]["exile"].count(card)
+    if not n:
+        return                       # an earlier pick already moved them
+    push_choose_option(
+        game, pid, "__exile", "answer",
+        options=[{"id": "yes",
+                  "label": f"Discard {n} {card} from your Exile mat"},
+                 {"id": "no", "label": "Keep them Exiled"}],
+        data={"card": card})
+
+
+def _k_exile_answer(game, pid, frame, choice):
+    if choice["ids"][0] != "yes":
+        return
+    card = frame["data"]["card"]
+    n = game["seats"][pid]["exile"].count(card)
+    if n:
+        discard_from_exile(game, pid, [card] * n)
+
+
+def _collect_token_abilities(game, pools, event, actor, subject, add):
+    """The kernel's OWN contributors to an ability pool: the Adventures tokens.
+
+    A token is not a card, so it cannot have a TRIGGERS entry — but its ability
+    is concurrent with every card ability the same occurrence triggers, so it
+    has to arrive through the pool rather than be applied inline somewhere. The
+    kernel therefore contributes on its own behalf, under the pseudo-card
+    `"__token"`.
+
+    Both are gated on the TURN PLAYER owning the token: "when YOU play a card
+    from that pile" / "when YOU gain a card from that pile" are about the
+    token's owner, and only they can be the one playing on their own turn. Plan's
+    Trashing token is the exception the compendium calls out — its 2022 version
+    "can also be on an opponent's turn" — so that one keys on the GAINER."""
+    if actor is None or event not in ("before_play", "gain") \
+            or not _any_pile_tokens(game):
+        return          # the ordinary board pays one cheap scan, not a pile_of
+    if event == "before_play":
+        pile = pile_of(game, subject)
+        if pile is None:
+            return
+        for kind in pile_tokens(game, pile, actor):
+            if kind in _TOKEN_BONUS:
+                # decision-free and order-independent: taking +1 Action can
+                # never change what +1 Card does, so the pool auto-runs them
+                # rather than making the player order their own tokens
+                add(actor, 0, "__token", "bonus", {"kind": kind, "pile": pile},
+                    commutes=True)
+    elif event == "gain":
+        pile = pile_of(game, subject)
+        if pile is None:
+            return
+        if "trashing" in pile_tokens(game, pile, actor):
+            add(actor, 0, "__token", "trashing", {"pile": pile})
+
+
+def _k_token_bonus(game, pid, frame, choice):
+    key, n = _TOKEN_BONUS[frame["data"]["kind"]]
+    if key == "cards":
+        draw(game, pid, n)
+    elif key == "actions":
+        add_actions(game, n, pid)
+    elif key == "buys":
+        add_buys(game, n, pid)
+    else:
+        add_coins(game, n, pid)
+
+
+def _k_token_trashing(game, pid, frame, choice):
+    """Plan's Trashing token: "when you gain a card from that pile, you may
+    trash a card from your hand"."""
+    hand = game["seats"][pid]["hand"]
+    if not hand:
+        return
+    push_choose_cards(game, pid, "__token", "trashing_pick", sorted(hand),
+                      0, 1, "trash")
+
+
+def _k_token_trashing_pick(game, pid, frame, choice):
+    if choice["cards"]:
+        trash(game, pid, choice["cards"])
+
+
+def _k_offer_window(game, pid, frame, choice):
+    """Deferred reaction/call window (a pooled `from:"hand"` or `from:"tavern"`
+    trigger). The card was in that zone at the OCCURRENCE; by the time the
+    player picks this ability an earlier pick may have moved it — lose track,
+    and say so. `zone` is read defensively because a frame written by an
+    earlier deploy is persisted inside a live save and predates it."""
+    card, d = frame["card"], frame["data"]
+    zone = d.get("zone", "hand")
+    if card not in game["seats"][pid][zone]:
+        lost_track(game, pid, card, f"{d['verb'].lower()}ed")
+        return
+    where = _REACT_WHERE.get(zone, "your hand")
+    push_choose_option(game, pid, card, d["stage"],
+                       options=[{"id": "play",
+                                 "label": f"{d['verb']} {card} from {where}"},
+                                {"id": "decline", "label": "Don't react"}],
+                       data=d["extra"])
+
+
+def _k_inplay_push(game, pid, frame, choice):
+    """Deferred `from:"in_play"` trigger: re-find the registered spec (by index
+    — frames are short-lived, so a registry reorder across a deploy is the only
+    hazard, accepted) and run its push if the card is still on the table."""
+    from . import effects
+    card, d = frame["card"], frame["data"]
+    if card not in game["seats"][pid]["in_play"]:
+        lost_track(game, pid, card)
+        return
+    effects.TRIGGERS[card][d["spec"]]["push"](game, pid, d["ctx"])
+
+
+def attack_protected(game, pid):
+    """Lighthouse (2022): an ongoing until-your-next-turn protection, NOT a
+    while-in-play effect — it exists exactly while a 'protect' watcher does."""
+    return any(w["event"] == "protect" and w["owner"] == pid
+               for w in game["watchers"])
+
+
+def watcher_data(game, owner, card):
+    """Live data dict of a standing watcher (Corsair's per-turn bookkeeping)."""
+    for w in game["watchers"]:
+        if w["owner"] == owner and w["card"] == card:
+            return w["data"]
+    return None
+
+
+def watcher_datas(game, owner, card):
+    """ALL live data dicts for owner's copies of a watcher — per-INSTANCE
+    bookkeeping (two Sailors each grant their own once-per-turn play)."""
+    return [w["data"] for w in game["watchers"]
+            if w["owner"] == owner and w["card"] == card]
+
+
+def duration_in_play(game, pid, card):
+    """Is `card` on pid's table (played this turn or persisting)? Riders (a
+    Throne Room staying out with its Duration) are on the table too — Sea
+    Chart's copy check must see them."""
+    seat = game["seats"][pid]
+    if card in seat["in_play"]:
+        return True
+    return any(e["card"] == card or card in e.get("riders", [])
+               for e in seat["duration"])
+
+
+def remove_watcher(game, owner, card, n=1):
+    """Card code may burn out a fired watcher (Blockade is per-copy-gained and
+    stays; Corsair's per-player-first-treasure tracks in data instead)."""
+    kept, removed = [], 0
+    for w in game["watchers"]:
+        if removed < n and w["owner"] == owner and w["card"] == card:
+            removed += 1
+            continue
+        kept.append(w)
+    game["watchers"] = kept
+
+
+# --- concurrent-ability ordering (compendium p23 §2) ---------------------------
+# "When a player has several concurrent abilities to resolve, they choose which
+# to resolve first. After resolving it, they choose which to resolve next."
+# The pool is that rule's shape: pick ONE, resolve it FULLY (its frames stack on
+# top — atomicity for free), then the remainder pool re-surfaces and re-offers.
+# Sequential re-offer, NEVER an order-the-list-up-front prompt: later picks may
+# react to what earlier resolutions revealed, abilities that died mid-window
+# drop out, and interleaving (p24 §3) falls out naturally.
+#
+# CONTRACT: any code path that would push >=2 same-player frames from ONE
+# triggering occurrence must route them through park_abilities. One ability
+# skips every prompt and behaves exactly like a direct push.
+
+# (card, stage) pairs whose COPIES must not collapse into one option. Empty
+# today, deliberately: every shipped duplicate is interchangeable (two Tide
+# Pools, a throne-roomed Caravan's two draws, two Havens each returning their
+# own set-aside), so offering "which copy first?" would be pure noise. A future
+# card whose copies genuinely differ adds its pair here — and a ledger row.
+ORDER_MATTERS = set()
+
+
+def park_abilities(game, pid, abilities):
+    """Queue same-player abilities born of one occurrence.
+    abilities = [{"card", "stage", "data"}] in the order they would have
+    resolved historically — the order a no-prompt collapse preserves."""
+    if not abilities:
+        return
+    push_auto(game, pid, "__abilities", "pool", data={"abilities": list(abilities)})
+
+
+def _pool_groups(abilities):
+    """[(key, [indices])] in first-appearance order; interchangeable copies
+    share a group (one option), ORDER_MATTERS pairs get one group each."""
+    groups, by_key = [], {}
+    for i, a in enumerate(abilities):
+        key = (a["card"], a["stage"])
+        if key in ORDER_MATTERS:
+            key = (a["card"], a["stage"], i)
+        if key not in by_key:
+            by_key[key] = []
+            groups.append((key, by_key[key]))
+        by_key[key].append(i)
+    return groups
+
+
+def _k_ability_pool(game, pid, frame, choice):
+    abilities = frame["data"]["abilities"]
+    # An ability marked "commutes" is decision-free AND order-independent
+    # (Collection's +1 VP, Nomads' +$2): resolving it never changes what any
+    # other pending ability does, so offering it in the prompt is pure noise —
+    # it runs automatically, first, and never spends the player's choice.
+    # The marker is declared at REGISTRATION (spec/add_watcher), never inferred.
+    auto = [a for a in abilities if a.get("commutes")]
+    rest = [a for a in abilities if not a.get("commutes")]
+    groups = _pool_groups(rest)
+    if len(groups) <= 1:
+        # no real choice — run everything, first-parked first (reversed push:
+        # the stack pops last-pushed first). Two Tide Pools never prompt.
+        for a in reversed(rest):
+            push_auto(game, pid, a["card"], a["stage"], data=a["data"])
+    else:
+        names = [k[0] for k, _ in groups]
+        options = []
+        for key, idxs in groups:
+            label = key[0]
+            if names.count(key[0]) > 1:             # same card, different stage
+                label += f" ({rest[idxs[0]]['stage']})"
+            if len(idxs) > 1:
+                label += f" ×{len(idxs)}"           # "Tide Pools ×2"
+            options.append({"id": str(idxs[0]), "label": label})
+        push_choose_option(game, pid, "__abilities", "pick", options=options,
+                           pick=1, data={"abilities": rest})
+    for a in reversed(auto):                        # on top: commuters run first
+        push_auto(game, pid, a["card"], a["stage"], data=a["data"])
+
+
+def _k_ability_pick(game, pid, frame, choice):
+    abilities = frame["data"]["abilities"]
+    i = int(choice["ids"][0])                       # ids validated vs options
+    chosen = abilities[i]
+    rest = abilities[:i] + abilities[i + 1:]
+    if rest:
+        # remainder BELOW the chosen ability: it re-surfaces (and re-groups)
+        # only after the chosen one has fully resolved
+        push_auto(game, pid, "__abilities", "pool", data={"abilities": rest})
+    push_auto(game, pid, chosen["card"], chosen["stage"], data=chosen["data"])
+
+
+def _start_of_turn(game, pid):
+    """Resolve pid's duration entries: park their fx as ONE ability pool (the
+    player picks what resolves first when the cards differ — p23 §2), expire
+    pid's watchers, mark entries done.
+    ALSO sweeps pid's own dur_setup entries — a Duration played OFF-TURN
+    (Pirate's reaction) never went through pid's clean-up, but its next-turn
+    ability still belongs to THIS turn start; its card then discards from
+    in_play at pid's ordinary clean-up (entry marked fired = spent)."""
+    seat = game["seats"][pid]
+    fx_batch = []
+    for entry in seat["duration"]:
+        for fx in entry["fx"]:
+            fx_batch.append((entry["card"], fx))
+        if entry.get("forever"):
+            continue     # Hireling/Champion: the fx repeat and the card stays
+        entry["fx"] = []
+        entry["done"] = True
+    for entry in seat.get("dur_setup", []):
+        for fx in entry["fx"]:
+            fx_batch.append((entry["card"], fx))
+        if entry.get("forever"):
+            continue
+        entry["fx"] = []
+        entry["fired"] = True
+    # ...and a REST-OF-THE-GAME watcher (Champion's attack immunity and its
+    # +1 Action) outlives its owner's turn start, which is what expires every
+    # other one.
+    game["watchers"] = [w for w in game["watchers"]
+                        if w["owner"] != pid or w.get("until") == "forever"]
+    # ONE concurrent set (phase 4): pid's duration fx AND every turn_start
+    # consumer (Clerk's own-turn hand reaction; any future turn_start watcher)
+    # pool together — "the start of turn is considered to be part of the
+    # Action phase" and all its abilities are simultaneous, so a Wharf and a
+    # Clerk in hand are the player's ordering choice, not the engine's. Also
+    # fixes the cross-player order: pools park current-player-FIRST (p23 §3),
+    # where the old separate emit made reactions cut ahead of the fx.
+    # ...and the seat-level start-of-turn abilities (Farmhands), which have no
+    # Duration on the table to hang off but are just as simultaneous
+    for fx in seat["start_fx"]:
+        fx_batch.append((fx["card"], fx))
+    seat["start_fx"] = []
+    pools = {}
+    for card, fx in fx_batch:
+        pools.setdefault(pid, ([], [], [], []))[0].append(
+            {"card": card, "stage": fx["stage"], "data": dict(fx["data"])})
+    _emit_collect(game, pools, "turn_start", actor=pid)
+    _park_pools(game, pools)
+
+
+def _cleanup_durations(game, pid):
+    """At pid's clean-up: discard done entries — for EVERY seat, not just the
+    turn player's (official timing: a Duration discards at the clean-up of the
+    turn its last ability resolved, and an ability that resolved BETWEEN turns
+    — a denied Outpost — means the following turn's clean-up, whoever's that
+    is). Then promote pid's setup entries (in_play -> duration zone). Returns
+    the names (incl. riders) that must NOT be discarded from pid's in_play."""
+    for p, s in game["seats"].items():
+        still_p = []
+        for entry in s["duration"]:
+            if entry.get("done"):
+                s["discard"].append(entry["card"])
+                s["discard"].extend(entry.get("riders", []))
+            else:
+                still_p.append(entry)
+        s["duration"] = still_p
+    seat = game["seats"][pid]
+    kept_out = []
+    still = seat["duration"]
+    # THE 2025 DURATION RULE (deviation B9, PAID): "the future effects of a
+    # played Duration STOP if the card fails to be in play."
+    #
+    # A promoted entry IS the card's accounting — the card leaves `in_play`
+    # below and from then on only the entry says where it is. So an entry whose
+    # card is no longer on the table must never be promoted, and this one gate
+    # closes BOTH halves of the rule at once: the fx never run next turn, and
+    # the card is not counted twice.
+    #
+    # **It was a card-CONSERVATION bug, not only a rules divergence**, which is
+    # why this got paid rather than re-recorded. Way of the Horse / Butterfly /
+    # Turtle "return this to its pile" — and ch. VII's REMOVED FROM PLAY names
+    # exactly those three among the six things in the game that can remove a
+    # Duration. Play a Caravan normally under a Throne Room (registering its
+    # fx), then use the Way on the SECOND play: the Caravan goes back to its
+    # pile AND kept a live entry, so `_census` counted 12 Caravans on an
+    # 11-card pile and the returned card still drew next turn.
+    #
+    # A MULTISET, because zones hold names: two Caravans with one returned must
+    # still promote the one that is really there (the ph.-9 `_in_play_leaving`
+    # lesson). The rider is left to discard normally, which is what Way of the
+    # Butterfly 5 says happens to the Throne Room.
+    on_table = Counter(seat["in_play"])
+    for entry in seat.pop("dur_setup", []):
+        # fired = an off-turn play whose fx already resolved at this seat's own
+        # turn start — spent, so it discards from in_play like any other card
+        if (entry["fx"] or entry["watchers"]) and not entry.get("fired"):
+            if not on_table[entry["card"]]:
+                _log(game, pid, "duration_stopped", card=entry["card"])
+                continue
+            on_table[entry["card"]] -= 1
+            kept_out.append(entry["card"])
+            kept_out.extend(entry["riders"])
+            # carry the WHOLE entry, not a hand-copied subset. The old version
+            # rebuilt it from three keys and silently dropped `watchers` — so a
+            # promoted entry could not be asked whether it held any (a KeyError
+            # for anything that looked) — and, once ph. 7 added it, `forever`,
+            # which would have discarded a Champion at the next turn start.
+            still.append(dict(entry))
+    seat["duration"] = still
+    # THE CARD LEAVES `in_play` AS IT IS PROMOTED. It used to stay there until
+    # the sweep, which was fine while Clean-up ran start to finish — but ph. 5H
+    # made Clean-up INTERRUPTIBLE, so a consumer's decision frame can hold the
+    # sweep open with the card counted BOTH in `in_play` and as a duration
+    # entry: `owned_cards` double-counts it, and `game["vp"]` is recomputed
+    # after every move. Found by an Adventures fuzz (a Traveller's exchange
+    # offer holds Clean-up open while a Champion persists), but the defect is
+    # 5H's and predates this set.
+    for name in kept_out:
+        if name in seat["in_play"]:
+            seat["in_play"].remove(name)
+    return kept_out
+
+
+# --- playing action cards + the attack/reaction kernel -----------------------
+
+def discard_then_putback(game, pid, card, chosen, rest, zone="aside"):
+    """THE look-at-cards / discard-some / put-the-rest-back shape (Sentry,
+    Lookout, Rabble, Cartographer).
+
+    Order is load-bearing and easy to get backwards: the put-back is pushed
+    FIRST so it sits BELOW the discard's when-discard triggers, which the
+    discard then pushes on top of it. Compendium, Sentry: "See TRIGGERED
+    ABILITY (first trash, then discard, THEN PUT CARDS BACK)", and p54: the
+    kept cards "are kept aside… this matters if, for example, discarding or
+    trashing triggers an ability that lets you draw."
+
+    Pushing the put-back last (the obvious reading of LIFO) returned the kept
+    cards to the deck BEFORE a discarded Tunnel/Trail/Weaver could react — and
+    a Trail's +1 Card then drew a card the player had never been allowed to
+    see. Four cards had their own copy of this ordering; now they share one.
+    """
+    if len(rest) >= 2:
+        push_order_cards(game, pid, card, "__putback_order", cards=list(rest))
+    elif rest:
+        push_auto(game, pid, card, "__putback", data={"rest": list(rest)})
+    if chosen:
+        discard(game, pid, chosen, zone=zone, public=True)
+
+
+def _k_putback(game, pid, frame, choice):
+    deck_from_aside(game, pid, frame["data"]["rest"])
+
+
+def _k_putback_order(game, pid, frame, choice):
+    deck_from_aside(game, pid, choice["order"])     # order[0] ends up on top
+
+
+def persisting_in_play(game, pid):
+    """Cards on pid's table that will NOT be discarded at this clean-up — the
+    duration setups about to be promoted, plus their riders. THE reader of
+    _cleanup_durations' keep-out rule, so card code never re-derives it."""
+    kept = []
+    for e in game["seats"][pid].get("dur_setup", []):
+        if (e["fx"] or e["watchers"]) and not e.get("fired"):
+            kept.append(e["card"])
+            kept.extend(e.get("riders", []))
+    return kept
+
+
+def _in_play_leaving(game, pid):
+    """The in_play copies this clean-up will actually discard — in_play minus
+    the setups being promoted. A MULTISET subtraction, because zones hold
+    NAMES: a seat can hold a finishing Tide Pools and a freshly played one at
+    the same time, and only the count tells the two copies apart."""
+    out = list(game["seats"][pid]["in_play"])
+    for name in persisting_in_play(game, pid):
+        if name in out:
+            out.remove(name)
+    return out
+
+
+def leaving_play(game, pid):
+    """Everything that WILL be discarded from pid's table at this clean-up.
+
+    Not just `in_play`: a Duration whose last ability has resolved sits in the
+    `duration` zone marked done and is discarded from play by THIS clean-up, so
+    it is every bit as much "discarded from play" as a card in in_play. Scheme
+    may target it, and looking only at in_play silently hid finishing Durations
+    (and their Throne-Room riders) from the offer."""
+    out = _in_play_leaving(game, pid)
+    for e in game["seats"][pid]["duration"]:
+        if e.get("done"):
+            out.append(e["card"])
+            out.extend(e.get("riders", []))
+    return out
+
+
+def topdeck_from_play(game, pid, card):
+    """Topdeck a card that is leaving play this clean-up, wherever it sits —
+    in_play, or a finished duration entry (its own card or one of its riders).
+    Returns False if it isn't actually there (lose-track)."""
+    seat = game["seats"][pid]
+    # NOT `card in seat["in_play"]`: a Duration played THIS turn also sits in
+    # in_play and is not leaving, so with two copies of one Duration on the
+    # table — one finishing, one just played — a name match takes the wrong
+    # one. The persisting copy then vanishes from under _cleanup_durations,
+    # whose kept-out removal is unguarded, and _end_turn raised ValueError.
+    if card in _in_play_leaving(game, pid):
+        topdeck(game, pid, card, zone="in_play", public=True)
+        return True
+    for e in seat["duration"]:
+        if not e.get("done"):
+            continue
+        if e["card"] == card:
+            seat["duration"].remove(e)
+            seat["deck"].insert(0, card)
+            # riders lose their host and discard normally
+            seat["discard"].extend(e.get("riders", []))
+            _log(game, pid, "topdeck", card=card)
+            return True
+        if card in e.get("riders", []):
+            e["riders"].remove(card)
+            seat["deck"].insert(0, card)
+            _log(game, pid, "topdeck", card=card)
+            return True
+    return False
+
+
+def find_card_zone(game, pid, card, zones=("discard", "hand", "trash")):
+    """Where is `card` right now — or None if it has MOVED (the lose-track
+    rule). A when-gain/trash/discard reaction fires after the card landed, but
+    another ability may have moved it in between; "cards that are lost track of
+    can't be played" (2021 expanded rule). Card code must ask this rather than
+    assume the zone it expects, or it will remove() a card that isn't there."""
+    seat = game["seats"][pid]
+    for z in zones:
+        pile = game["trash"] if z == "trash" else seat.get(z)
+        if pile and card in pile:
+            return z
+    return None
+
+
+def lost_track(game, pid, card, verb=None, why=None):
+    """LOG that an ability was skipped because its card moved.
+
+    **Every lose-track guard that silently returns owes one of these.** The
+    ability not happening is correct; happening in SILENCE is not — a prompt
+    that never opens is indistinguishable from a trigger that failed to fire,
+    which is exactly how a real game (two Trails discarded, the first one's
+    draw shuffling the second back into the deck) got reported as a bug. The
+    player cannot see the zone the rule is talking about, so the engine has to
+    say it.
+
+    `verb` is what can't happen to it — "played", "revealed"; omit it where the
+    ability isn't one word (Watchtower's trash-or-topdeck) and the client says
+    "the ability is skipped" instead. `why` overrides the default "it moved"
+    for the cases that aren't literally a move — Sailor's gained Duration
+    landing somewhere it was never playable from."""
+    extra = {}
+    if verb:
+        extra["verb"] = verb
+    if why:
+        extra["why"] = why
+    _log(game, pid, "lost_track", card=card, **extra)
+
+
+def play_action_card(game, pid, card, from_zone="hand", count=True):
+    """Move the card to in_play (from_zone=None for throne-room replays), count the
+    play, and run its effect. Attack-typed plays are wrapped: reaction windows for
+    every opponent holding an eligible Reaction resolve BEFORE the play ability
+    (official timing), with per-play immunity collected in the play_ability frame.
+    count=False for off-turn reaction plays (Pirate) — they must not pollute the
+    turn player's actions_played counter."""
+    seat = game["seats"][pid]
+    if from_zone is not None:
+        # "trash" is the shared public pile, not a seat zone — Trail reacts to
+        # being TRASHED and plays itself from there.
+        src = game["trash"] if from_zone == "trash" else seat[from_zone]
+        src.remove(card)
+        seat["in_play"].append(card)
+        game["_cur_dur"] = None          # a new physical play gets a fresh entry
+        if has_type(game, card, "duration"):
+            # eager entry: later stages (Haven's pick) and Throne Room's rider
+            # marking both need the physical card's entry to already exist
+            _dur_setup_list(game, pid).append({"card": card, "fx": [], "watchers": 0, "riders": []})
+            game["_cur_dur"] = [pid, len(_dur_setup_list(game, pid)) - 1]
+    else:
+        # replay (Throne Room): duration fx pile onto the SAME physical card
+        lst = _dur_setup_list(game, pid)
+        game["_cur_dur"] = None
+        for i in range(len(lst) - 1, -1, -1):
+            if lst[i]["card"] == card:
+                game["_cur_dur"] = [pid, i]
+                break
+    if count and has_type(game, card, "action"):
+        game["turn_ctx"]["actions_played"] += 1   # Conspirator counts ACTIONS only
+        # ...and the NAMES in play order (ph. 9): Scepter replays "a non-Command
+        # Action card you played this turn that's still in play", and Citadel's
+        # target is THE FIRST-PLAYED action even when a before-play reaction
+        # (Caravan Guard) puts other cards into play ahead of its resolution —
+        # "a card is considered played even before it's resolved", and this
+        # list records exactly that order.
+        game["turn_ctx"]["played_actions"].append(card)
+    if has_type(game, card, "treasure") and not capitalism_changed(game, card):
+        # a Treasure played out-of-band (Sailor playing a gained Astrolabe)
+        # still produces its printed $ — and the Merchant/first-Silver hook.
+        # NOT a Capitalism-changed Action: its $ comes from its own +$ text
+        # when the effect runs, not from a printed coin value.
+        _log(game, pid, "play", card=card, coins=coins_of(game, card))
+        _treasure_coins(game, pid, card)
+    else:
+        _log(game, pid, "play", card=card)
+    # "DIRECTLY AFTER RESOLVING an Action card" (Royal Carriage, Coin of the
+    # Realm). Parked FIRST so that LIFO puts it UNDER everything the play is
+    # about to push — see _k_play_resolved for why an emit here would be wrong.
+    if has_type(game, card, "action"):
+        push_auto(game, pid, "__play", "resolved",
+                  data={"card": card, "replay": from_zone is None})
+    if has_type(game, card, "attack"):
+        _open_attack_window(game, pid, card)
+        _emit_before_play(game, pid, card, replay=from_zone is None)
+    else:
+        _before_play_then_ability(game, pid, card, replay=from_zone is None)
+
+
+def _emit_before_play(game, pid, card, replay=False):
+    """The BEFORE-PLAY window — the abilities that resolve between a card being
+    played and its own ability doing anything: an Adventures "+" token on its
+    pile, Urchin's "when you play another Attack card with this in play, you
+    may first trash this", Kiln. ("After before-play abilities like Adventures
+    tokens, Kiln, Urchin", p33 — ONE class, so ONE event.)
+
+    For an ATTACK this is emitted AFTER _open_attack_window on purpose: pushes
+    are LIFO, so the ability pool this parks sits ABOVE the opponents' reaction
+    windows and resolves first — which is what "you may FIRST trash this"
+    means, and what the compendium's Skirmisher example needs ("you gain a
+    Mercenary before resolving the played Attack, so Skirmisher's when-gain
+    ability is not active yet"). "Other players' Reactions are resolved after
+    your token" says the same thing for the tokens.
+
+    `attack` rides the ctx so an attack-only consumer (Urchin) can ask; before
+    ph. 6H this was a separate `play_attack` event, which would have meant two
+    kernel emits for one timing point. `replay` marks a throne-room replay of a
+    card already in play: "the before-play ability only triggers if you play
+    ANOTHER Attack card, not if you play the same Urchin multiple times with a
+    throne-room"."""
+    emit(game, "before_play", actor=pid, subject=card, replay=replay,
+         attack=has_type(game, card, "attack"))
+
+
+def _before_play_then_ability(game, pid, card, replay=False):
+    """A non-Attack play: the before-play window, THEN the card's own ability.
+
+    The attack path gets this ordering for free (_open_attack_window parks the
+    play ability first), but an ordinary play runs its effect inline — and a
+    pool parked before an inline call would resolve AFTER it, i.e. exactly
+    backwards. So when the emit actually collects something, the ability is
+    parked underneath it; when it collects nothing (every play in the game
+    today) the effect runs inline exactly as it always did, which is what makes
+    generalizing the event byte-identical rather than merely equivalent."""
+    pools = {}
+    _emit_collect(game, pools, "before_play", actor=pid, subject=card,
+                  replay=replay, attack=False)
+    if pools:
+        push_auto(game, pid, "__play", "ability",
+                  data={"card": card, "replay": replay,
+                        "cur_dur": game.get("_cur_dur")})
+        _park_pools(game, pools)
+        return
+    _run_play_ability(game, pid, card, replay=replay)
+
+
+def _before_play_then_treasure(game, pid, card, replay=False):
+    """The Treasure twin of `_before_play_then_ability` (ph. 10, Kiln).
+
+    Kiln's "the next time you play a card this turn" is a card OF ANY TYPE, so
+    an ordinary Treasure play needs the before-play window too — and it needs
+    the same conditional parking, for the same reason: the coins and the
+    card's own ability run INLINE, so a pool parked in front of them would
+    resolve after them, i.e. backwards.
+
+    Returns True when the rest of the play has been parked underneath a pool;
+    False when nothing was collected, which is every board without a Kiln."""
+    pools = {}
+    _emit_collect(game, pools, "before_play", actor=pid, subject=card,
+                  replay=replay, attack=False)
+    if not pools:
+        return False
+    push_auto(game, pid, "__play", "treasure_rest",
+              data={"card": card, "cur_dur": game.get("_cur_dur")})
+    _park_pools(game, pools)
+    return True
+
+
+def _k_play_treasure_rest(game, pid, frame, choice):
+    """The rest of an ordinary Treasure play once a before-play consumer
+    (Kiln) has resolved: the coins, the card's own ability, then the
+    `play_treasure` emit — the inline tail of `_play_one_treasure`, verbatim."""
+    _restore_cur_dur(game, frame)
+    card = frame["data"]["card"]
+    from . import effects
+    _treasure_coins(game, pid, card)
+    fn = effects.EFFECTS.get(card)
+    if fn is not None:
+        _run_ability(game, pid, fn)
+    emit(game, "play_treasure", actor=pid, subject=card)
+
+
+def _restore_cur_dur(game, frame):
+    """Re-point `_cur_dur` at the play this parked frame belongs to.
+
+    `_cur_dur` says which duration-setup entry `add_duration_fx` should write
+    to, and it is set by play_action_card / _play_one_treasure for the physical
+    card being played. That works while a play resolves inline. But a play can
+    be PARKED — under the attack window, or under a before_play pool — and
+    anything resolving in the gap that plays a card of its own repoints it:
+    Caravan Guard is a reaction that plays ITSELF and is a Duration, so a
+    Haunted Woods played into a Caravan Guard reaction found the pointer on the
+    reactor's entry, saw the card names disagree, and MINTED A SECOND ENTRY for
+    a card that was only played once — the card was then owned twice and an
+    extra copy reached the deck (a card-conservation break, found by the ph.-7H
+    fuzz census on a 4-player Adventures/Alchemy board).
+
+    Restoring rather than saving-and-reverting is deliberate: the pointer must
+    stay live for the LATER stages the ability pushes (Haven's pick, Throne
+    Room's rider marking), which is exactly what the inline path gives them.
+
+    Guarded on the key being PRESENT, not on its value: a frame written by an
+    earlier deploy can be sitting in a live save mid-attack-window, and it must
+    keep behaving the way it did when it was pushed. A value of None IS
+    meaningful — a non-Duration play sets the pointer to None, and the inline
+    path would have run its ability with None."""
+    if "cur_dur" in frame["data"]:
+        game["_cur_dur"] = frame["data"]["cur_dur"]
+
+
+def _would_resolve_gate(game, pid, card, immune=None, replay=False):
+    """THE WOULD-RESOLVE WINDOW (ph. 8) — the last thing that can happen before
+    a played card's own ability runs, and the only place an ability can be
+    REPLACED rather than merely preceded.
+
+    The compendium gives it its own timing class, distinct from before-play:
+    "Enchantress is triggered when you WOULD RESOLVE the played Action card. So
+    if you play an Enchanted Attack card, Reactions are resolved first, as
+    normal. Good Harvest, Kiln, Urchin and Adventures tokens are also resolved
+    first." Its other listed members are all Ways ("Ways are triggered at the
+    same time as Enchantress, replacing what you do"), Highwayman and
+    Enlightenment — so this one event is also the ph.-10 Ways seam.
+
+    Returns True when the ability has been PARKED underneath a pool of
+    consumers. Same shape as 6H's before_play gate and for the same reason: a
+    pool parked in front of an inline call would resolve after it, i.e.
+    backwards — so the ability is only parked when the emit actually collects
+    something, and a board with no consumer runs byte-identically to before.
+
+    `immune` distinguishes the two ability shapes: None is an ordinary play
+    (which also emits play_treasure), a list is an ATTACK's play ability with
+    its per-play immunity set."""
+    pools = {}
+    _emit_collect(game, pools, "would_resolve", actor=pid, subject=card,
+                  replay=replay, attack=immune is not None)
+    if not pools:
+        return False
+    push_auto(game, pid, "__play", "resolve",
+              data={"card": card, "replay": replay,
+                    "immune": None if immune is None else list(immune),
+                    "cur_dur": game.get("_cur_dur")})
+    _park_pools(game, pools)
+    return True
+
+
+def push_way_offer(game, pid, way, card, stage, cancels=True):
+    """THE WAY OFFER (ph. 10) — "when you play an Action card, you may choose
+    to resolve the Way INSTEAD of resolving the play ability of the Action
+    card".
+
+    Every Way's `would_resolve` stage calls this. It is a two-option prompt
+    rather than a move because a Way is a TIMED WINDOW like every other
+    would-resolve consumer, and has to be ordered in the ability pool against
+    whatever else that occurrence collected (an Enchantress; a second Way on a
+    forced board). That is the ph.-6H `call` finding again: a window is a
+    trigger, not a `legal_moves` entry, and the move surface does not grow.
+
+    Picking the Way calls `cancel_pending_play` and runs `stage` — the
+    Enchantress template. Picking "normally" returns and the parked
+    `__play/resolve` continuation runs the real ability.
+
+    **A DECISION ON EVERY ACTION PLAY IS THIS SET'S PRODUCT COST, and it is
+    the rule.** With a Way dealt, every Action play stops to ask.
+
+    `cancels=False` is **WAY OF THE CHAMELEON, the one Way that does not
+    replace the play**: "you resolve the effects of the card you played, but
+    all +Cards you get this turn are +$ instead", and the 2023 ruling is
+    explicit that "unlike with the other Ways, with Way of the Chameleon
+    you're FOLLOWING THE ACTION CARD'S play ability". So its pick must not
+    call `cancel_pending_play`. It is a flag here rather than a second prompt
+    in card code because the two prompts are otherwise identical, and two
+    copies of one prompt shape are somewhere for them to drift apart."""
+    push_choose_option(
+        game, pid, way, "__way_offer",
+        options=[{"id": "normal", "label": f"Play {card} normally"},
+                 {"id": "way", "label": f"Play {card} using {way}"}],
+        data={"card": card, "stage": stage, "cancels": bool(cancels)})
+
+
+def _k_way_offer(game, pid, frame, choice):
+    """Answer to the Way offer. Displays under the WAY's own name (a kernel
+    `__*` stage falls back to ("*", stage) in `_stage_fn`)."""
+    if choice["ids"][0] != "way":
+        return                       # the parked play ability runs as normal
+    way = frame["card"]
+    # "You just resolve the Way instead" — the card still counts as PLAYED, is
+    # in play, bumped actions_played, and its after-play abilities still fire.
+    # Way of the Chameleon is the exception (`cancels=False`): it MODIFIES the
+    # play rather than replacing it, so the parked ability must still run.
+    if frame["data"].get("cancels", True):
+        cancel_pending_play(game)
+    _log(game, pid, "way", name=way, card=frame["data"]["card"])
+    _run_stage(game, way, frame["data"]["stage"], pid,
+               {"kind": "auto", "pid": pid, "card": way,
+                "stage": frame["data"]["stage"],
+                "constraint": {}, "data": {"card": frame["data"]["card"]}},
+               None)
+
+
+def cancel_pending_play(game):
+    """"…instead of following its instructions" — Enchantress, and every Way.
+
+    Flags the parked would-resolve continuation so the card's play ability is
+    never run. The card still counts as PLAYED (it is in play, `actions_played`
+    is already bumped, and "a card is considered played even before it's
+    resolved"), and everything else about the play is untouched: reactions have
+    already resolved, before-play abilities have already resolved, and the
+    `action_resolved` emit parked under all of it still fires — "after-play
+    abilities such as Coin of the Realm, Royal Carriage, Citadel or Flagship
+    still trigger after you play an Enchanted Action card".
+
+    The twin of `cancel_pending_gain` in the would-gain protocol, and returns
+    False the same way when there is nothing parked to cancel."""
+    for f in reversed(game["pending"]):
+        if f["card"] == "__play" and f["stage"] == "resolve":
+            f["data"]["cancelled"] = True
+            return True
+    return False
+
+
+def _run_play_ability(game, pid, card, replay=False):
+    """A non-Attack card's own play ability (and the play_treasure emit that
+    follows a Treasure's). Split out so it can run inline OR from a parked
+    frame — the two must be the same code, not two copies that drift."""
+    if _would_resolve_gate(game, pid, card, replay=replay):
+        return
+    _do_play_ability(game, pid, card)
+
+
+def _do_play_ability(game, pid, card):
+    from . import effects as _fx
+    fn = _fx.EFFECTS.get(card)
+    if fn is None and not has_type(game, card, "treasure"):
+        raise KeyError(f"dontminion: no effect registered for {card!r}")
+    if fn is not None:
+        _run_ability(game, pid, fn)     # see _acting: off-turn plays exist
+    if has_type(game, card, "treasure"):
+        emit(game, "play_treasure", actor=pid, subject=card)
+
+
+def _do_attack_ability(game, pid, card, immune):
+    game["_atk_immune"] = list(immune)
+    try:
+        _effect_fn(card)(game, pid)
+    finally:
+        game.pop("_atk_immune", None)
+
+
+def _k_play_resolve(game, pid, frame, choice):
+    """The would-resolve continuation. `cancelled` is Enchantress (or, later, a
+    Way) having replaced what this card does — the play stands, its ability
+    simply never runs."""
+    _restore_cur_dur(game, frame)
+    d = frame["data"]
+    if d.get("cancelled"):
+        return
+    if d["immune"] is None:
+        _do_play_ability(game, pid, d["card"])
+    else:
+        _do_attack_ability(game, pid, d["card"], d["immune"])
+
+
+def _k_play_ability_frame(game, pid, frame, choice):
+    _restore_cur_dur(game, frame)
+    _run_play_ability(game, pid, frame["data"]["card"],
+                      replay=frame["data"].get("replay", False))
+
+
+def _k_play_resolved(game, pid, frame, choice):
+    """"Directly after resolving an Action card" — a parked continuation rather
+    than an emit inside play_action_card, because play_action_card RETURNS
+    while the play's frames are still pending and "completely resolve the play
+    ability before playing it again" (p17) defines resolution as those frames
+    having drained. Parked before the play pushes anything, so LIFO fires it
+    exactly then. A throne-room replay resolves twice and so emits twice; the
+    consumer decides what to do about that from `replay`."""
+    d = frame["data"]
+    emit(game, "action_resolved", actor=pid, subject=d["card"],
+         replay=d.get("replay", False))
+
+
+def playable_from_supply(game, pid, pred=None):
+    """Supply piles whose TOP CARD a Command card may play. Only the top card
+    of a pile is choosable ("you can only choose a card that is currently on
+    top of a Supply pile"), which is why this asks pile_top rather than reading
+    the pile name — ph. 3H's ordered piles make the two differ."""
+    out = []
+    for name in sorted(game["supply"]):
+        top = pile_top(game, name)
+        if top is None or not command_may_play(game, top):
+            continue
+        if pred is not None and not pred(name):
+            continue
+        out.append(name)
+    return out
+
+
+def command_may_play(game, card):
+    """Can a Command card play this? Two exclusions, both from the current
+    card texts rather than the original ones:
+
+      * NOT another Command card — "this is to prevent loops from occurring".
+      * NOT a Duration (the 2025 change). Before it, playing one directly was
+        allowed and its later ability stopped after this turn.
+    """
+    return (has_type(game, card, "action")
+            and not has_type(game, card, "command")
+            and not has_type(game, card, "duration"))
+
+
+def play_from_supply(game, pid, pile, count=True):
+    """PLAY A CARD WHILE LEAVING IT — run the play ability of a Supply pile's
+    top card with the card never moving: it stays on its pile, and the Command
+    card that played it is the one in play.
+
+    This is what the CURRENT Band of Misfits and Overlord do, and what
+    Inheritance's Estates do ("play the card with your Estate token, leaving it
+    there"). It is deliberately NOT a "play this card AS that one": the 2019
+    errata retired that reading — "unlike the first version, this version does
+    not change itself to another card, nor does it play itself. Instead it
+    PLAYS AN ACTION CARD from the Supply."
+
+    Returns False if the pile's top card is not something a Command card may
+    play, so the caller can offer the choice without pre-filtering twice."""
+    card = pile_top(game, pile)
+    if card is None or not command_may_play(game, card):
+        return False
+    _log(game, pid, "play_from_supply", card=card, pile=pile)
+    if count:
+        game["turn_ctx"]["actions_played"] += 1
+    if has_type(game, card, "attack"):
+        # _open_attack_window ALREADY parks the play ability under the reaction
+        # windows, so this path needs no continuation of its own — adding one
+        # ran the attack twice. Same machinery as an Attack played from hand,
+        # which is the point: an attack is an attack however it reached play.
+        _open_attack_window(game, pid, card)
+        _emit_before_play(game, pid, card)
+        return True
+    _run_supply_ability(game, pid, card)
+    return True
+
+
+def play_mouse_card(game, pid):
+    """WAY OF THE MOUSE (ph. 10): "play the set-aside card, leaving it there."
+
+    The third member of ch. VI's PLAY A CARD WHILE LEAVING IT family, and it
+    needed its own wrapper because neither sibling fits: `play_from_supply`
+    (5H) wants a Supply pile and `play_set_aside` (ph. 7) wants a card in a
+    SEAT's set-aside zone. The Mouse card is a single game-level card that
+    belongs to nobody — `game["mouse_card"]`.
+
+    Everything that follows from "leaving it there" is the family's shared
+    behaviour: while-in-play abilities are not active, when-discard abilities
+    never trigger, and "if the played card instructs you to move it, you won't
+    be able to do so (due to the lose-track rule)" — which is LOGGED, never
+    silent. The 2025 errata bans a Duration as the Mouse card, so that corner
+    is closed at setup rather than here."""
+    card = game.get("mouse_card")
+    if not card:
+        return False
+    _log(game, pid, "play_mouse", card=card)
+    if has_type(game, card, "action") and pid == game["turn"]:
+        game["turn_ctx"]["actions_played"] += 1
+    # AN ATTACK MOUSE CARD IS STILL AN ATTACK BEING PLAYED, so it owes the
+    # reaction window — the two siblings in this family (`play_from_supply`,
+    # `play_set_aside`) both branch here and this one did not, which let a Way
+    # of the Mouse whose card is a Swindler/Urchin/Ambassador/Black Cat hit a
+    # Moat holder with no window at all (found by the ph.-10 cross-set batch).
+    # ch. VII Way of the Mouse names Swindler itself: "when it's not your turn,
+    # if you play a card that affects the other players (like Swindler or
+    # Catapult), start with the current player." `_open_attack_window` parks
+    # the play ability under the windows, so no continuation is needed here.
+    if has_type(game, card, "attack"):
+        _open_attack_window(game, pid, card)
+        _emit_before_play(game, pid, card)
+        return True
+    _run_supply_ability(game, pid, card)
+    return True
+
+
+def link_duration(game, pid, card, handle):
+    """MASTERMIND (ph. 10): "if the card is a Duration, Mastermind stays in
+    play as long as that Duration stays in play."
+
+    A rider, like `mark_duration_rider` — but attached from a LATER WINDOW
+    (Mastermind plays the Duration a whole turn after its own entry was
+    created, from a start-of-turn stage), which is what ph. 9's
+    `duration_handle` exists for.
+
+    TRANSITIVE by construction: "if you Mastermind another Mastermind, the
+    first one stays in play as long as the Duration it played — the second
+    Mastermind — stays in play. If next turn you use the second Mastermind on
+    another Duration, BOTH Masterminds stay in play as long as that Duration
+    does." Because each link copies the riders it already carries onto the new
+    host, a chain collapses onto whichever entry is currently alive."""
+    entry = None
+    lst = _dur_setup_list(game, pid)
+    if handle is not None and handle[1] < len(lst):
+        entry = lst[handle[1]]
+    if entry is None:
+        return False
+    riders = entry.setdefault("riders", [])
+    if card not in riders:
+        riders.append(card)
+    # THE CHAIN: whatever was riding the linking card rides the new host too —
+    # so the entry to look at is the LINKING CARD'S OWN (`other["card"] ==
+    # card`), never one it merely rides. A Throne Room and a Mastermind can
+    # both ride one Caravan without the Throne Room belonging to the
+    # Mastermind, and dragging every co-rider along would strand it.
+    #
+    # And it MOVES them rather than copying: a rider recorded on two live
+    # entries is one physical card counted twice by the conservation census,
+    # and both entries promote at Clean-up.
+    for other in game["seats"][pid]["duration"] + lst:
+        if other is entry or other.get("card") != card:
+            continue
+        for r in list(other.get("riders", [])):
+            if r != card and r not in riders:
+                riders.append(r)
+            other["riders"].remove(r)
+    # ...AND THE LINKING CARD'S OWN ENTRY IS NOW SPENT. Leaving it is a
+    # conservation break in one direction and removing it is one in the other,
+    # so both halves have to happen together:
+    #
+    #   * its entry is marked `done` by this turn's `_start_of_turn` (the fx
+    #     that did the linking was its last), and `_cleanup_durations` discards
+    #     a done entry's `card` — so the physical Mastermind would be named
+    #     TWICE, once by its dying entry and once as a rider on the new host;
+    #   * but the card left `in_play` when that entry was promoted, so simply
+    #     dropping the entry leaves it counted in NO zone at all.
+    #
+    # Putting it back into `in_play` is not bookkeeping, it is the physical
+    # truth: a rider sits on the TABLE (exactly where a Throne Room riding a
+    # Duration sits), and `_cleanup_durations` takes riders OUT of `in_play`
+    # as it promotes the host. Exactly one entry is retired per link, because
+    # one link is one physical card — a second, still-live Mastermind is
+    # `done`-less and correctly untouched. Found by the ph.-10 card batch.
+    seat = game["seats"][pid]
+    for i, other in enumerate(seat["duration"]):
+        if other is not entry and other.get("card") == card and other.get("done"):
+            seat["duration"].pop(i)
+            seat["in_play"].append(card)
+            break
+    return True
+
+
+def play_set_aside(game, pid, card, count=True):
+    """PLAY A CARD WHILE LEAVING IT, from a SET-ASIDE card rather than a Supply
+    pile — Inheritance's Estates ("play the card with your Estate token,
+    leaving it there"). Same shape as play_from_supply, and the same reason it
+    is not "play this card AS that one": the 2019 errata retired that reading.
+
+    Returns False when there is nothing to play, which is the compendium's own
+    case: "if an opponent has bought Inheritance and you haven't, your Estates
+    are Actions during their turn — if you play an Estate then, it goes into
+    play but does nothing when played"."""
+    if card is None or not command_may_play(game, card):
+        return False
+    _log(game, pid, "play_set_aside", card=card)
+    if count:
+        game["turn_ctx"]["actions_played"] += 1
+    if has_type(game, card, "attack"):
+        _open_attack_window(game, pid, card)
+        _emit_before_play(game, pid, card)
+        return True
+    _run_supply_ability(game, pid, card)
+    return True
+
+
+def _run_supply_ability(game, pid, card):
+    from . import effects
+    fn = effects.EFFECTS.get(card)
+    if fn is not None:
+        _run_ability(game, pid, fn)
+
+
+def attack_reactions():
+    """THE registry of cards that react to an Attack being played, merged from
+    the effects modules. Was hardcoded to Moat + Diplomat in the kernel, which
+    made every new reaction a kernel edit. Entry shape:
+
+        {"label": str,
+         "when":  fn(game, pid) -> bool | None,   # beyond "it's in your hand"
+         "immunity": bool,                        # Moat: unaffected by this play
+         "mode": "reveal" | "play",               # play = it plays ITSELF (p53)
+         "stage": str | None,                     # STAGES[(card, stage)] to run
+         "repeatable": bool}                      # may react again with a copy
+    """
+    from . import effects
+    return getattr(effects, "ATTACK_REACTIONS", {})
+
+
+def _reaction_options(game, o, immune, used=()):
+    """Options for one opponent's reaction window. `used` is what this player
+    already reacted with against THIS attack play — a non-repeatable reaction
+    isn't offered twice (you can't Moat the same attack again), while a
+    repeatable one is (the compendium allows several Guard Dogs per attack)."""
+    hand = game["seats"][o]["hand"]
+    opts = []
+    for card, spec in sorted(attack_reactions().items()):
+        if card not in hand:
+            continue
+        if card in used and not spec.get("repeatable"):
+            continue
+        if spec.get("immunity") and o in immune:
+            continue                     # already unaffected; nothing to gain
+        when = spec.get("when")
+        if when is not None and not when(game, o):
+            continue
+        verb = _REACT_VERB.get(spec.get("mode"), "Reveal")
+        opts.append({"id": f"react:{card}",
+                     "label": spec.get("label") or f"{verb} {card}"})
+    if opts:
+        opts.append({"id": "decline", "label": "Don't react"})
+    return opts
+
+
+def _open_attack_window(game, pid, card):
+    """Park the attack's play ability and offer every eligible opponent their
+    reaction window FIRST — the compendium's timing: reactions resolve when the
+    Attack is PLAYED, before its ability does anything.
+
+    Shared by the Action and TREASURE play paths; an attack is an attack
+    whichever way it reached the table (Cauldron is an Attack Treasure)."""
+    # Lighthouse protection (until-their-next-turn watcher) = unaffected,
+    # no window needed (public, so it's logged rather than asked)
+    immune0 = [o for o in opponents(game, pid) if attack_protected(game, o)]
+    for o in immune0:
+        _log(game, o, "lighthouse")
+    # `cur_dur` rides the frame because THIS PLAY'S duration-setup pointer is a
+    # property of the physical play, and the play is now split across a park:
+    # anything that runs inside the window (a reaction that PLAYS a card — a
+    # Caravan Guard is both) sets its own pointer, and the attack's ability
+    # would then register its fx against a stranger's entry. See _k_play_ability.
+    push_auto(game, pid, "__attack", "play_ability",
+              data={"card": card, "immune": list(immune0),
+                    "cur_dur": game.get("_cur_dur")})
+    for o in reversed(opponents(game, pid)):
+        # An ALREADY-PROTECTED player still gets the window: "it triggers
+        # whenever an Attack card is played, no matter if the card would have
+        # any effect on you" (p53). Skipping them cost a Lighthouse-protected
+        # Guard Dog holder its +2/+4 Cards on every attack — Guard Dog is pure
+        # upside and grants no immunity of its own. Passing immune0 keeps the
+        # pointless options out: _reaction_options drops an immunity-granting
+        # reaction (Moat) for someone already unaffected, so a protected player
+        # holding only a Moat is still offered nothing.
+        opts = _reaction_options(game, o, immune=immune0)
+        if opts:
+            _push_window(game, o, opts)
+
+
+def _push_window(game, o, opts):
+    push_choose_option(game, o, "__attack", "window", options=opts, pick=1)
+
+
+def reopen_attack_window(game, pid):
+    """Re-offer the current attack's window to pid — for a reaction whose own
+    stage pushed frames (Diplomat's discard, Guard Dog's play) and must let the
+    player react again afterwards. Safe to call when no attack is open."""
+    atk = _current_attack_frame(game)
+    if atk is None:
+        return
+    used = atk["data"].setdefault("used", {}).get(pid, [])
+    opts = _reaction_options(game, pid, atk["data"]["immune"], used)
+    if opts:
+        _push_window(game, pid, opts)
+
+
+def _current_attack_frame(game):
+    for f in reversed(game["pending"]):
+        if f["card"] == "__attack" and f["stage"] == "play_ability":
+            return f
+    return None
+
+
+# Option ids the window used before the registry (they are PERSISTED inside an
+# open frame, so a game paused on an attack window survives a deploy holding
+# one). Compatibility only — delete once no live save can carry them.
+_LEGACY_REACTION_IDS = {"reveal_moat": "Moat", "reveal_diplomat": "Diplomat"}
+
+
+def _k_window(game, pid, frame, choice):
+    cid = choice["ids"][0]
+    if cid == "decline":
+        return
+    if cid in _LEGACY_REACTION_IDS:
+        card = _LEGACY_REACTION_IDS[cid]
+    elif ":" in cid:
+        card = cid.split(":", 1)[1]
+    else:
+        return
+    spec = attack_reactions().get(card)
+    if spec is None:
+        return
+    atk = _current_attack_frame(game)
+    if atk is not None:
+        atk["data"].setdefault("used", {}).setdefault(pid, []).append(card)
+        if spec.get("immunity") and pid not in atk["data"]["immune"]:
+            atk["data"]["immune"].append(pid)
+
+    if spec.get("mode") == "play":
+        # REACTION THAT PLAYS ITSELF (compendium p53): "this doesn't use up an
+        # Action from your Action pool. You discard the card in THAT TURN'S
+        # Clean-up phase" — i.e. the attacker's, which is why clean-up has to
+        # sweep every seat's in_play, not just the turn player's.
+        # count only on your OWN turn: an opponent's reaction must not bump the
+        # turn player's actions_played (Conspirator counts ACTIONS YOU played).
+        play_action_card(game, pid, card, from_zone="hand",
+                         count=(pid == game["turn"]))
+    elif spec.get("mode") == "discard":
+        # "you may first DISCARD this to ..." (Beggar). The card leaves the
+        # hand as the cost of reacting, which is also why a second copy is
+        # offered again without `repeatable` doing any work for the first one.
+        discard(game, pid, [card])
+    else:
+        reveal(game, pid, [card], "hand")
+
+    stage = spec.get("stage")
+    if stage is not None:
+        _run_stage(game, card, stage, pid, frame, None)
+        return          # the stage re-opens the window itself once it's done
+    reopen_attack_window(game, pid)
+
+
+def _k_legacy_diplomat_discard(game, pid, frame, choice):
+    """Resolves a Diplomat discard frame written by the pre-registry kernel."""
+    discard(game, pid, choice["cards"])
+    reopen_attack_window(game, pid)
+
+
+def _k_play_ability(game, pid, frame, choice):
+    _restore_cur_dur(game, frame)
+    d = frame["data"]
+    # the would-resolve window sits BELOW the reaction windows and above the
+    # ability — "if you play an Enchanted Attack card, Reactions are resolved
+    # first, as normal", and only then can the play be replaced
+    if _would_resolve_gate(game, pid, d["card"], immune=d["immune"],
+                           replay=d.get("replay", False)):
+        return
+    _do_attack_ability(game, pid, d["card"], d["immune"])
+
+
+def attack_opponents(game, pid, card, per_opp_stage, data=None, immune=None):
+    """Queue the card's per-opponent stage for every non-immune opponent, in turn
+    order; each opponent's whole chain resolves before the next starts.
+
+    Called from on_play (inside the play_ability frame) the per-play immune set
+    is picked up automatically. A card that calls this from a LATER stage (its
+    attack part follows another choice — Minion's mode, Replace's gain) must
+    capture `list(game["_atk_immune"])` into its frame data during on_play and
+    pass it back via `immune=` — the transient is gone by then."""
+    if immune is None:
+        immune = game.get("_atk_immune", [])
+    targets = [o for o in opponents(game, pid) if o not in immune]
+    if targets:
+        push_auto(game, pid, "__attack", "next",
+                  data={"queue": targets, "card": card, "stage": per_opp_stage,
+                        "extra": data or {}})
+
+
+def _k_next(game, pid, frame, choice):
+    queue = frame["data"]["queue"]
+    if not queue:
+        return
+    o, rest = queue[0], queue[1:]
+    if rest:
+        push_auto(game, pid, "__attack", "next", data={**frame["data"], "queue": rest})
+    push_auto(game, o, frame["data"]["card"], frame["data"]["stage"],
+              data={"opp": o, **frame["data"]["extra"]})
+
+
+KERNEL_STAGES = {
+    # "*" = a kernel stage any card may push (see _stage_fn)
+    ("*", "__putback"): _k_putback,
+    ("*", "__putback_order"): _k_putback_order,
+    ("__attack", "window"): _k_window,
+    # legacy stage: a game paused mid-Diplomat across the deploy still holds a
+    # frame naming it. Compatibility only — delete with _LEGACY_REACTION_IDS.
+    ("__attack", "diplomat_discard"): _k_legacy_diplomat_discard,
+    ("__attack", "play_ability"): _k_play_ability,
+    ("__attack", "next"): _k_next,
+    # ph. 6H: the two halves of a play that a before-play consumer splits, and
+    # the "directly after resolving" continuation
+    ("__play", "ability"): _k_play_ability_frame,
+    ("__play", "treasure_rest"): _k_play_treasure_rest,
+    ("__play", "resolved"): _k_play_resolved,
+    # ph. 8: the WOULD-RESOLVE continuation — the half of a play that
+    # Enchantress (and, at ph. 10, a Way) can replace outright
+    ("__play", "resolve"): _k_play_resolve,
+    # ph. 7: the Adventures tokens' own abilities (a token is not a card, so
+    # the kernel contributes these to the ability pool itself)
+    ("__token", "bonus"): _k_token_bonus,
+    ("__token", "trashing"): _k_token_trashing,
+    ("__token", "trashing_pick"): _k_token_trashing_pick,
+    # ("__turn", "finish") registers below its definition
+}
+
+
+# --- turn-move handlers ------------------------------------------------------
+
+def _fresh_turn_ctx():
+    return {"bridges": 0, "actions_played": 0, "merchants": 0,
+            "silver_played": False, "bought": False,
+            # C&G: cards GAINED in this Buy phase (Merchant Guild counts all
+            # gains, not just buys, and counts ones from before it was played)
+            # and cards owed at the end of the turn (Farrier's overpay).
+            "buy_gains": 0, "end_draw": 0,
+            # Adventures (ph. 7): cards Save set aside to come back INTO YOUR
+            # HAND after the clean-up draw, and Mission's "during which you
+            # can't buy cards" (Events and Projects are still buyable).
+            "end_hand": [], "no_buy": False,
+            # Clean-up has STARTED. `phase` cannot say this: it is still
+            # "buy" from the moment _end_turn is entered until the hand-off
+            # assigns the next turn's, and ph. 5H made the gap long enough to
+            # hold real decisions. Peddler is the consumer — "cost reductions
+            # for this turn, or from cards in play, still apply in Clean-up
+            # EXCEPT Peddler's", because Peddler's own text says "during your
+            # Buy phase" — and Improve, which remodels at cleanup_start, is
+            # what made the difference observable.
+            "cleanup": False,
+            # Renaissance (ph. 9): Action names in play order (Scepter's
+            # replay targets; [0] is Citadel's first-play), and the per-turn
+            # once flags for Citadel's replay, Innovation's play-on-gain and
+            # Horn's topdeck ("You may only put one Border Guard onto your
+            # deck each turn with Horn").
+            "played_actions": [], "citadel_used": False,
+            "innovation_used": False, "horn_used": False,
+            # Menagerie (ph. 10). `chameleon` swaps every +Cards this player
+            # gets for +$ and vice versa for the REST OF THE TURN, not just
+            # the play ("only +Cards and +$ you get THIS TURN are changed…
+            # if you play Merchant Ship, you get +2 Cards this turn, but +$
+            # next turn as normal"). `ignore_actions` is Snowy Village's
+            # "ignore any further +Actions you get this turn". `trashes` is
+            # the live count feeding `last_turn_trashes` (Goatherd).
+            "chameleon": False, "ignore_actions": False, "trashes": 0,
+            # the last card gained this turn by ANY player other than a
+            # Wayfarer — the cost Wayfarer copies
+            "last_gain": None}
+
+
+def _h_play_action(game, pid, move):
+    if game["phase"] != "action":
+        return False, "not in your action phase"
+    card = move.get("card")
+    if card not in game["seats"][pid]["hand"]:
+        return False, "card not in hand"
+    if not has_type(game, card, "action"):
+        return False, "not an action card"
+    if game["actions"] <= 0:
+        return False, "no actions left"
+    game["actions"] -= 1
+    play_action_card(game, pid, card, from_zone="hand")
+    return True, None
+
+
+def _treasure_coins(game, pid, card):
+    """The printed $ of a played Treasure + the Merchant first-Silver hook —
+    shared by the buy-phase handler and out-of-band plays (play_action_card)."""
+    if card == "Potion":
+        # "When you play a Potion, it produces a Potion (instead of $, like
+        # other Treasures do), which is added to your money pool."
+        add_potions(game, 1, pid)
+        return
+    game["coins"] += coins_of(game, card)
+    if card == "Silver" and not game["turn_ctx"]["silver_played"]:
+        game["turn_ctx"]["silver_played"] = True
+        m = game["turn_ctx"]["merchants"]
+        if m:
+            game["coins"] += m
+            _log(game, pid, "plus", coins=m, why="Merchant")
+
+
+def play_treasure_card(game, pid, card, from_zone="hand"):
+    """Play a Treasure from somewhere other than the ordinary buy-phase flow —
+    Coronet plays one twice, Farmhands plays a set-aside one at the start of a
+    turn. `from_zone=None` replays a Treasure already in play (the throne-room
+    shape), running its ability and its coins again without moving it."""
+    return _play_one_treasure(game, pid, card, from_zone)
+
+
+def _play_one_treasure(game, pid, card, from_zone="hand"):
+    # CAPITALISM (ph. 9): an Action-become-Treasure played in the Buy phase is
+    # still an ACTION PLAY — "you play these like other Treasure cards …
+    # following its instructions", it "doesn't use an Action from your Action
+    # pool", and the compendium routes it through the whole play timing (an
+    # Enchantress catches it, Urchin-class before-play fires, it counts as an
+    # Action played). So the play delegates to play_action_card — attack
+    # windows, before_play, would_resolve, duration setup and actions_played
+    # all included, no Action spent — and then announces the treasure play the
+    # way every other Treasure does. from_zone=None (a throne-room replay)
+    # keeps the same meaning on both paths.
+    if capitalism_changed(game, card):
+        play_action_card(game, pid, card, from_zone=from_zone)
+        emit(game, "play_treasure", actor=pid, subject=card)
+        return
+    from . import effects
+    seat = game["seats"][pid]
+    if from_zone is not None:
+        seat[from_zone].remove(card)
+        seat["in_play"].append(card)
+    game["_cur_dur"] = None
+    if has_type(game, card, "duration"):
+        _dur_setup_list(game, pid).append({"card": card, "fx": [], "watchers": 0, "riders": []})
+        game["_cur_dur"] = [pid, len(_dur_setup_list(game, pid)) - 1]
+    _log(game, pid, "play", card=card, coins=coins_of(game, card))
+    # KILN (ph. 10): "the next time you play a card THIS TURN, you may first
+    # gain a copy of it" — **a card OF ANY TYPE**, and "before resolving the
+    # card". Until now `before_play` fired for every Action play (6H) and for
+    # an Attack-typed Treasure (Cauldron); a plain Copper emitted nothing.
+    # Conditionally parked, the 6H discipline, so a Kiln-less board is
+    # byte-identical: the coins and the ability ARE the continuation, and they
+    # run inline when nothing is collected.
+    if not has_type(game, card, "attack")             and _before_play_then_treasure(game, pid, card,
+                                           replay=from_zone is None):
+        return
+    _treasure_coins(game, pid, card)
+    if has_type(game, card, "attack"):
+        # An ATTACK-typed Treasure (Cauldron) opens the reaction window exactly
+        # like an Attack Action: the compendium's reaction window "triggers
+        # whenever an Attack card is PLAYED". This path never wrapped attacks,
+        # so `_atk_immune` was never set and a watcher registered from the play
+        # captured an EMPTY immune list — i.e. the attack would have been
+        # unblockable by Moat, silently.
+        _open_attack_window(game, pid, card)
+        _emit_before_play(game, pid, card, replay=from_zone is None)
+        emit(game, "play_treasure", actor=pid, subject=card)
+        return
+    # treasures with abilities (Astrolabe's duration half) run their effect too
+    fn = effects.EFFECTS.get(card)
+    if fn is not None:
+        _run_ability(game, pid, fn)
+    emit(game, "play_treasure", actor=pid, subject=card)
+
+
+def _h_play_treasure(game, pid, move):
+    if game["phase"] != "buy":
+        return False, "treasures are played in your buy phase"
+    if game["turn_ctx"]["bought"]:
+        return False, "can't play treasures after buying"
+    card = move.get("card")
+    if card not in game["seats"][pid]["hand"]:
+        return False, "card not in hand"
+    if not has_type(game, card, "treasure"):
+        return False, "not a treasure"
+    _play_one_treasure(game, pid, card)
+    return True, None
+
+
+def autoplay_treasures(game, pid):
+    """The exact list play_all_treasures would play right now, in play order —
+    THE reader, consulted by the handler, legal_moves AND player_view (shipped,
+    so the client's button can never disagree with the server: the livelock
+    rule). It excludes the static MANUAL_TREASURES (Anvil-class decisions) and
+    — state-dependently — every Capitalism-changed Action: those draw, attack
+    or prompt like the Actions they are, and the button must not fire them.
+    This is the state-aware half of the ledger's `autoplay_block` row (pulled
+    forward from ph. 12 by Capitalism); Highwayman's whole-button block joins
+    it when Allies lands."""
+    manual = manual_treasures()
+    hand = game["seats"][pid]["hand"]
+    auto = [c for c in list(hand)
+            if has_type(game, c, "treasure") and c not in manual
+            and not capitalism_changed(game, c)]
+    # order-sensitive treasures go last; stable, so everything else keeps
+    # hand order (which is what determinism/replay compares on)
+    last = autoplay_last()
+    auto.sort(key=lambda c: c in last)
+    return auto
+
+
+def _h_play_all_treasures(game, pid, move):
+    if game["phase"] != "buy":
+        return False, "treasures are played in your buy phase"
+    if game["turn_ctx"]["bought"]:
+        return False, "can't play treasures after buying"
+    auto = autoplay_treasures(game, pid)
+    if not auto:
+        # a no-op that reported success is what let a bot livelock here
+        return False, "no treasures to autoplay"
+    for card in auto:
+        _play_one_treasure(game, pid, card)
+    return True, None
+
+
+def debt_blocks_buying(game, pid):
+    """Why pid may not buy ANYTHING right now, or None. "When you have Debt
+    tokens, you can't buy anything (cards, Events or Projects). This is the only
+    effect of having Debt" (DEBT § IV).
+
+    It lives here rather than in `BUY_GATES` because that registry is per-CARD —
+    it answers "may this pile be bought" (Grand Market's no-Copper rule). This
+    is a rule about the BUYER, so it binds every pile and every landscape at
+    once, which is also how Projects (ph. 9) are covered for free: they buy
+    through `_h_buy_landscape`."""
+    return "pay off your Debt first" if game["debt"].get(pid) else None
+
+
+def buy_pay_alt(game, pid, card):
+    """The ALTERNATIVE PAYMENT this card offers right now, or None (ph. 10).
+
+    Animal Fair: "the cost of Animal Fair is always $7. When buying a card,
+    you are allowed to choose Animal Fair EVEN WITHOUT HAVING $7, as long as
+    you have an Action card in hand. You may choose to either pay its cost (if
+    you have $7) or trash an Action card from your hand. (You always use 1
+    Buy.)" — so the affordability check itself has to admit an escape.
+
+    THE reader, consulted by `_h_buy` AND `legal_moves`: an enumerator and a
+    handler that disagree hand the bot a move that does nothing (the
+    play_all_treasures livelock). The stage runs BEFORE the gain, because "if
+    you buy it by trashing a card, the trashing happens before any when-buy
+    abilities"."""
+    from . import effects
+    spec = getattr(effects, "BUY_PAY_ALT", {}).get(_priced(game, card))
+    if spec is None:
+        return None
+    return spec if spec["avail"](game, pid) else None
+
+
+def _h_buy(game, pid, move):
+    if game["phase"] != "buy":
+        return False, "not in your buy phase"
+    err = debt_blocks_buying(game, pid)
+    if err:
+        return False, err
+    card = move.get("card")
+    # `supply` is the index of BUYABLE piles, so a non-supply pile (Spoils,
+    # Horses, Rewards) fails here without needing its own check — the only
+    # way to those is gain_from().
+    if game["turn_ctx"]["no_buy"]:
+        # Mission's extra turn: "you can't buy any cards on this extra turn,
+        # but you can gain cards in other ways, and you can buy Events"
+        return False, "you can't buy cards this turn"
+    if card not in game["supply"]:
+        return False, "no such pile"
+    if game["supply"][card] <= 0:
+        return False, "pile is empty"
+    if game["buys"] <= 0:
+        return False, "no buys left"
+    err = buy_gate(game, pid, card)
+    if err:
+        return False, err
+    c = cost(game, card)
+    if c > game["coins"] and not buy_pay_alt(game, pid, card):
+        return False, "can't afford it"
+    p = potion_cost(game, card)
+    if p > game["potions"]:
+        return False, "not enough Potions"
+    # you buy a PILE and get its top card — the same for every pile we ship
+    # today, and the distinction an ordered pile (Knights, Castles) needs
+    got = pile_top(game, card)
+    # ANIMAL FAIR (ph. 10): an alternative payment. Offered whenever it is
+    # available — "you MAY choose to either pay its cost (if you have $7) or
+    # trash an Action card from your hand", so it is a real choice even when
+    # you could pay. The Buy is spent on both branches, and the stage runs
+    # BEFORE `_finish_buy`: "if you buy it by trashing a card, the trashing
+    # happens before any when-buy abilities".
+    alt = buy_pay_alt(game, pid, card)
+    if alt is not None:
+        game["buys"] -= 1
+        game["turn_ctx"]["bought"] = True
+        push_auto(game, pid, "__buy", "finish",
+                  data={"pile": card, "card": got, "overpay": 0})
+        opts = [{"id": "alt", "label": alt["label"]}]
+        if c <= game["coins"]:
+            opts.insert(0, {"id": "pay", "label": f"Pay ${c}"})
+        push_choose_option(game, pid, got, alt["stage"], options=opts,
+                           data={"pile": card, "cost": c})
+        return True, None
+    game["coins"] -= c
+    game["potions"] -= p
+    game["buys"] -= 1
+    game["turn_ctx"]["bought"] = True
+    # DEBT (Empires): "you don't pay anything to cover the Debt cost. Instead
+    # you take that many Debt tokens. (If the cost also includes $, you have to
+    # pay that.)" — so the coin check above is the COIN component alone and an
+    # {8D} card is buyable with $0. Taking the tokens is part of paying for the
+    # card, hence here rather than in _finish_buy: a when-gain ability (which
+    # _finish_buy fires) must already see the Debt.
+    add_debt(game, pid, debt_cost(game, card))
+    # OVERPAY (Guilds/C&G): a `$N+` card lets you pay MORE than it costs. The
+    # payment happens HERE, while paying for the card; the ability it buys is a
+    # when-gain ability that reads how much you overpaid (the 2022 retiming —
+    # pre-2022 it was a when-buy ability, which is why the compendium's older
+    # examples read differently). With money left, ask before finishing.
+    if cards_overpay(got) and game["coins"] > 0:
+        push_auto(game, pid, "__buy", "finish", data={"pile": card, "card": got, "overpay": 0})
+        push_choose_option(
+            game, pid, got, "__overpay",
+            options=[{"id": str(k), "label": "Don't overpay" if k == 0 else f"Overpay ${k}"}
+                     for k in range(game["coins"] + 1)])
+        return True, None
+    _finish_buy(game, pid, card, got, 0)
+    return True, None
+
+
+def _finish_buy(game, pid, pile, got, overpay):
+    """The half of a buy that follows the price being settled. Split out so the
+    overpay prompt can sit in the middle of it: the log line, the gain (which
+    carries `overpay` so the card's own when-gain ability can read it) and the
+    buy event all belong AFTER the money has actually been paid."""
+    _log(game, pid, "buy", card=got, **({"overpay": overpay} if overpay else {}))
+    gain(game, pid, pile, via_buy=True, overpay=overpay)
+    emit(game, "buy", actor=pid, subject=got)   # Prosperity's on-buy seam
+
+
+def _k_overpay(game, pid, frame, choice):
+    """Answer to the overpay prompt. A kernel stage named `__*`, so it displays
+    under the bought card's own name (_stage_fn falls back to ("*", stage))."""
+    n = int(choice["ids"][0])
+    n = max(0, min(n, game["coins"]))
+    for f in reversed(game["pending"]):
+        if f["card"] == "__buy" and f["stage"] == "finish":
+            f["data"]["overpay"] = n
+            break
+    if n:
+        game["coins"] -= n
+
+
+def _k_buy_finish(game, pid, frame, choice):
+    d = frame["data"]
+    _finish_buy(game, pid, d["pile"], d["card"], d["overpay"])
+
+
+def buy_gate(game, pid, card):
+    """Pile-specific BUY restrictions (Grand Market's no-Copper-in-play).
+    effects.BUY_GATES = {card: fn(game, pid) -> error string | None}. Gaining
+    bypasses gates — they bind buying only."""
+    from . import effects
+    fn = getattr(effects, "BUY_GATES", {}).get(card)
+    return fn(game, pid) if fn is not None else None
+
+
+# --- LANDSCAPES: buying a thing that is not a card (ph. 6H) ------------------
+
+def landscape_cost(game, name):
+    """THE landscape price — the PRINTED cost, never engine.cost().
+
+    "Its cost cannot be changed by cards like Bridge" (p32). Routing it through
+    cost() would be the obvious thing and would silently make a Bridge turn
+    discount every Event on the table; a landscape is not a card, so nothing
+    that changes card costs reaches it. (Empires' Debt-costed Events are ph. 8;
+    until the Debt vector lands there this stays a plain coin int.)"""
+    return LANDSCAPES[name]["cost"]
+
+
+def landscape_vp(game, name):
+    """VP tokens sitting ON a landscape — the Arena/Battlefield-class store
+    ("setup: put 6 VP per player on this"). Per-landscape state lives in
+    game["landscapes"][name], where 6H put it; a landscape that stores nothing
+    still has no such key, so this reads through a default."""
+    st = game["landscapes"].get(name)
+    return st.get("vp", 0) if st else 0
+
+
+def add_landscape_vp(game, name, n):
+    """Put n VP tokens on a landscape (its setup, or a card putting them back).
+    False if this game was not dealt it."""
+    st = game["landscapes"].get(name)
+    if st is None or n <= 0:
+        return False
+    st["vp"] = st.get("vp", 0) + n
+    _log(game, None, "landscape_vp", name=name, count=n, total=st["vp"])
+    return True
+
+
+def take_landscape_vp(game, name, pid, n=None):
+    """Take VP tokens off a landscape onto pid (n=None takes them all).
+    Returns how many moved — "if there are none left you get nothing", which
+    is the whole point of a store that drains."""
+    have = landscape_vp(game, name)
+    k = have if n is None else min(n, have)
+    if k <= 0:
+        return 0
+    st = game["landscapes"][name]
+    st["vp"] = have - k
+    if not st["vp"]:
+        del st["vp"]
+    add_vp_tokens(game, pid, k)
+    return k
+
+
+def landscape_tokens(game, name, pid):
+    """pid's plain tokens ON a landscape (Sinister Plot's counters — "keep
+    them on Sinister Plot next to your Project cube"). Presence-based like the
+    VP store: an untouched landscape ships no key."""
+    st = game["landscapes"].get(name)
+    return st.get("tokens", {}).get(pid, 0) if st else 0
+
+
+def add_landscape_tokens(game, name, pid, n=1):
+    st = game["landscapes"][name]
+    toks = st.setdefault("tokens", {})
+    toks[pid] = toks.get(pid, 0) + n
+    _log(game, pid, "landscape_tokens", name=name, count=n, total=toks[pid])
+
+
+def take_landscape_tokens(game, name, pid):
+    """Remove ALL of pid's tokens from the landscape ("you remove all your
+    tokens"), returning how many came off."""
+    st = game["landscapes"][name]
+    toks = st.get("tokens", {})
+    k = toks.pop(pid, 0)
+    if not toks and "tokens" in st:
+        del st["tokens"]
+    if k:
+        _log(game, pid, "landscape_tokens", name=name, count=-k, total=0)
+    return k
+
+
+def landscape_scoring(game, pid):
+    """The SCORING PIPELINE HOOK (ph. 7H) — what the LANDMARKS on this table add
+    to or subtract from pid's score.
+
+    `effects.LANDSCAPE_SCORING = {name: fn(game, pid) -> int}`, summed over
+    every landscape DEALT to this game: "a Landmark's ability is always active
+    for all players", so there is no ownership test — being on the table is the
+    whole condition, exactly like `from:"game"` reads the Supply.
+
+    It is folded into `_total_vp`, which `_post_move` recomputes after every
+    move, so DURING-game landmark VP display falls out for free. A "when
+    scoring" landmark is then just a function of final deck composition, and
+    recomputing it continuously is a superset that costs nothing — with one
+    edge a scoring fn must respect: it must not CHANGE VALUE at game over. The
+    one type-sensitive interaction (Inheritance making Estates Actions, which an
+    Obelisk-class count would see) is already pinned by `types_of`'s over-gate,
+    which stops the injection once the game is over."""
+    if not game["landscapes"]:
+        return 0                       # the common case: no landscape dealt
+    from . import effects
+    fns = getattr(effects, "LANDSCAPE_SCORING", {})
+    return sum(fn(game, pid) for name, fn in fns.items()
+               if name in game["landscapes"])
+
+
+def project_owned(game, name, pid):
+    """Does pid have a Project cube on this landscape? THE ownership reader —
+    "A Project's ability is active for players who have a Project cube on the
+    card" (p32). The cube IS the `bought_by` record `_h_buy_landscape` has
+    written since 6H; total on undealt names."""
+    st = game["landscapes"].get(name)
+    return st is not None and st["kind"] == "project" and pid in st["bought_by"]
+
+
+def _project_cubes(game, pid):
+    """How many Project cubes pid has placed (across every dealt project)."""
+    return sum(1 for st in game["landscapes"].values()
+               if st["kind"] == "project" and pid in st["bought_by"])
+
+
+# "Each player gets two Project cubes in their chosen color" (SPECIAL SETUP:
+# RENAISSANCE) — with the official <=2-landscape deal the cap is unreachable,
+# but the forced-board seam can put three or more Projects on one table, so the
+# gate still encodes it.
+_PROJECT_CUBES = 2
+
+
+def landscape_gate(game, pid, name):
+    """Why pid may not BUY this landscape right now, or None if they may.
+
+    ONE reader, consulted by legal_moves AND by the handler. An enumerator and
+    a handler that disagree hand the bot a move that does nothing, which is the
+    play_all_treasures livelock — the reason `spendable` and `manual_treasures`
+    are shaped the same way."""
+    st = game["landscapes"].get(name)
+    # `name in LANDSCAPES` too: a live save names the landscapes it was dealt,
+    # and a deploy that retired one would otherwise KeyError on a game already
+    # holding it — the same reason pile helpers are total on unknown names.
+    if st is None or name not in LANDSCAPES:
+        return "no such landscape"
+    if st["kind"] not in BUYABLE_LANDSCAPE_KINDS:
+        return f"a {st['kind']} is not something you buy"
+    # PROJECTS (ph. 9): "You can buy two Projects during the game, but not the
+    # same one twice, and you can never remove a placed cube" (p32). Both
+    # clauses are properties of the KIND, not `once` data rows — every project
+    # in the game obeys them, so modelling them as per-landscape flags would
+    # only be somewhere for the data and the rule to disagree.
+    if st["kind"] == "project":
+        if pid in st["bought_by"]:
+            return "you already have a cube on that"
+        if _project_cubes(game, pid) >= _PROJECT_CUBES:
+            return "you have no Project cubes left"
+    # "Once per turn / once per game means you can only BUY it once per turn /
+    # once per game" (p32). Both are per player; only the turn player can buy,
+    # so a turn is identified by its number (which an Outpost extra turn also
+    # increments — it is a different turn).
+    once = LANDSCAPES[name].get("once")
+    if once == "turn" and st["bought_turn"] == game["turn_number"]:
+        return "you already bought that this turn"
+    if once == "game" and pid in st["bought_by"]:
+        return "you already bought that this game"
+    return None
+
+
+def _h_buy_landscape(game, pid, move):
+    """Buy an Event (or, from ph. 9, a Project): "paying from your money pool
+    and using up one Buy from your Buy pool" (p32).
+
+    THIS IS NOT A GAIN AND NOT BUYING A CARD — "buying an Event is not buying a
+    card", so there is no `gain` or `buy` emit and no `buy_gains` bump, and
+    nothing Hoard / Haggler / Merchant Guild-class can see it. It DOES set
+    `turn_ctx["bought"]`, because buying ANYTHING ends the part of the Buy
+    phase in which you may still play Treasures."""
+    if game["phase"] != "buy":
+        return False, "not in your buy phase"
+    # the Debt gate binds "cards, Events or Projects" alike — see
+    # debt_blocks_buying, and note it is checked BEFORE the landscape gate so
+    # the message says why you can't buy anything rather than why not this
+    err = debt_blocks_buying(game, pid)
+    if err:
+        return False, err
+    name = move.get("name")
+    err = landscape_gate(game, pid, name)
+    if err:
+        return False, err
+    if game["buys"] <= 0:
+        return False, "no buys left"
+    c = landscape_cost(game, name)
+    if c > game["coins"]:
+        return False, "can't afford it"
+    game["coins"] -= c
+    game["buys"] -= 1
+    game["turn_ctx"]["bought"] = True
+    # Empires' Debt-costed Events (Triumph, Annex, Ritual) — the same rule as a
+    # card's: the coins are paid, the Debt is taken. A landscape's price is the
+    # PRINTED one in both components, so this reads cards.landscape_debt and
+    # never debt_cost() (which prices a card through the pile face).
+    add_debt(game, pid, cards_landscape_debt(name))
+    st = game["landscapes"][name]
+    st["bought_turn"] = game["turn_number"]
+    if pid not in st["bought_by"]:
+        st["bought_by"].append(pid)
+    _log(game, pid, "buy_landscape", name=name)
+    # A PROJECT buy places the cube and does nothing else — its ability is
+    # ONGOING ("this Project's ongoing ability now applies to you for the rest
+    # of the game"), read by its consumers through project_owned, never run at
+    # buy time. LANDSCAPE_FX stays an EVENT's one-shot buy ability. Buying
+    # Fleet during the Fleet round is exactly this and grants no turn: the
+    # round's roster was fixed when the round began.
+    if st["kind"] == "project":
+        return True, None
+    from . import effects
+    fn = getattr(effects, "LANDSCAPE_FX", {}).get(name)
+    if fn is not None:
+        # a landscape's ability is an ability like any other: it may push
+        # frames, and they display under the LANDSCAPE's own name
+        _run_ability(game, pid, fn)
+    return True, None
+
+
+def _enter_buy_phase(game, pid, auto=False):
+    """action -> buy, and the ONE place the transition is announced.
+
+    "At the start of your Buy phase" is a real timing point (Arena, ph. 8), and
+    it has two entrances — the player ending their Action phase and the
+    kernel's auto-advance — so both had to route through one function or the
+    event would fire on only one of them. It can also happen TWICE in a turn
+    now that Villa can send you back to your Action phase, which is correct:
+    "you can only do this once at the start of your Buy phase" is per entrance,
+    and Arena's entry names Villa among the cards that give you another."""
+    game["phase"] = "buy"
+    _log(game, pid, "phase", phase="buy", **({"auto": True} if auto else {}))
+    emit(game, "buy_phase_start", actor=pid)
+
+
+def _h_end_phase(game, pid, move):
+    if game["phase"] == "action":
+        _enter_buy_phase(game, pid)
+    elif not _push_cleanup_choices(game, pid):
+        _end_turn(game, pid)
+    return True, None
+
+
+def _push_cleanup_choices(game, pid):
+    """End-of-buy-phase decisions (Treasury's may-topdeck) via the trigger
+    bus. When any fire, the turn end runs through frames: the parked
+    __turn/finish continuation fires _end_turn once the choices resolve.
+    Returns True if frames were pushed (else callers end the turn directly)."""
+    n0 = len(game["pending"])
+    push_auto(game, pid, "__turn", "finish", data={})
+    # `final=True` — the LAST end-of-buy-phase of the turn (a Villa return
+    # fires the same event with final=False; see return_to_action_phase).
+    # `buy_gains` rides the event on BOTH paths so a consumer never has to
+    # know which one it is looking at.
+    emit(game, "buy_phase_end", actor=pid, final=True,
+         buy_gains=game["turn_ctx"]["buy_gains"])
+    if len(game["pending"]) == n0 + 1:
+        _pop_frame(game)          # nothing triggered — unpark the finish
+        return False
+    return True
+
+
+def _k_turn_finish(game, pid, frame, choice):
+    _end_turn(game, pid)
+
+
+KERNEL_STAGES[("__turn", "finish")] = _k_turn_finish
+KERNEL_STAGES[("__buy", "finish")] = _k_buy_finish
+KERNEL_STAGES[("*", "__overpay")] = _k_overpay
+KERNEL_STAGES[("__gain", "resolve")] = _k_gain_resolve
+KERNEL_STAGES[("__abilities", "pool")] = _k_ability_pool
+KERNEL_STAGES[("__abilities", "pick")] = _k_ability_pick
+KERNEL_STAGES[("*", "__offer_window")] = _k_offer_window
+KERNEL_STAGES[("*", "__inplay_push")] = _k_inplay_push
+KERNEL_STAGES[("*", "__star_pick")] = _k_star_pick
+KERNEL_STAGES[("__exile", "discard_copies")] = _k_exile_discard_copies
+KERNEL_STAGES[("__exile", "answer")] = _k_exile_answer
+KERNEL_STAGES[("*", "__way_offer")] = _k_way_offer
+
+
+_HANDLERS = {
+    "play_action": _h_play_action,
+    "play_treasure": _h_play_treasure,
+    "play_all_treasures": _h_play_all_treasures,
+    "buy": _h_buy,
+    "buy_landscape": _h_buy_landscape,
+    "spend": _h_spend,
+    "end_phase": _h_end_phase,
+}
+
+
+def _maybe_auto_buy(game):
+    """Auto-advance action -> buy once the turn player can't act any further:
+    effects fully resolved (no pending) and either no Actions left or no
+    Action card in hand. Evaluated only inside apply_move (after _drive) and
+    at the hand-off in _end_turn — never at new_game, so test fixtures that
+    stage a hand post-deal still start in the action phase. Because it folds
+    into the CAUSING move, that move's undo snapshot restores the pre-move
+    action phase (no separate skip to unwind)."""
+    if game["over"] or game["phase"] != "action" or game["pending"]:
+        return False
+    hand = game["seats"][game["turn"]]["hand"]
+    # Villagers (ph. 9) are Actions-in-waiting: a player out of Actions but
+    # holding tokens AND an Action card can still act, so the phase must not
+    # advance from under them — they end it themselves if they want to.
+    can_act = game["actions"] > 0 \
+        or game["villagers"].get(game["turn"], 0) > 0
+    if not can_act or not any(has_type(game, c, "action") for c in hand):
+        _enter_buy_phase(game, game["turn"], auto=True)
+        return True
+    return False
+
+
+def _end_turn(game, pid):
+    """START Clean-up. The SWEEP is parked as a continuation rather than run
+    inline, which is what makes Clean-up INTERRUPTIBLE: a consumer of
+    `cleanup_start` or `cleanup_discard` may push a real decision frame and
+    MOVE a card before anything is discarded and before the new hand is drawn.
+
+    Before ph. 5H the events fired but the sweep carried straight on, so a
+    consumer could be told a card was being discarded and had no way to act on
+    it — a seam that looked usable and was not. Three cards (Scheme,
+    Alchemist, Herbalist) worked around it with a `buy_phase_end` watcher.
+    """
+    seat = game["seats"][pid]
+    # Clean-up has begun — see turn_ctx["cleanup"]. Set FIRST, before anything
+    # can observe a cost: a consumer of `cleanup_start` (Improve) prices cards
+    # while this is open, and `phase` still reads "buy" throughout.
+    game["turn_ctx"]["cleanup"] = True
+    # durations: discard resolved entries, keep this turn's setups on the table
+    kept_out = _cleanup_durations(game, pid)
+    # `pulled` says the persisting cards have ALREADY left in_play (they now do,
+    # as they are promoted). A frame written by an earlier deploy carries no
+    # such key and its sweep must still subtract them — the expand/contract
+    # shape, for a frame that can genuinely be sitting in a live save.
+    push_auto(game, pid, "__cleanup", "sweep",
+              data={"kept_out": list(kept_out), "pulled": True})
+    # "at the start of Clean-up" (Alchemist, Hermit-class) — before any card
+    # has moved, so a consumer can still see the whole table.
+    emit(game, "cleanup_start", actor=pid)
+    inplay = list(seat["in_play"])
+    for name in kept_out:
+        if name in inplay:       # _cleanup_durations already took them out
+            inplay.remove(name)
+    # "when you discard this FROM PLAY" during Clean-up (Scheme, Herbalist). A
+    # distinct event from `discard`, deliberately: the when-discard reactions
+    # (Tunnel/Trail/Weaver) are all "other than during a Clean-up phase" and
+    # must NOT see this. Fired BEFORE the cards move, so a consumer can still
+    # find them in in_play — and now actually relocate them.
+    #
+    # ONE BATCH, not an emit per card: the whole table is discarded
+    # SIMULTANEOUSLY, so every card's consumers trigger together and belong in
+    # ONE pool — a Soldier and a Fugitive both finishing their journey are the
+    # player's ordering choice, and it is a real one (exchanging the Fugitive
+    # returns it to its pile, which is what lets the Soldier exchange into it).
+    # Per-card emit() made each card its own pool, ordering them by in_play
+    # position instead — the ledger-B4 accident, in the shape emit_batch exists
+    # to prevent.
+    emit_batch(game, "cleanup_discard", pid, inplay)
+
+
+def _k_cleanup_sweep(game, pid, frame, choice):
+    """The rest of Clean-up, once every start-of-Clean-up ability has resolved."""
+    seat = game["seats"][pid]
+    kept_out = frame["data"]["kept_out"]
+    # a consumer may have MOVED a card off the table (Scheme topdecks it), so
+    # re-read what is actually still in play rather than trusting a snapshot.
+    # kept_out (Durations + their riders) is accounted for in the duration
+    # zone, so it must not also be discarded — or counted twice.
+    inplay = list(seat["in_play"])
+    if not frame["data"].get("pulled"):
+        # pre-ph.-7 frame: the promoted cards are still sitting in in_play.
+        # Subtracting them TWICE is what this guard prevents — it destroyed a
+        # second copy of the same Duration (two Gears, one persisting), because
+        # `seat["in_play"] = []` then wiped whatever the subtraction skipped.
+        for name in kept_out:
+            if name in inplay:
+                inplay.remove(name)
+    seat["discard"].extend(inplay)
+    seat["in_play"] = []
+    seat["discard"].extend(seat["hand"])
+    seat["hand"] = []
+    # cards set aside only until this Clean-up (Joust's Province: "Discard the
+    # Province in Clean-up"). They are NOT in play while set aside, which is
+    # what keeps them out of Horn of Plenty's and Shop's in-play counts.
+    if seat["cleanup_aside"]:
+        _log(game, pid, "discard", cards=list(seat["cleanup_aside"]))
+        seat["discard"].extend(seat["cleanup_aside"])
+        seat["cleanup_aside"] = []
+    # ...and cards that go back to their PILE instead of to the discard
+    # (Encampment). Every seat, not just the turn player's: an Encampment set
+    # aside on someone else's turn "is returned in THAT player's Clean-up".
+    for other, s in game["seats"].items():
+        for c in list(s.get("cleanup_return", ())):
+            if not return_to_pile(game, other, c, zone="cleanup_return"):
+                # no pile would take it back — keep the card in the game
+                # rather than dropping it out of the census
+                s["cleanup_return"].remove(c)
+                s["discard"].append(c)
+    # OTHER seats' in_play too: a REACTION THAT PLAYS ITSELF was played during
+    # THIS turn and "you discard the card in that turn's Clean-up phase" —
+    # this turn's, not the reactor's. Left behind it would still be on the
+    # table when its owner's turn came round, wrongly counting as a card in
+    # play for Bank / Peddler / Grand Market / Conspirator. Durations and
+    # their riders are protected: _cleanup_durations already promoted them out
+    # of in_play for every seat.
+    for other, s in game["seats"].items():
+        if other == pid or not s["in_play"]:
+            continue
+        held = [e["card"] for e in s["duration"]]
+        for e in s["duration"]:
+            held.extend(e.get("riders", []))
+        leaving = list(s["in_play"])
+        for name in held:
+            if name in leaving:
+                leaving.remove(name)
+        if leaving:
+            s["discard"].extend(leaving)
+            s["in_play"] = [c for c in s["in_play"] if c in held]
+            _log(game, other, "cleanup_off_turn", cards=leaving)
+    # Sailor-class this-turn watchers die with the turn
+    game["watchers"] = [w for w in game["watchers"]
+                        if w.get("until") != "turn_end"]
+    # Smugglers: this turn's gains become pid's "last completed turn" record
+    game["last_turn_gains"][pid] = game.pop("_turn_gains", [])
+    # ...and Goatherd's twin: how many cards were trashed on the turn now
+    # ending. A COUNT, because that is all the card asks ("+1 Card per card
+    # the player to your right trashed on their last turn").
+    game["last_turn_trashes"][pid] = game["turn_ctx"].get("trashes", 0)
+    # Outpost: the 3-card clean-up draw ALWAYS applies once played; the extra
+    # turn only if the PREVIOUS turn wasn't also pid's (no 3rd turn in a row)
+    prev = game.get("last_turn_pid")
+    outpost_played = game.pop("_outpost", None) == pid
+    req = game.pop("_extra_turn_req", None)
+    requested = bool(req) and req.get("pid") == pid
+    # "no more than 2 turns in a row" — the 2023 change, shared by every
+    # extra-turn card. Outpost and Mission bought on the same turn still give
+    # ONE extra turn, and it is a Mission turn: the stricter restriction
+    # applies rather than being swallowed (recorded as ambiguity A6).
+    extra = (outpost_played or requested) and prev != pid
+    extra_no_buy = extra and requested and req.get("no_buy", False)
+    # SEIZE THE DAY (ph. 10) IS THE STATED EXCEPTION TO THAT RULE, and it is
+    # an exception rather than an ambiguity: "if you trigger Seize the Day and
+    # (for instance) Outpost on the same turn, you will get BOTH extra turns
+    # as long as you take the Seize the Day turn last. This would give you
+    # three turns in a row."
+    #
+    # So its slot is not popped when it is set — it SURVIVES until a turn end
+    # that has no other extra turn to grant, which is precisely "taken last".
+    # That falls out rather than needing an ordering prompt: taking it first
+    # would strand the Outpost turn (a third in a row, denied), so the order
+    # that gives you both is the only one a player would ever choose. Same
+    # reasoning as deviation B8 — the branch we resolve is always available
+    # and always the wanted one.
+    #
+    # It is a NORMAL turn (Mission's no-buy restriction does not travel to
+    # it), and it is once per game per player, so this can grant at most one
+    # extra turn beyond the ordinary gate.
+    if not extra and game.get("_seize") == pid:
+        game.pop("_seize", None)
+        extra, extra_no_buy = True, False
+    if outpost_played and not extra:
+        # the extra-turn ability resolved (denied) BETWEEN turns: the Outpost
+        # is spent now — mark done (dropping its parked no-op fx) so the next
+        # clean-up's all-seats sweep discards it, per official timing
+        for entry in seat["duration"]:
+            if entry["card"] == "Outpost" and not entry.get("done"):
+                entry["fx"] = []
+                entry["done"] = True
+    # The REST of the turn end is a second parked stage (ph. 9): the hand draw
+    # below may park a Star Chart pick frame, so everything after it — the
+    # Farrier/Save returns, the game-end check, the hand-off — has to sit in a
+    # continuation UNDER that frame (push-the-continuation-FIRST). The extra-
+    # turn flags travel in the frame data because their transients are popped
+    # above, exactly once.
+    push_auto(game, pid, "__cleanup", "finish",
+              data={"outpost": outpost_played, "extra": extra,
+                    "extra_no_buy": extra_no_buy})
+    # FLAG (ph. 9): "when drawing your hand, +1 Card" — the Clean-up hand draw
+    # counts one higher for the holder (5 -> 6; an Outpost hand 3 -> 4).
+    hand_n = (3 if outpost_played else 5) \
+        + (1 if holds_artifact(game, pid, "Flag") else 0)
+    final_draw(game, pid, hand_n)
+
+
+def _k_cleanup_finish(game, pid, frame, choice):
+    """End of turn, after the new hand is drawn: the end-of-turn returns, the
+    game-end check (with the Fleet round, ph. 9) and the hand-off."""
+    seat = game["seats"][pid]
+    outpost_played = frame["data"]["outpost"]
+    extra = frame["data"]["extra"]
+    extra_no_buy = frame["data"]["extra_no_buy"]
+    # "+1 Card at the end of this turn" (Farrier's overpay; Expedition) —
+    # AFTER the new hand is drawn, which is the whole point of the card: the
+    # extra cards are for NEXT turn, so a Farrier overpaid by 2 leaves you
+    # holding 7.
+    #
+    # `add_cards`, not `draw`: both producers print a PLUS and both say "at
+    # the end of THIS TURN", so Way of the Chameleon swaps them. This is the
+    # one printed-plus grant that no card's own code performs — the kernel
+    # drains the counter — so the ph.-10 sweep of the effects modules could
+    # not have reached it.
+    if game["turn_ctx"]["end_draw"]:
+        add_cards(game, game["turn_ctx"]["end_draw"], pid)
+    # Save: "put it into your hand at END OF TURN (after drawing)" — so the
+    # saved card is an EXTRA card in the new hand, not one of the five.
+    saved = [c for c in game["turn_ctx"]["end_hand"]
+             if c in seat["set_aside"]]
+    if saved:
+        take_set_aside(game, pid, saved, dest="hand")
+        _log(game, pid, "to_hand", count=len(saved), cards=list(saved),
+             private_to=[pid])
+    # An EXTRA turn (Outpost) does not add to the player's turn count — the
+    # count exists for the fewest-turns tiebreaker, and "extra turns do not add
+    # to a player's turn count, and are not used in breaking ties" (wiki Turn
+    # page; Outpost's FAQ agrees). Fleet turns are the same by their own text
+    # ("these Fleet turns are not counted for tie-breaker"). game["extra_turn"]
+    # still describes the turn now ENDING — reassigned for the next turn below.
+    fl = game["fleet"]
+    on_fleet_turn = bool(fl and fl.get("on_turn"))
+    if not game.get("extra_turn") and not on_fleet_turn:
+        seat["turns_taken"] += 1
+    game["last_turn_pid"] = pid
+    if fl is not None:
+        fl["on_turn"] = False
+    else:
+        # The ordinary game-end check — SKIPPED entirely once the Fleet round
+        # has begun: the round runs to its end whatever the piles do (nothing
+        # in it can re-empty a pile in a way that should re-arm the check, and
+        # a Fleet turn that returns cards to the Supply must not cancel the
+        # round that is already running).
+        if game["supply"].get("Province", 0) <= 0 \
+                or count_empty_piles(game) >= 3 \
+                or (game["colony"] and game["supply"].get("Colony", 1) <= 0):
+            owners = _fleet_owners(game)
+            if not owners:
+                _finish_game(game)
+                return
+            # FLEET: "the game effectively continues for one more round …
+            # only players who have bought Fleet get a regular turn in this
+            # round. The first player to get a Fleet turn is the next player
+            # after the player who last had a regular turn." Queued extra
+            # turns (the `extra` flag) still resolve first — "any extra turns
+            # that were already in queue will now be resolved".
+            order = game["players"]
+            i = order.index(pid)
+            seq = order[i + 1:] + order[:i + 1]
+            game["fleet"] = fl = {"remaining": [p for p in seq if p in owners],
+                                  "on_turn": False}
+            _log(game, None, "fleet_round", players=list(fl["remaining"]))
+    # THE ROUND IS OVER when no owner is still owed a turn AND nothing is
+    # queued behind it. The `extra` clause is what makes this UNIFORM: an
+    # extra turn generated on the LAST Fleet turn is resolved exactly like one
+    # generated on any other, which is the reading ruling ③ supports —
+    # "since the game continues, any extra turns … will now be resolved",
+    # with no distinction drawn between queued-before and triggered-during.
+    # (Recorded as ambiguity A8: ch. VII's Fleet entry has exactly three
+    # clarifications and none of them names turns triggered DURING the round.)
+    if fl is not None and not fl["remaining"] and not extra:
+        _finish_game(game)
+        return
+    order = game["players"]
+    if extra:
+        nxt = pid
+    elif fl is not None:
+        nxt = fl["remaining"].pop(0)
+        fl["on_turn"] = True
+    else:
+        nxt = order[(order.index(pid) + 1) % len(order)]
+    game["extra_turn"] = bool(extra)
+    game["turn"] = nxt
+    game["turn_number"] += 1
+    game["phase"] = "action"
+    game["actions"] = 1
+    game["buys"] = 1
+    game["coins"] = 0
+    game["potions"] = 0
+    game["turn_ctx"] = _fresh_turn_ctx()
+    game["turn_ctx"]["no_buy"] = bool(extra_no_buy)
+    _log(game, nxt, "turn_start", turn=game["turn_number"], extra=bool(extra),
+         **({"no_buy": True} if extra_no_buy else {}),
+         **({"fleet": True} if fl is not None and fl.get("on_turn")
+            and not extra else {}))
+    _arm_undo(game)
+    _start_of_turn(game, nxt)   # duration fx queue as auto frames; watchers expire
+    _maybe_auto_buy(game)       # a hand with no Action cards skips straight to buy
+
+
+def _fleet_owners(game):
+    """The players with a cube on Fleet, if it is dealt — the roster of the
+    after-game-end round."""
+    st = game["landscapes"].get("Fleet")
+    if st is None or st["kind"] != "project":
+        return []
+    return list(st["bought_by"])
+
+
+KERNEL_STAGES[("__cleanup", "sweep")] = _k_cleanup_sweep
+KERNEL_STAGES[("__cleanup", "finish")] = _k_cleanup_finish
+
+
+def _finish_game(game):
+    game["over"] = True
+    scores = score_game(game)
+    game["scores"] = scores
+    best = max(s["vp"] for s in scores.values())
+    tied = [p for p in game["players"] if scores[p]["vp"] == best]
+    if len(tied) > 1:
+        fewest = min(scores[p]["turns"] for p in tied)
+        tied = [p for p in tied if scores[p]["turns"] == fewest]
+    game["winners"] = tied
+    _log(game, None, "game_over", winners=list(tied))
+
+
+# --- the move gate -----------------------------------------------------------
+
+def apply_move(game, pid, move):
+    if game["over"]:
+        return False, "game is over"
+    if not isinstance(move, dict):
+        return False, "bad move"
+    mt = move.get("type")
+    if mt == "undo_turn":
+        # BEFORE the pending gate — an unrevealed move is undoable even with a
+        # frame open (yours: a Workshop pile pick; an opponent's: a Militia they
+        # haven't answered yet). legal_moves deliberately never offers this, so
+        # the random bot can't take it back.
+        ok, err = _undo_move(game, pid)
+        if ok:
+            _post_move(game)
+        return ok, err
+    pushed = False
+    if game["pending_pid"] is not None:
+        if pid != game["pending_pid"]:
+            return False, "not your decision"
+        if mt == "spend" and pid == game["turn"]:
+            # Coffers are spendable "at any time during your turn", INCLUDING
+            # in the middle of resolving an ability (ph. 7: Storyteller pays
+            # all of your $ for cards, so a Coffers spent while its prompt is
+            # open is a card drawn). `spendable` is still THE reader — this
+            # only lets the move past the pending gate that would otherwise
+            # refuse the move the enumerator had just offered.
+            _push_undo(game)
+            pushed = True
+            ok, err = _h_spend(game, pid, move)
+        elif mt != "decision":
+            return False, f"must resolve {game['pending_kind']} first"
+        else:
+            if pid == game["turn"]:
+                _push_undo(game)  # a reveal inside the move clears it again
+                pushed = True
+            ok, err = _resolve_decision(game, pid, move)
+    elif mt == "decision":
+        return False, "nothing to decide"
+    elif pid != game["turn"]:
+        return False, "not your turn"
+    else:
+        handler = _HANDLERS.get(mt)
+        if handler is None:
+            return False, f"unknown move: {mt}"
+        _push_undo(game)          # a reveal inside the move clears it again
+        pushed = True
+        ok, err = handler(game, pid, move)
+    if ok:
+        _drive(game)
+        if _maybe_auto_buy(game):
+            # the auto-advance can itself have consumers (Arena's start-of-Buy
+            # -phase offer), and it runs AFTER the drive that would have
+            # resolved them — so drive again rather than leave a parked frame
+            _drive(game)
+        _post_move(game)
+    elif pushed and game.get("undo_stack"):
+        game["undo_stack"].pop()   # a rejected move mutated nothing
+    return ok, err
+
+
+def _resolve_decision(game, pid, move):
+    top = game["pending"][-1]
+    ok, err = _validate_choice(top, move)
+    if not ok:
+        return False, err
+    if pid != game["turn"]:
+        # An opponent's choice (attack response, Masquerade pick, window
+        # decline) is information the turn player didn't have — no undo after.
+        _mark_revealed(game)
+    frame = _pop_frame(game)
+    _run_stage(game, frame["card"], frame["stage"], pid, frame, move)
+    return True, None
+
+
+def _validate_choice(frame, move):
+    kind = frame["kind"]
+    c = frame["constraint"]
+    if kind == "choose_cards":
+        cards = move.get("cards")
+        if not isinstance(cards, list) or not all(isinstance(x, str) for x in cards):
+            return False, "bad cards"
+        if not (c["min"] <= len(cards) <= c["max"]):
+            return False, f"pick between {c['min']} and {c['max']} cards"
+        if not _is_submultiset(cards, c["cards"]):
+            return False, "cards not available"
+        return True, None
+    if kind == "choose_option":
+        ids = move.get("ids")
+        if not isinstance(ids, list) or len(ids) != c["pick"]:
+            return False, f"pick exactly {c['pick']} option(s)"
+        valid = {o["id"] for o in c["options"]}
+        if not all(i in valid for i in ids):
+            return False, "unknown option"
+        if c.get("distinct", True) and len(set(ids)) != len(ids):
+            return False, "options must be different"
+        return True, None
+    if kind == "order_cards":
+        order = move.get("order")
+        if not isinstance(order, list) or sorted(order) != sorted(c["cards"]):
+            return False, "order must use exactly the shown cards"
+        return True, None
+    if kind == "place_in_deck":
+        pos = move.get("position")
+        if not isinstance(pos, int) or not (0 <= pos <= c["deck_len"]):
+            return False, f"position must be 0..{c['deck_len']}"
+        return True, None
+    if kind == "name_card":
+        if move.get("card") not in c["cards"]:
+            return False, "name a card in the supply"
+        return True, None
+    if kind == "choose_pile":
+        if move.get("pile") not in c["piles"]:
+            return False, "not an eligible pile"
+        return True, None
+    return False, f"unknown decision kind {kind}"
+
+
+def _is_submultiset(sub, full):
+    counts = {}
+    for x in full:
+        counts[x] = counts.get(x, 0) + 1
+    for x in sub:
+        counts[x] = counts.get(x, 0) - 1
+        if counts[x] < 0:
+            return False
+    return True
+
+
+# --- legal moves + uniform sampling ------------------------------------------
+
+def legal_moves(game, pid):
+    """Every ≥1-valid-move guarantee applies to the ACTOR; others get [].
+    Decision spaces are enumerated completely when small (≤ _ENUM_CAP), else a
+    single valid sampled fallback is returned (apply_move validates, so the UI
+    never depends on this being complete)."""
+    if game["over"]:
+        return []
+    if game["pending_pid"] is not None:
+        if pid != game["pending_pid"]:
+            return []
+        # ...plus anything spendable, which since ph. 7 includes mid-ability
+        # (Storyteller). Appended AFTER the decisions so the sampled-fallback
+        # path below still keys on there being no enumerable decision.
+        return _legal_decisions(game, pid) + _spend_moves(game, pid)
+    if pid != game["turn"]:
+        return []
+    mv = []
+    hand = game["seats"][pid]["hand"]
+    if game["phase"] == "action":
+        if game["actions"] > 0:
+            for c in sorted(set(hand)):
+                if has_type(game, c, "action"):
+                    mv.append({"type": "play_action", "card": c})
+    else:
+        if not game["turn_ctx"]["bought"]:
+            treasures = sorted({c for c in hand if has_type(game, c, "treasure")})
+            for c in treasures:
+                mv.append({"type": "play_treasure", "card": c})
+            # only when play_all would actually PLAY something — it skips the
+            # interactive MANUAL_TREASURES (War Chest/Anvil) and the
+            # Capitalism-changed Actions, so a hand holding nothing else makes
+            # it a no-op, and a bot that prefers it loops.
+            if autoplay_treasures(game, pid):
+                mv.append({"type": "play_all_treasures"})
+        # Debt blocks buying ANYTHING, so it gates both enumerations below —
+        # the handlers refuse the move, and an enumerator that disagreed would
+        # hand the bot a no-op (the play_all_treasures livelock). Note the
+        # DEBT COMPONENT of a price needs no affordability test: you never pay
+        # it, you take the tokens.
+        in_debt = debt_blocks_buying(game, pid) is not None
+        if game["buys"] > 0 and not game["turn_ctx"]["no_buy"] and not in_debt:
+            for pile in sorted(game["supply"]):
+                if game["supply"][pile] > 0 \
+                        and (cost(game, pile) <= game["coins"]
+                             or buy_pay_alt(game, pid, pile)) \
+                        and potion_cost(game, pile) <= game["potions"] \
+                        and buy_gate(game, pid, pile) is None:
+                    mv.append({"type": "buy", "card": pile})
+        # ...and the landscapes, which cost a Buy the same way but are not
+        # cards and have no pile. Their price is the PRINTED one — and they
+        # stay buyable on a Mission turn, which bans buying CARDS only.
+        if game["buys"] > 0 and not in_debt:
+            for name in sorted(game["landscapes"]):
+                if landscape_gate(game, pid, name) is None \
+                        and landscape_cost(game, name) <= game["coins"]:
+                    mv.append({"type": "buy_landscape", "name": name})
+    mv += _spend_moves(game, pid)
+    mv.append({"type": "end_phase"})
+    return mv
+
+
+def _spend_moves(game, pid):
+    """Coffers (and every later spendable counter) — legal in EITHER phase and
+    now mid-ability too, "at any time during your turn". Enumerated per amount
+    so a search or a bot can pick how much, the way it picks any other move."""
+    out = []
+    for what, have in spendable(game, pid).items():
+        for k in range(1, have + 1):
+            out.append({"type": "spend", "what": what, "n": k})
+    return out
+
+
+def _legal_decisions(game, pid):
+    frame = game["pending"][-1]
+    kind = frame["kind"]
+    c = frame["constraint"]
+    out = []
+    if kind == "choose_cards":
+        seen = set()
+        for k in range(c["min"], c["max"] + 1):
+            for combo in itertools.combinations(sorted(c["cards"]), k):
+                if combo in seen:
+                    continue
+                seen.add(combo)
+                out.append({"type": "decision", "cards": list(combo)})
+                if len(out) > _ENUM_CAP:
+                    return [_sampled_fallback(game, pid)]
+    elif kind == "choose_option":
+        ids = [o["id"] for o in c["options"]]
+        for combo in itertools.combinations(ids, c["pick"]):
+            out.append({"type": "decision", "ids": list(combo)})
+    elif kind == "order_cards":
+        seen = set()
+        for perm in itertools.permutations(c["cards"]):
+            if perm in seen:
+                continue
+            seen.add(perm)
+            out.append({"type": "decision", "order": list(perm)})
+            if len(out) > _ENUM_CAP:
+                return [_sampled_fallback(game, pid)]
+    elif kind == "place_in_deck":
+        out = [{"type": "decision", "position": p} for p in range(c["deck_len"] + 1)]
+    elif kind == "name_card":
+        out = [{"type": "decision", "card": n} for n in c["cards"]]
+    elif kind == "choose_pile":
+        out = [{"type": "decision", "pile": n} for n in c["piles"]]
+    return out or [_sampled_fallback(game, pid)]
+
+
+def _sampled_fallback(game, pid):
+    return {"type": "decision", **sample_decision(game, pid, random.Random(0))}
+
+
+def sample_decision(game, pid, rng):
+    """Uniform valid payload for the top frame. Uses the caller's rng, never the
+    game's rng_state (the AI must not consume game entropy)."""
+    frame = game["pending"][-1]
+    assert frame["pid"] == pid, "sample_decision for the wrong seat"
+    kind = frame["kind"]
+    c = frame["constraint"]
+    if kind == "choose_cards":
+        k = rng.randint(c["min"], c["max"])
+        return {"cards": rng.sample(c["cards"], k)}
+    if kind == "choose_option":
+        ids = [o["id"] for o in c["options"]]
+        return {"ids": rng.sample(ids, c["pick"])}
+    if kind == "order_cards":
+        order = list(c["cards"])
+        rng.shuffle(order)
+        return {"order": order}
+    if kind == "place_in_deck":
+        return {"position": rng.randint(0, c["deck_len"])}
+    if kind == "name_card":
+        return {"card": rng.choice(c["cards"])}
+    if kind == "choose_pile":
+        return {"pile": rng.choice(c["piles"])}
+    raise ValueError(f"unknown decision kind {kind}")
+
+
+# --- scoring -----------------------------------------------------------------
+
+def owned_cards(game, pid):
+    """Every card pid owns, across every zone — the scoring census, and also
+    what a deck-composition bot reads (bot.py's Big Money counts its Silvers
+    with this)."""
+    s = game["seats"][pid]
+    owned = s["deck"] + s["hand"] + s["discard"] + s["in_play"] + s["aside"]
+    # Seaside zones + mats (migrate guarantees these on every loaded save)
+    owned += s["dur_aside"] + s["island"] + s["village_mat"]
+    owned += s["set_aside"] + s["cleanup_aside"]   # C&G set-asides
+    # ph. 8: still yours until Clean-up puts it back on its pile (Encampment)
+    owned += s.get("cleanup_return", [])
+    # a card on the Tavern mat is OWNED — it is still yours, it still scores
+    # (Distant Lands scores ON the mat), and the bots' deck reads must see it
+    owned += s["tavern"]
+    # ...and so is a card in EXILE (ph. 10): "Cards on your Exile mat are
+    # YOURS" — they score, and a conservation census that missed them would
+    # report every Exile as a lost card
+    owned += s["exile"]
+    for entry in s["duration"]:
+        owned.append(entry["card"])
+        owned += entry.get("riders", [])
+    return owned
+
+
+def _vp_of(game, pid):
+    owned = owned_cards(game, pid)
+    n = len(owned)
+    # Distant Lands is the first card whose VP depends on WHERE it is: "worth
+    # 4 VP if on your Tavern mat at the end of the game (otherwise worth 0)".
+    # Counted here rather than in the loop below because the loop only sees a
+    # flat list of names — a card's location is not recoverable from it.
+    on_mat = {}
+    for c in game["seats"][pid]["tavern"]:
+        on_mat[c] = on_mat.get(c, 0) + 1
+    duchies = owned.count("Duchy")
+    golds = owned.count("Gold")
+    silvers = owned.count("Silver")
+    actions = sum(1 for c in owned if has_type(game, c, "action"))
+    # "Worth 1 VP per Castle you have" — Castle is a TYPE, and both counting
+    # Castles count THEMSELVES (a lone Humble Castle is worth 1)
+    castles = sum(1 for c in owned if has_type(game, c, "castle"))
+    # "differently named cards you have" (Fairgrounds) — the whole deck, by name
+    distinct = len(set(owned))
+    total = 0
+    for c in owned:
+        v = CARDS[c]["vp"]
+        if v == "gardens":
+            total += n // 10
+        elif v == "duke":
+            total += duchies
+        elif v == "fairgrounds":
+            total += 2 * (distinct // 5)
+        elif v == "demesne":
+            total += golds
+        elif v == "vineyard":
+            total += actions // 3
+        elif v == "feodum":
+            total += silvers // 3
+        elif v == "humble_castle":
+            total += castles
+        elif v == "kings_castle":
+            total += 2 * castles
+        elif v == "distant_lands":
+            if on_mat.get(c):
+                on_mat[c] -= 1          # this copy is one of the ones on the mat
+                total += 4
+        else:
+            total += v
+    return total
+
+
+def _total_vp(game, pid):
+    return (_vp_of(game, pid) + game["vp_tokens"].get(pid, 0)
+            + landscape_scoring(game, pid))
+
+
+def _post_move(game):
+    game["vp"] = {p: _total_vp(game, p) for p in game["players"]}
+
+
+def score_game(game):
+    return {p: {"vp": _total_vp(game, p), "turns": game["seats"][p]["turns_taken"]}
+            for p in game["players"]}
+
+
+def is_over(game):
+    return bool(game["over"])
+
+
+def winners(game):
+    return list(game["winners"]) if game["over"] else []
+
+
+# --- per-recipient redaction -------------------------------------------------
+
+def player_view(game, viewer):
+    """Build (not filter) the wire view. Deck order NEVER ships; hands only to
+    their owner; discard = top + count; the raw pending stack (frame data!) is
+    replaced by pending_view; rng_state/seed popped; the undo snapshots (every
+    hidden zone!) never leave the server — only their COUNT ships (undo_depth),
+    which with turn_revealed drives the client's Undo button. Everything
+    reveals at over.
+
+    `landscapes`, `debt`, every seat's `tavern`, every seat's `exile` (ph. 10 —
+    ch. II lists "all cards you have set aside face up (including on any player
+    mats)" as open information, and the Exile mat is face up) and every seat's
+    `tokens` ship AS-IS and that is correct, not an omission: landscapes sit
+    face up on the table, Debt tokens sit in front of you where everyone can
+    count them (and everyone must, since they stop you buying), mat contents
+    are face up (p28) and tokens are public markers. Ph. 9 adds `villagers`
+    (mat tokens are open
+    information like Coffers), `artifacts` (they sit in front of their holder)
+    and `fleet` (the round roster is table state) to the same list — including
+    each project's `bought_by` cube record inside `landscapes`. They are
+    listed here because "build, not filter" means a new key's publicity is a
+    decision someone made, and `test_view_wire` asserts them against the
+    SERIALIZED payload of a real game."""
+    g = copy.deepcopy({k: v for k, v in game.items() if k != "undo_stack"})
+    g["undo_depth"] = len(game.get("undo_stack") or [])
+    g.pop("rng_state", None)
+    g.pop("seed", None)
+    g.pop("_cur_dur", None)
+    g.pop("_outpost", None)
+    g.pop("_actor", None)
+    g.pop("_shuffle_pick", None)   # never at rest; defensive like the others
+    # watchers are public table state, but their data can reference hidden
+    # resume info — ship only the visible identity
+    g["watchers"] = [{"event": w["event"], "owner": w["owner"], "card": w["card"]}
+                     for w in g["watchers"]]
+    # EFFECTIVE prices, computed by THE cost function — the client must never
+    # re-derive them. It used to subtract only Bridge, so every other cost rule
+    # (Quarry's turn discount, Peddler's dynamic self-cost, and every future
+    # one) was invisible: the pile showed its printed price, never lit up as
+    # affordable, and the click handler refused to send the buy.
+    g["costs"] = {c: cost(game, c) for c in game["piles"]}
+    # the POTION half of each price (Alchemy). Shipped separately rather
+    # than folded into `costs` so the existing numeric field keeps its
+    # meaning for every client — a cached bundle still prices $ correctly,
+    # it just does not draw the Potion. Only non-zero entries ship.
+    g["potion_costs"] = {c: potion_cost(game, c) for c in game["piles"]
+                         if potion_cost(game, c)}
+    # ...and the DEBT half (Empires), the same shape for the same reason. An
+    # Empires board is unreadable without it: Engineer's whole price is {4D},
+    # so `costs` alone shows it as free.
+    g["debt_costs"] = {c: debt_cost(game, c) for c in game["piles"]
+                       if debt_cost(game, c)}
+    # What the VIEWER may spend right now, straight from THE reader. Shipped
+    # rather than re-derived client-side: the rule moved in ph. 7 (Coffers are
+    # spendable mid-ability now, for Storyteller), and a client carrying its
+    # own copy of it is the Peddler-cost bug's exact shape.
+    g["spendable"] = spendable(game, viewer) if viewer else {}
+    # ...and the exact list Play-all-treasures would play, from ITS reader —
+    # membership went state-dependent in ph. 9 (a Capitalism-changed Action
+    # must not be auto-played), so the static /catalog manual-treasures set no
+    # longer decides the button by itself.
+    g["autoplay"] = (autoplay_treasures(game, viewer)
+                     if viewer in game["seats"] else [])
+    # Piles ship as face + count, never `contents`: an ordered pile's order
+    # below the top is HIDDEN (Ruins and Knights are shuffled), and "an honest
+    # client ignores it" is not security — the repo has paid for that three
+    # times. `attach` is genuinely public table state (tokens, Traits) and
+    # `members` is static setup data the client has no use for.
+    g["piles"] = {n: {"count": pile_count(game, n), "supply": p["supply"],
+                      "face": p["face"], "ordered": p["contents"] is not None,
+                      "attach": copy.deepcopy(p["attach"])}
+                  for n, p in game["piles"].items()}
+    pend = g.pop("pending")
+    if pend:
+        top = pend[-1]
+        if viewer == top["pid"]:
+            g["pending_view"] = {"kind": top["kind"], "card": top["card"],
+                                 "constraint": top["constraint"]}
+        else:
+            g["pending_view"] = {"card": top["card"], "waiting_on": top["pid"]}
+    else:
+        g["pending_view"] = None
+    over = g["over"]
+    for p, seat in g["seats"].items():
+        seat["deck_count"] = len(seat["deck"])
+        seat["hand_count"] = len(seat["hand"])
+        seat["aside_count"] = len(seat["aside"])
+        seat["discard_view"] = {"top": seat["discard"][-1] if seat["discard"] else None,
+                                "count": len(seat["discard"])}
+        # Seaside zones: durations + island are open table state; the duration
+        # set-aside (Haven) and Native Village mat are owner-only until over
+        seat["duration_view"] = [{"card": e["card"], "riders": list(e.get("riders", []))}
+                                 for e in seat["duration"]]
+        seat["island"] = list(seat["island"])
+        seat["dur_aside_count"] = len(seat["dur_aside"])
+        seat["village_count"] = len(seat["village_mat"])
+        # C&G: a set-aside card is face down in front of you until you play it
+        seat["set_aside_count"] = len(seat["set_aside"])
+        seat.pop("duration", None)
+        seat.pop("dur_setup", None)
+        seat.pop("start_fx", None)       # holds resume data, like watcher data
+        if not over:
+            seat.pop("deck")
+            seat.pop("discard")
+            seat.pop("aside")
+            if p != viewer:
+                seat.pop("hand")
+                seat.pop("dur_aside", None)
+                seat.pop("village_mat", None)
+                seat.pop("set_aside", None)
+    log = []
+    for e in g["log"]:
+        if "private_to" in e and viewer not in e["private_to"]:
+            continue
+        # draw / to_hand entries carry card names — owner-only until game over
+        # (per-field redaction; the count stays public)
+        if not over and e.get("event") in ("draw", "to_hand") \
+                and e.get("pid") != viewer and "cards" in e:
+            e = {k: v for k, v in e.items() if k != "cards"}
+        log.append(e)
+    g["log"] = log
+    return g
+
+
+# --- setup -------------------------------------------------------------------
+
+_REQUIRE_TRIES = 500
+
+
+def deal_kingdom(pool, requires, rng):
+    """The random 10, honouring create-time REQUIREMENTS (`cards.REQUIREMENTS`
+    keys — "give me a village / a +Buy / a drawer").
+
+    REJECTION SAMPLING, deliberately: deal an ordinary random 10 and re-deal
+    until it satisfies every requirement. The result is the NORMAL kingdom
+    distribution conditioned on "has at least one of each", which is exactly
+    what the option promises — it deletes the boards with none of a checked
+    bonus and changes nothing else. In particular it does NOT reserve a slot
+    per requirement: ticking all three still yields boards where one Worker's
+    Village covers two of them, or where the ordinary fill already supplied a
+    Smithy, at the rates those boards occur naturally.
+
+    CONSTRUCTING the board instead (force one qualifying card per requirement,
+    fill the other seven at random) is the obvious implementation and it is
+    wrong for this: it guarantees three DIFFERENT qualifying cards whenever all
+    three are ticked, which over-represents +Action/+Buy/+Card cards badly —
+    measured, it pushed the mean number of villages from 1.58 to 1.95 and cut
+    exactly-one-village boards from 57% to 35%. That was the first
+    implementation; this replaced it.
+
+    With nothing required this is EXACTLY `rng.sample(pool, 10)`: the rng call
+    sequence is unchanged, so every seed that already exists still deals the
+    same kingdom (the determinism soak and every forced-kingdom test depend on
+    that). Requirements are read in `REQUIREMENT_ORDER`, never client order, so
+    the deal stays reproducible from (seed, options) alone."""
+    reqs = [r for r in REQUIREMENT_ORDER if r in set(requires or ())]
+    kingdom = rng.sample(pool, 10)
+    if not reqs:
+        return kingdom
+    # An unsatisfiable pool fails HERE with a usable message rather than after
+    # 500 doomed re-deals. (No shipped expansion can hit this — each one alone
+    # satisfies all three — but the option must not depend on that staying true.)
+    for req in reqs:
+        if not any(cards_grant(c, req) for c in pool):
+            raise ValueError(
+                f"no card in the chosen expansions gives {REQUIREMENTS[req]['label']}")
+    for _ in range(_REQUIRE_TRIES):
+        if all(any(cards_grant(c, req) for c in kingdom) for req in reqs):
+            return kingdom
+        kingdom = rng.sample(pool, 10)
+    # Every requirement is individually satisfiable, so reaching here needs ~500
+    # unlucky draws in a row; the measured accept rate is ~0.55 on the full pool
+    # and ~0.46 on the smallest (Base alone, all three ticked).
+    raise ValueError("could not deal a kingdom meeting the chosen requirements")
+
+
+_LANDSCAPE_CAP = 2
+_WAY_CAP = 1
+
+
+def deal_landscapes(kingdom_pool, landscape_pool, rng):
+    """The landscapes this game uses, by the official setup method (p11):
+
+        "shuffle them in with the Randomizer cards and use the first landscape
+         cards that show up before hitting 10 Kingdom cards. No more than two
+         landscape cards per game, and no more than one of them a Way."
+
+    Simulated literally rather than approximated — a deck of the enabled sets'
+    Kingdom randomizers plus their landscape randomizers, walked until the 10th
+    Kingdom card. That is why the *sizes* of both pools matter: a set with many
+    landscapes and few Kingdom cards really does put more of them on the table,
+    and a proportion-style shortcut would quietly lose that.
+
+    CONSUMES NO ENTROPY WHEN THERE ARE NO LANDSCAPES, which is what makes this
+    phase provably deal-preserving: every set shipped today has an empty pool,
+    so the rng call sequence of every existing seed is untouched (pinned by the
+    determinism soak and by test_landscapes' no-op proof)."""
+    if not landscape_pool:
+        return []
+    deck = ["" for _ in kingdom_pool] + list(landscape_pool)
+    rng.shuffle(deck)
+    out, kingdom_seen, ways = [], 0, 0
+    for entry in deck:
+        if not entry:
+            kingdom_seen += 1
+            if kingdom_seen >= 10:
+                break
+            continue
+        if cards_landscape_kind(entry) == "way" and ways >= _WAY_CAP:
+            continue
+        out.append(entry)
+        if cards_landscape_kind(entry) == "way":
+            ways += 1
+        if len(out) >= _LANDSCAPE_CAP:
+            break
+    return out
+
+
+def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
+             requires=None, landscapes=None):
+    """players in seat/turn order (the caller shuffles seats); expansions a
+    non-empty subset of KINGDOM's keys; kingdom overrides the random 10 (tests,
+    forced-kingdom soaks) and, being an explicit board, ignores `requires`;
+    requires a subset of cards.REQUIREMENTS naming bonuses the dealt kingdom
+    must contain at least one of; landscapes overrides the dealt Events/
+    Projects/... the way `kingdom` overrides the ten (the forced-board test
+    seam — every landscape pool is empty until ph. 7, so nothing else can put
+    one on the table)."""
+    players = list(player_ids)
+    if not 2 <= len(players) <= 4:
+        raise ValueError("dontminion needs 2-4 players")
+    exps = sorted(set(expansions or []))
+    if not exps or any(e not in KINGDOM for e in exps):
+        raise ValueError(f"expansions must be a non-empty subset of {sorted(KINGDOM)}")
+    rng = random.Random(seed)
+    kingdom_pool = sorted({c for e in exps for c in KINGDOM[e]})
+    if kingdom is not None:
+        kingdom = list(kingdom)
+        # an entry may be a PILE name rather than a card (Knights) — see PILES
+        bad = [c for c in kingdom
+               if c not in PILES and (c not in CARDS or not CARDS[c]["kingdom"])]
+        if bad:
+            raise ValueError(f"unknown kingdom cards: {bad}")
+    else:
+        bad_req = sorted(set(requires or ()) - set(REQUIREMENTS))
+        if bad_req:
+            raise ValueError(f"unknown kingdom requirements: {bad_req}")
+        if len(kingdom_pool) < 10:
+            raise ValueError("not enough kingdom cards in the enabled expansions")
+        kingdom = sorted(deal_kingdom(kingdom_pool, requires, rng))
+    # LANDSCAPES (ph. 6H) — dealt from the same randomizer shuffle as the ten,
+    # so this sits directly after the kingdom deal. It draws NOTHING from the
+    # rng while every pool is empty, which is what keeps every existing seed's
+    # board byte-identical.
+    if landscapes is not None:
+        landscapes = list(landscapes)
+        bad_ls = [x for x in landscapes if x not in LANDSCAPES]
+        if bad_ls:
+            raise ValueError(f"unknown landscapes: {bad_ls}")
+    else:
+        landscapes = deal_landscapes(kingdom_pool,
+                                     cards_landscape_pool(exps), rng)
+    n = len(players)
+    supply = {c: pile_size(c, n) for c in BASIC_CARDS}
+    for c in kingdom:
+        if c in PILES:
+            continue          # ORDERED piles are built below, from `contents`
+        supply[c] = pile_size(c, n)
+    # Prosperity: Platinum/Colony join the Supply with probability equal to
+    # the Prosperity proportion of the kingdom (official randomizer rule);
+    # both piles or neither. Colony-empty becomes a game-end condition.
+    prosperity_n = sum(1 for c in kingdom if cards_expansion(c) == "prosperity")
+    colony = prosperity_n > 0 and rng.random() < prosperity_n / 10
+    # Dark Ages, the same probabilistic shape (SPECIAL SETUP § I): Shelters
+    # replace the 3 starting Estates with probability equal to the Dark Ages
+    # proportion of the kingdom. A SEPARATE draw from the Colony one —
+    # "it should not be the same card you check for Colonies".
+    darkages_n = sum(1 for c in kingdom if cards_expansion(c) == "darkages")
+    shelters = darkages_n > 0 and rng.random() < darkages_n / 10
+    if colony:
+        supply["Platinum"] = pile_size("Platinum", n)
+        supply["Colony"] = pile_size("Colony", n)
+    # Charlatan's game-wide rule: Curse is also a Treasure worth $1
+    curse_is_treasure = "Charlatan" in kingdom
+    # Cornucopia & Guilds SPECIAL SETUP (compendium § I). Both extra piles are
+    # drawn from the kingdom cards this game did NOT deal, so they can only
+    # come from the expansions in play; with none eligible we simply play
+    # without one (a legal board — Young Witch just attacks unblockably, and
+    # Ferryman gains nothing), rather than re-dealing the whole kingdom.
+    # A Potion is PART of a card's cost, so "$2 or $3" / "$3 or $4" means those
+    # coin amounts with NO Potion component — a {$3,P} card does not cost $3, so
+    # both selections exclude every Potion-costed card.
+    bane = ferryman_pile = None
+    # ORDERED piles (Knights) are excluded as candidates: both selections build
+    # an ordinary pile out of the chosen name, which cannot represent a
+    # shuffled one. Nothing is lost today — the only such pile costs $5, which
+    # neither selection can reach — and a future one gets a deliberate decision
+    # rather than a silently malformed pile.
+    unused = sorted({c for e in exps for c in KINGDOM[e] if c in CARDS}
+                    - set(kingdom))
+    if "Young Witch" in kingdom:
+        # "an extra Kingdom card pile costing $2 or $3, added TO the Supply"
+        pick = [c for c in unused
+                if cards_printed_cost(c) in (2, 3) and not cards_potion(c)]
+        if pick:
+            bane = rng.choice(pick)
+            supply[bane] = pile_size(bane, n)
+            unused.remove(bane)
+    if "Ferryman" in kingdom:
+        # "an unused Kingdom card pile costing $3 or $4, OUTSIDE the Supply"
+        pick = [c for c in unused
+                if cards_printed_cost(c) in (3, 4) and not cards_potion(c)]
+        if pick:
+            ferryman_pile = rng.choice(pick)
+            unused.remove(ferryman_pile)
+    # Alchemy: "if any Kingdom card has a Potion in its cost, include the 16
+    # Potion cards in the Supply" — a setup rule, not a randomiser roll. The
+    # extra Cornucopia piles are never Potion-costed (filtered above), so the
+    # dealt kingdom is the whole test.
+    if any(cards_potion(c) for c in kingdom if c in CARDS):
+        supply["Potion"] = pile_size("Potion", n)
+    # Dark Ages SPECIAL SETUP, part 2 — the shuffled piles. Their contents are
+    # drawn HERE, from the setup rng, so the whole board is a function of the
+    # seed; the piles themselves are added once the game dict exists.
+    #
+    # "If any Kingdom card has the type Looter, include a Ruins pile in the
+    # Supply. Shuffle the 50 Ruins cards, and from those draw and include the
+    # same number of Ruins as Curses." Only the top card is ever visible, which
+    # is exactly what an ordered pile is (ph. 3H).
+    # "If these extra cards have a special setup rule, do that setup" — a Bane
+    # or a Ferryman pile IS in the game, so a Hermit picked as the Bane brings
+    # the Madman pile with it and a Death Cart brings the Ruins.
+    in_play_cards = [c for c in kingdom + [bane, ferryman_pile]
+                     if c is not None and c in CARDS]
+    ruins_pile = knights_pile = None
+    if any("looter" in CARDS[c]["types"] for c in in_play_cards):
+        deck = [r for r in RUINS for _ in range(RUINS_EACH)]
+        rng.shuffle(deck)
+        ruins_pile = deck[:pile_size("Curse", n)]
+    if "Knights" in kingdom:
+        knights_pile = list(KNIGHTS)
+        rng.shuffle(knights_pile)
+    game = {
+        "game": "dontminion",
+        "players": players,
+        "names": dict(names or {p: p for p in players}),
+        "expansions": exps,
+        "kingdom": kingdom,
+        # `supply` is the count index over the BUYABLE piles (unchanged);
+        # `nonsupply` the same shape for piles outside the Supply; `piles` the
+        # per-pile model that says which index holds a pile and what it shows.
+        # See THE PILE MODEL above.
+        "supply": supply,
+        "nonsupply": {},
+        "piles": {c: _plain_pile(c) for c in supply},
+        # LANDSCAPES: name -> {"kind", + the per-landscape state the kernel
+        # reads}. `bought_turn`/`bought_by` are the once-per-turn / once-per-
+        # game gates (p32) and are written unconditionally at setup rather
+        # than lazily, so `landscape_gate` never needs a defensive .get().
+        "landscapes": {name: {"kind": LANDSCAPES[name]["kind"],
+                              "bought_turn": None, "bought_by": []}
+                       for name in landscapes},
+        "trash": [],
+        "seats": {},
+        "turn": players[0],
+        "turn_number": 1,
+        "phase": "action",
+        "actions": 1,
+        "buys": 1,
+        "coins": 0,
+        "potions": 0,              # the Potion half of the money pool (Alchemy)
+        "turn_ctx": _fresh_turn_ctx(),
+        "pending": [],
+        "pending_pid": None,
+        "pending_kind": None,
+        "schema": SCHEMA,
+        "watchers": [],            # cross-player triggers (Monkey/Corsair/Blockade)
+        "last_turn_pid": None,     # who took the previous turn (Outpost's gate)
+        "last_turn_gains": {},     # pid -> cards gained on their last own turn (Smugglers)
+        "extra_turn": False,       # the CURRENT turn is an Outpost extra turn
+        "colony": colony,          # Platinum/Colony game (Prosperity setup rule)
+        "shelters": shelters,      # Shelter starting decks (Dark Ages setup rule)
+        "curse_is_treasure": curse_is_treasure,   # Charlatan's game-wide rule
+        # Cornucopia & Guilds
+        "coffers": {p: 0 for p in players},
+        "bane": bane,                     # the Young Witch pile (IS in the Supply)
+        "ferryman_pile": ferryman_pile,   # Ferryman's pile (is NOT in the Supply)
+        "footpad_draw": "Footpad" in kingdom,     # its game-wide when-gain rule
+        "vp_tokens": {p: 0 for p in players},
+        # Empires (ph. 7H): Debt tokens, public, per player. Nothing on any
+        # board today can give you one — the seam ships before its consumers.
+        "debt": {p: 0 for p in players},
+        # Renaissance (ph. 9): the Villagers half of the Coffers/Villagers
+        # mat; the Artifacts this game keeps available ("If the following
+        # cards are in the game, keep these Artifact cards available" — keyed
+        # on the granting card being IN THE GAME, so a Bane or Ferryman
+        # Border Guard brings the Lantern and Horn); and the Fleet round,
+        # None until the game-end check trips with a cube on Fleet.
+        "villagers": {p: 0 for p in players},
+        "artifacts": {a: None for a in cards_artifacts_for(in_play_cards)},
+        "fleet": None,
+        # Menagerie (ph. 10): how many cards each player trashed on their last
+        # completed turn (Goatherd), and Way of the Mouse's set-aside card.
+        "last_turn_trashes": {},
+        "mouse_card": None,
+        "vp": {},
+        "log": [],
+        "log_depth": 0,
+        "over": False,
+        "winners": [],
+        "scores": {},
+        "seed": seed,
+        "rng_state": None,
+    }
+    _save_rng(game, rng)
+    # the non-Supply piles this set brings, all riding ph. 3H's pile model
+    if ferryman_pile:
+        add_pile(game, ferryman_pile, count=pile_size(ferryman_pile, n))
+    if "Joust" in kingdom:
+        # "a pile of the 6 different Rewards outside the Supply. In a 2-player
+        # game, use one of each, otherwise two of each." Modelled as six piles
+        # rather than one ordered pile: every Reward is face up and Joust gains
+        # ANY of them, so there is no top card and no hidden order.
+        for r in REWARDS:
+            add_pile(game, r, count=1 if n == 2 else 2)
+    # Dark Ages: the two shuffled SUPPLY piles (only their top card is ever
+    # visible — the wire never ships `contents`), then the three piles that sit
+    # OUTSIDE the Supply, so "gain a card from the Supply" excludes them by
+    # construction rather than by anyone remembering to check.
+    if ruins_pile:
+        add_pile(game, "Ruins", contents=ruins_pile, supply=True, members=RUINS)
+    if knights_pile:
+        add_pile(game, "Knights", contents=knights_pile, supply=True, members=KNIGHTS)
+    # Empires: the five SPLIT piles and Castles. Ordered piles like Ruins and
+    # Knights, but their order is PRINTED rather than shuffled — "put the five
+    # cheaper cards on top", "sort them by cost with the cheapest card on top"
+    # — so they draw no entropy and can be built from the kingdom alone.
+    for name in kingdom:
+        if name in EMPIRES_SPLITS:
+            cheap, dear = EMPIRES_SPLITS[name]
+            add_pile(game, name, supply=True, members=[cheap, dear],
+                     contents=[cheap] * SPLIT_EACH + [dear] * SPLIT_EACH)
+        elif name == "Castles":
+            # "In a 2-player game, use one of each of the 8 unique cards"
+            each = 1 if n == 2 else 2
+            add_pile(game, name, supply=True, members=CASTLES,
+                     contents=[c for c in CASTLES for _ in range(each)])
+    # WAY OF THE MOUSE (ph. 10): "set aside an unused Action Kingdom card
+    # costing $2 or $3. Players may play that card using this Way." The 2025
+    # errata adds NON-DURATION, which ch. I's setup section was never updated
+    # for — the card and ch. VII win. Drawn from the kingdom cards this game
+    # did not deal (the Bane/Ferryman shape), and it brings its own setup rule
+    # with it, which is why it is chosen before LANDSCAPE_SETUP runs.
+    #
+    # ⚠ IT IS ALSO WHY THE PICK SITS ABOVE THE SETUP BLOCKS BELOW rather than
+    # under them. Ch. I ends the Menagerie setup paragraph with "*if this
+    # Action card has a special setup rule, do that setup*", and the Mouse card
+    # is BY DEFINITION not in the kingdom, so `in_play_cards` cannot see it: a
+    # Border Guard Mouse card kept no Lantern or Horn (its play ability then
+    # silently took nothing), and an Urchin/Hermit/Page/Peasant one built no
+    # Mercenary/Madman/Traveller pile — the Bane/Ferryman clause four lines up
+    # says exactly this for its own extra piles. Found by the ph.-10 cross-set
+    # batch. Nothing between here and the old site consumes the rng, so every
+    # existing seed still deals the same board.
+    if "Way of the Mouse" in game["landscapes"]:
+        pick = [c for c in unused
+                if cards_printed_cost(c) in (2, 3) and not cards_potion(c)
+                and "action" in CARDS[c]["types"]
+                and "duration" not in CARDS[c]["types"]]
+        if pick:
+            game["mouse_card"] = rng.choice(pick)
+            _save_rng(game, rng)
+            in_play_cards = in_play_cards + [game["mouse_card"]]
+            # the artifacts index was built from the kingdom alone, above
+            for _art in cards_artifacts_for([game["mouse_card"]]):
+                game["artifacts"].setdefault(_art, None)
+    # Adventures: "if Page is in the Supply, add the Treasure Hunter, Warrior,
+    # Hero and Champion piles (5 each)" — the Traveller chain, outside the
+    # Supply, so a Workshop can never reach one and only an exchange can.
+    for head in ("Page", "Peasant"):
+        if head in in_play_cards:
+            for up in cards_traveller_chain(head):
+                add_pile(game, up, count=TRAVELLER_PILE)
+    if "Hermit" in in_play_cards:
+        add_pile(game, "Madman", count=10)
+    if "Urchin" in in_play_cards:
+        add_pile(game, "Mercenary", count=10)
+    if any(c in in_play_cards for c in ("Bandit Camp", "Marauder", "Pillage")):
+        add_pile(game, "Spoils", count=15)
+    # MENAGERIE (ph. 10): "if any cards referring to Horses are used, include
+    # the Horse pile (30 cards) OUTSIDE the Supply" — so it is never buyable
+    # and never counts toward the three-empty-piles end, both free from ph.
+    # 3H's non-Supply index.
+    #
+    # **"CARDS" HERE MEANS EVERY CARD IN THE GAME, NOT JUST THE SUPPLY.** Four
+    # Events (Bargain, Demand, Ride, Stampede) gain Horses and no kingdom card
+    # need be a producer for one of them to be dealt; and the Mouse card is a
+    # single set-aside card that is not in any pile, yet Sleigh ($2) and Scrap
+    # ($3) are both eligible picks and both say Horse. Reading the Supply alone
+    # left all three shapes gaining from a pile that was never built — which is
+    # why the Mouse pick moved ABOVE this clause rather than below it.
+    _horse_users = list(in_play_cards) + list(game["landscapes"])
+    if game["mouse_card"]:
+        _horse_users.append(game["mouse_card"])
+    if any(cards_uses_horses(c) for c in _horse_users):
+        add_pile(game, "Horse", count=HORSE_PILE)
+    # LANDSCAPE SETUP (ph. 7H): `effects.LANDSCAPE_SETUP = {name: fn(game, rng)}`
+    # — a landscape whose setup needs the BOARD (Obelisk picks a random Action
+    # Supply pile; Tax puts a Debt token on every pile; Aqueduct puts 8 VP on
+    # the Gold pile). Ordered here on purpose: after every pile exists, before
+    # the opening deal. The rng is re-saved only when a setup actually ran, so
+    # a board with no such landscape draws the same starting hands as ever.
+    from . import effects
+    _ls_setup = getattr(effects, "LANDSCAPE_SETUP", {})
+    if any(name in _ls_setup for name in game["landscapes"]):
+        for name in game["landscapes"]:
+            if name in _ls_setup:
+                _ls_setup[name](game, rng)
+        _save_rng(game, rng)
+    for pid in players:
+        game["seats"][pid] = {"deck": [], "hand": [], "discard": [],
+                              "in_play": [], "aside": [], "turns_taken": 0,
+                              # Seaside zones: persistent duration entries, their
+                              # face-down set-asides (Haven/Blockade), and mats
+                              "duration": [], "dur_aside": [],
+                              "island": [], "village_mat": [],
+                              # C&G: Farmhands' set-aside + its start-of-turn play
+                              "set_aside": [], "start_fx": [],
+                              "cleanup_aside": [],
+                              # ph. 8: back to its PILE at Clean-up (Encampment)
+                              "cleanup_return": [],
+                              # ph. 6H: the Tavern mat (public) + this seat's
+                              # Adventures tokens (-1 Card, -$1, Journey)
+                              "tavern": [], "tokens": {},
+                              # ph. 10: the EXILE mat (public, and OWNED —
+                              # "cards on your Exile mat are yours")
+                              "exile": []}
+        # "If Shelters are used, each player starts with 3 Shelters — a Hovel, a
+        # Necropolis, and an Overgrown Estate — instead of the 3 Estates. (Don't
+        # include those Estates in the game.)" The Estate PILE is untouched: it
+        # is the players' three copies that are replaced, and Shelters belong to
+        # no pile at all.
+        start = ["Copper"] * 7 + (list(SHELTERS) if shelters else ["Estate"] * 3)
+        r = _make_rng(game)
+        r.shuffle(start)
+        _save_rng(game, r)
+        game["seats"][pid]["deck"] = start
+        draw(game, pid, 5)
+    if "Baker" in kingdom:
+        # "If Baker is in the game, each player starts with one token on their
+        # Coffers mat" — set directly, not via add_coffers, which would log a
+        # gain for a player before the game has begun
+        game["coffers"] = {p: 1 for p in players}
+    _log(game, players[0], "turn_start", turn=1)
+    _post_move(game)
+    # The setup draws marked "revealed" — arm the FIRST turn's undo cleanly.
+    _arm_undo(game)
+    return game

@@ -1,0 +1,78 @@
+[package]
+name = "dissonance-core"
+version = "0.1.0"
+edition = "2021"
+
+# Deliberately dependency-free in the NATIVE default build: own RNG, own thread
+# pool, builds offline, and the hot loop holds nothing we can't inspect. The two
+# entries below are both opt-in — `bridge` for the wire reader's own tests, and
+# the wasm32 block for in-browser serving, which needs a JSON boundary and
+# wasm-bindgen by construction.
+[dependencies]
+serde_json = { version = "1", optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+serde_json = "1"
+
+[features]
+# Reads `engine.view_for`'s payload back into a `View` (src/wire.rs) and tests it
+# natively. The wasm build gets the same module unconditionally.
+bridge = ["dep:serde_json"]
+
+# Flip the parity: ODD-numbered tricks score +2 and EVEN ones -1. That is 7
+# positive tricks against 6, so the pool widens from +5 to +8 and the ceiling
+# from 12 to 14 -- and trick 1 becomes a trick you WANT, which should reverse
+# the sign of the opening-lead advantage.
+odd-positive = []
+
+# Deck width. Both players always hold 13, so a wider deck changes ONLY how
+# many cards nobody was dealt: 6 (default, 32 cards) / 2 / 10 / 14. That count
+# is the game's entire permanent hidden-information budget. Mutually exclusive —
+# the highest one set wins, so a stray `--all-features` picks rank10 rather
+# than miscompiling. `rank7` is the original 28-card game; `rank8` is now a
+# no-op kept so older sweep scripts still build.
+rank7 = []
+rank8 = []
+rank9 = []
+rank10 = []
+
+# No `panic = "abort"` here, deliberately. The lib is rlib + cdylib, so a
+# `cargo test --release` build graph holds the same lib twice -- the cdylib
+# honouring an abort strategy and the test targets, which cargo forces to
+# unwind -- and from a clean target/ the two flavours collide (cargo warns
+# about the shared libdissonance.so filename): the first run dies with
+# "requires panic strategy `abort`" and a re-run, finding cached unwind
+# artifacts, passes. A gate that fails once per fresh checkout is how this
+# crate's engine suite silently stopped compiling for a whole release. The
+# setting bought nothing back: wasm32-unknown-unknown aborts on panic
+# regardless. Measured 2026-08-07: the release cdylib is the same 141,046
+# bytes with and without it, code sections identical -- the only delta is the
+# crate-hash string inside wasm-bindgen's custom metadata sections, which
+# wasm-bindgen strips when it emits the shipped `_bg.wasm`.
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[lib]
+name = "dissonance"
+path = "src/lib.rs"
+# cdylib is what wasm-pack links; rlib keeps the bins and tests building.
+crate-type = ["rlib", "cdylib"]
+
+# WASM-OPT IS OFF, AND IT IS OFF BECAUSE IT SHIPPED A BROKEN ARTIFACT.
+#
+# wasm-pack runs `wasm-opt` when it finds one on PATH. Binaryen 108 -- what apt
+# installs on this box -- produces a binary that fails at `init()`, and the
+# client-AI path degrades from that SILENTLY: the workers never load, every
+# decision falls through to the server bot, and the room plays on at full speed
+# still labelled Hard. It was caught by `npm run screens` and by nothing else.
+#
+# This was previously handled by REMEMBERING to ship the plain wasm-bindgen
+# output, which is not a mechanism. Turning it off here makes the safe build the
+# default one, and the cost is ~19KB on a 157KB artifact that is fetched once
+# and cached. If a known-good binaryen is ever available, re-enable it
+# deliberately and re-run `npm run screens` before committing the result.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

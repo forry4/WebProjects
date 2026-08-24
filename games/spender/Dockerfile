@@ -16,7 +16,7 @@ RUN pip wheel --wheel-dir=/build/wheels -r /build/requirements.txt
 # (e.g. cython.int[5][90] -> C int[90][5] dim reversal), validated on 3.2.5; an unpinned bump could
 # change codegen and (caught by the build GATE below) block the deploy. Bump deliberately + re-gate.
 RUN pip install --no-cache-dir cython==3.2.5
-COPY games/spender/ai/az/valuation3.py /build/cy/valuation3.py
+COPY games/spender/ai/serving/valuation3.py /build/cy/valuation3.py
 RUN cythonize -i -3 /build/cy/valuation3.py
 
 ### Runtime: slim image that installs from the prebuilt wheels
@@ -36,7 +36,7 @@ RUN pip install --no-index --find-links=/wheels -r /app/games/spender/requiremen
 COPY . /app
 
 # Drop in the precompiled Cython hot-path module (shadows valuation3.py -> faster variant-S V-leaf).
-COPY --from=builder /build/cy/valuation3*.so /app/games/spender/ai/az/
+COPY --from=builder /build/cy/valuation3*.so /app/games/spender/ai/serving/
 # Build GATE: the compiled module must be byte-identical to the source (exact-value tests) or the
 # image fails to build -- a Cython miscompile can never reach production.
 RUN python -m pytest games/spender/tests/test_h3_valuation.py games/spender/tests/test_vsearch.py -q

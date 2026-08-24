@@ -41,6 +41,8 @@ from core.auth import (
     gen_token, get_user_by_session, validate_reconnect_token, mark_reconnect_token_used,
 )
 from core.config import cors_allowed_origins
+from core.build_info import build_info
+from core import rooms as _rooms
 
 LOG = logging.getLogger("games.wherewolf")
 
@@ -73,16 +75,18 @@ ROOMS: dict[str, dict] = {}
 ROOM_LOCK = asyncio.Lock()
 
 
-def _db():
-    return get_db_conn()
+# ── Shared room-server primitives (core/rooms.py) ─────────────────────────────
+# These were byte-identical in all four games. Aliased under the historical private
+# names so the rest of this module (and its tests) are unchanged.
+
+normalize_room = _rooms.normalize_room
+_gen_token = _rooms.gen_room_token
+_db = _rooms.db_conn
+_send = _rooms.send_json
 
 
-def _gen_token(n: int = 12) -> str:
-    return gen_token(n)
-
-
-def normalize_room(rid: str) -> str:
-    return (rid or "").upper()
+def _ensure_room_loaded(room_id: str) -> dict | None:
+    return _rooms.ensure_room_loaded(ROOMS, room_id, load_game_to_memory)
 
 
 def ww_init_db() -> None:
@@ -190,7 +194,7 @@ def save_game(room_id: str) -> None:
         room.get("host"), room.get("players", {}).get(room.get("host")),
         pids[0] if pids else None,
         pids[1] if len(pids) > 1 else None,
-        json.dumps(pids), json.dumps(state), now, now,
+        json.dumps(pids), _rooms.encode_state(state), now, now,
     )
 
 
@@ -207,7 +211,7 @@ def load_game_to_memory(room_id: str) -> bool:
     if not row or not row["state_json"]:
         return False
     try:
-        state = json.loads(row["state_json"])
+        state = _rooms.decode_state(row["state_json"])
     except Exception:
         return False
     room = {
@@ -221,6 +225,12 @@ def load_game_to_memory(room_id: str) -> bool:
         "_events": {},
     }
     g = room.get("game")
+    # Games saved before the engine stopped persisting it still carry `rng_state` —
+    # 625 words of dead Mersenne noise that nothing reads (see engine._save_rng). Drop
+    # it here so an existing row shrinks the next time it saves instead of carrying it
+    # for the rest of its retention window.
+    if isinstance(g, dict):
+        g.pop("rng_state", None)
     # Restart recovery: the night conductor is in-memory, so a game reloaded
     # mid-night is fast-forwarded straight into a fresh voting window (swaps/peeks
     # already applied are preserved). A DAY game with a passed deadline resolves on
@@ -233,7 +243,7 @@ def load_game_to_memory(room_id: str) -> bool:
 
 
 def list_open_games() -> list[dict]:
-    maybe_cleanup_games("werewolf_games")   # throttled (<=1/h)
+    maybe_cleanup_games("werewolf_games", background=True)   # throttled (<=1/h), non-blocking
     conn = _db()
     cur = conn.cursor()
     cur.execute("""SELECT id, host_id, host_name, player_ids, created_at FROM werewolf_games
@@ -276,17 +286,9 @@ def list_user_games(user_id: str) -> list[dict]:
 
 
 def delete_open_game(game_id: str, user_id: str) -> bool:
-    conn = _db()
-    cur = conn.cursor()
-    # Count first (the driver-agnostic cursor has no reliable rowcount on libsql).
-    cur.execute("SELECT COUNT(*) FROM werewolf_games WHERE id=? AND host_id=? AND status='open'",
-                (game_id, user_id))
-    deleted = (cur.fetchone()[0] or 0) > 0
-    if deleted:
-        cur.execute("DELETE FROM werewolf_games WHERE id=? AND host_id=? AND status='open'", (game_id, user_id))
-        conn.commit()
-    conn.close()
-    return deleted
+    """Cancel an open game this user hosts. SELECT-then-DELETE lives in
+    core.rooms — never cursor.rowcount (absent on libsql; it 500'd prod)."""
+    return _rooms.delete_open_game("werewolf_games", "host_id", game_id, user_id)
 
 
 # ── Broadcast (per-recipient redaction) ───────────────────────────────────────
@@ -485,6 +487,10 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
     await websocket.accept()
     room_id = normalize_room(room)
     pid = player
+    # Abuse throttles (core.rooms): cap connects per IP and messages per socket.
+    if await _rooms.reject_if_connecting_too_fast(websocket):
+        return
+    _msg_throttle = _rooms.MessageThrottle()
     # The `player` path segment is CLIENT-SUPPLIED and NOT trusted: anyone can open a
     # socket claiming any pid (all pids are broadcast in the public players map). So a
     # socket must PROVE ownership of `pid` before it can act as that seat or receive
@@ -497,6 +503,9 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
     try:
         while True:
             raw = await websocket.receive_text()
+            if not _msg_throttle.allow():
+                await websocket.close(code=1008)
+                return
             try:
                 msg = json.loads(raw)
             except Exception:
@@ -532,22 +541,9 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
     except WebSocketDisconnect:
         pass
     finally:
-        room = ROOMS.get(room_id)
-        if room and room.get("sockets", {}).get(pid) is websocket:
-            room["sockets"].pop(pid, None)
-            # Drop only empty, not-yet-started open rooms; keep playing/over in memory.
-            if not room["sockets"] and room.get("status") == "open" and room.get("game") is None:
-                ROOMS.pop(room_id, None)
-
-
-def _ensure_room_loaded(room_id: str) -> dict | None:
-    if room_id not in ROOMS:
-        load_game_to_memory(room_id)
-    return ROOMS.get(room_id)
-
-
-async def _send(ws: WebSocket, payload: dict) -> None:
-    await ws.send_text(json.dumps(payload))
+        # Stale-socket guard + empty-room cleanup, shared: core/rooms.py.
+        # Drops only empty, not-yet-started open rooms; playing/over stay resident.
+        _rooms.release_socket(ROOMS, room_id, pid, websocket)
 
 
 async def _handle_create(ws, room_id, pid, msg) -> bool:
@@ -767,7 +763,7 @@ async def _handle_abandon(ws, room_id, pid):
 # ── REST ──────────────────────────────────────────────────────────────────────
 @werewolf_app.get("/health")
 async def health():
-    return {"status": "ok", "service": "wherewolf", "version": "1.0"}
+    return {"status": "ok", "service": "wherewolf", "version": "1.0", **build_info()}
 
 
 @werewolf_app.get("/games")

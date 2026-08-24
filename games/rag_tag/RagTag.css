@@ -1,0 +1,1812 @@
+/* Rag Tag.
+ *
+ * A real stylesheet, imported with ?inline and injected by the component's own
+ * <style> tag. It is NEVER a JS template literal: one stray backtick used to
+ * terminate the literal, reparse the rest of the file as a tagged template and
+ * blank the page, and it shipped that way twice.
+ *
+ * The lobby is the SHARED kit (shared/lobby.jsx + shared/lobby.lobby-css.css).
+ * This sheet is concatenated AFTER it, so nothing here may set display,
+ * grid-template-columns or gap on .rt-lobby-cols — a base rule here out-orders
+ * the shared MEDIA rules and would pin a phone to three columns. Per-game width
+ * tuning goes through --lby-list-max, which works from either side.
+ *
+ * LOOK: a warm, lamp-lit arena. There is no licensed art anywhere in the
+ * repo, so every surface here is drawn in CSS — layered gradients for the
+ * canvas and the lamp, one inline SVG turbulence tile for grain, and the
+ * emblems from art.jsx. Nothing is fetched, so nothing can 404, go stale in a
+ * CDN, or need a cache-bust on deploy.
+ *
+ * SIZES: type and the pieces that carry it are clamp()ed against the viewport
+ * rather than switched at breakpoints, so a 380px phone and a 1600px desktop
+ * both get proportionate text instead of the same 0.72rem.
+ */
+
+.ragtag {
+  min-height: 100dvh;
+  background:
+    radial-gradient(120% 62% at 50% 0%, rgba(232, 102, 60, 0.15), transparent 62%),
+    radial-gradient(90% 45% at 50% 100%, rgba(120, 70, 160, 0.09), transparent 60%),
+    linear-gradient(180deg, #1e1512 0%, #17100c 55%, #140e0a 100%);
+  --lby-accent: #e8663c;
+
+  --rt-ink: #f6efe6;
+  --rt-dim: #b3a190;
+  --rt-faint: #a3907e;
+
+  --rt-bg: #17100c;
+  --rt-panel: #241a15;
+  --rt-panel-2: #2f221b;
+  --rt-panel-3: #3a2a21;
+  --rt-line: #4b3527;
+  --rt-line-soft: #3a2a20;
+
+  --rt-hp: #63c76f;
+  --rt-power: #a97fe0;
+  --rt-hit: #ef6a49;
+  --rt-heal: #63c76f;
+  --rt-gold: #e2b55f;
+
+  /* One grain tile, reused by every panel. Inline so there is no request. */
+  --rt-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.42'/%3E%3C/svg%3E");
+
+  --rt-fs: clamp(0.78rem, 0.735rem + 0.19vw, 0.9rem);
+  --rt-fs-sm: clamp(0.68rem, 0.65rem + 0.13vw, 0.78rem);
+  --rt-fs-lg: clamp(0.95rem, 0.88rem + 0.3vw, 1.15rem);
+  --rt-radius: 0.7rem;
+  --rt-tap: 2.75rem;          /* the minimum comfortable touch target */
+  --rt-shadow: 0 1px 0 rgba(255, 236, 214, 0.05) inset, 0 6px 18px -8px rgba(0, 0, 0, 0.75);
+
+  --lby-list-max: 30rem;
+  color: var(--rt-ink);
+  font-size: var(--rt-fs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The lobby grid needs an explicit width. The shared kit gives .lby-cols
+   `margin-inline: auto`, and this game's root is `.app` — which baseCss makes a
+   COLUMN FLEX container. Auto inline margins beat align-items:stretch on a flex
+   item, so without this the grid shrink-wraps to its content and sits in a
+   narrow band with empty space either side of it on a wide monitor. Dontminion
+   hit the same thing and fixed it the same way; Spender Duel still has it.
+   Width and padding are fair game here — only display, grid-template-columns
+   and gap must be left to the shared media rules. */
+.ragtag .rt-lobby-cols { width: 100%; padding: 0 16px 40px; }
+
+/* The arena floor: a warm lamp above the ring, falling off to the dark. */
+.ragtag .rt-wrap {
+  width: 100%;
+  max-width: 84rem;
+  margin: 0 auto;
+  padding: 0 clamp(0.5rem, 0.25rem + 1vw, 1rem) 3rem;
+  position: relative;
+}
+
+/* ── Layout ─────────────────────────────────────────────────────────────
+ * One column on a phone, stage + log rail once there is room for the rail to
+ * hold a sentence without wrapping every three words. */
+.ragtag .rt-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: clamp(0.5rem, 0.3rem + 0.7vw, 0.9rem);
+  align-items: start;
+}
+
+@media (min-width: 940px) {
+  .ragtag .rt-layout { grid-template-columns: minmax(0, 1fr) clamp(17rem, 23vw, 23rem); }
+  /* The rail keeps its column even while empty. Hiding it during the draft
+     traded one width oscillation for another: everything jumped ~340px narrower
+     the moment the first round resolved. */
+  .ragtag .rt-layout-solo { grid-template-columns: minmax(0, 1fr); }
+  .ragtag .rt-layout-solo .rt-main {
+    max-width: calc(100% - clamp(17rem, 23vw, 23rem) - 0.9rem);
+    margin-inline: auto;
+  }
+  .ragtag .rt-layout-solo .rt-rail { display: none; }
+  .ragtag .rt-rail {
+    position: sticky;
+    top: 0.6rem;
+    /* max-height, not height: on turn one the log holds two lines, and a fixed
+       viewport height left an 800px empty box beside a half-full board. */
+    max-height: calc(100vh - 1.2rem);
+    display: flex;
+  }
+  .ragtag .rt-rail .rt-log { flex: 1 1 auto; min-height: 0; }
+}
+
+.ragtag .rt-main {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.45rem, 0.3rem + 0.5vw, 0.75rem);
+  min-width: 0;
+}
+
+.ragtag .rt-rail { min-width: 0; }
+
+/* Stacked under the board rather than beside it, an empty log is just a panel
+   saying nothing. Only hidden below the two-column tier. */
+@media (max-width: 939px) {
+  .ragtag .rt-rail-empty { display: none; }
+}
+
+/* Shared panel treatment: bevel, grain, warm edge. */
+.ragtag .rt-side,
+.ragtag .rt-stage,
+.ragtag .rt-prompt,
+.ragtag .rt-log,
+.ragtag .rt-over {
+  position: relative;
+  border: 1px solid var(--rt-line);
+  border-radius: var(--rt-radius);
+  background:
+    linear-gradient(180deg, rgba(255, 226, 196, 0.045), transparent 46%),
+    linear-gradient(180deg, var(--rt-panel-2), var(--rt-panel));
+  box-shadow: var(--rt-shadow);
+  isolation: isolate;
+}
+
+.ragtag .rt-side::after,
+.ragtag .rt-stage::after,
+.ragtag .rt-prompt::after,
+.ragtag .rt-log::after,
+.ragtag .rt-over::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-image: var(--rt-grain);
+  opacity: 0.035;
+  mix-blend-mode: overlay;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.ragtag .rt-i {
+  width: 1em;
+  height: 1em;
+  flex: none;
+  vertical-align: -0.13em;
+}
+
+/* ── Fighter boards ─────────────────────────────────────────────────────── */
+
+.ragtag .rt-side { padding: clamp(0.4rem, 0.3rem + 0.3vw, 0.6rem); }
+/* Ownership is carried by the label and a left edge, NOT by the accent ring:
+   the ring is reserved for the panel that wants input. */
+.ragtag .rt-side.rt-mine {
+  border-color: var(--rt-line);
+  box-shadow: inset 3px 0 0 0 color-mix(in srgb, var(--lby-accent) 70%, transparent), var(--rt-shadow);
+}
+
+.ragtag .rt-side-hd {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: var(--rt-fs-sm);
+  color: var(--rt-dim);
+  margin-bottom: 0.4rem;
+  position: relative;
+  z-index: 1;
+}
+
+.ragtag .rt-side-name {
+  font-weight: 700;
+  color: var(--rt-ink);
+  letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Which side is mine is the most important orientation cue on the screen and
+   was the least legible text on it. */
+.ragtag .rt-side-tag {
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  font-size: 0.68em;
+  font-weight: 650;
+  color: var(--rt-dim);
+  white-space: nowrap;
+}
+
+.ragtag .rt-side.rt-mine .rt-side-tag { color: var(--lby-accent); }
+
+.ragtag .rt-fighters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(0.35rem, 0.25rem + 0.35vw, 0.6rem);
+  position: relative;
+  z-index: 1;
+}
+
+.ragtag .rt-fighter {
+  --f-ink: var(--rt-gold);
+  --f-deep: #33261c;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--rt-line-soft);
+  border-radius: 0.55rem;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--f-deep) 62%, transparent), transparent 58%),
+    linear-gradient(180deg, var(--rt-panel-3), var(--rt-panel-2));
+  padding: clamp(0.35rem, 0.28rem + 0.25vw, 0.55rem);
+  min-width: 0;
+  transition: border-color 200ms ease, box-shadow 220ms ease, transform 220ms ease, opacity 300ms ease;
+  animation: rt-rise 320ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+
+.ragtag .rt-fighter-ghost { min-height: 6.5rem; opacity: 0.35; }
+
+/* The lamp that lights the fighter whose card is on the table. */
+.ragtag .rt-fighter-glow {
+  position: absolute;
+  inset: -40% -20% auto -20%;
+  height: 120%;
+  background: radial-gradient(60% 60% at 50% 0%, color-mix(in srgb, var(--f-ink) 34%, transparent), transparent 70%);
+  opacity: 0;
+  transition: opacity 300ms ease;
+  pointer-events: none;
+}
+
+.ragtag .rt-fighter.rt-active {
+  border-color: var(--f-ink);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--f-ink) 60%, transparent),
+    0 8px 24px -12px color-mix(in srgb, var(--f-ink) 75%, transparent);
+  transform: translateY(-1px);
+}
+
+.ragtag .rt-fighter.rt-active .rt-fighter-glow { opacity: 1; animation: rt-breathe 2.6s ease-in-out infinite; }
+
+.ragtag .rt-fighter.rt-ko { opacity: 0.5; filter: grayscale(0.65); }
+.ragtag .rt-fighter.rt-struck { animation: rt-shake 420ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both; }
+.ragtag .rt-fighter.rt-mended { animation: rt-mend 620ms ease both; }
+
+.ragtag .rt-fhd {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  position: relative;
+}
+
+.ragtag .rt-crest {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: clamp(1.6rem, 1.3rem + 1.1vw, 2.1rem);
+  aspect-ratio: 1;
+  border-radius: 0.42rem;
+  color: var(--f-ink);
+  border: 1px solid color-mix(in srgb, var(--f-ink) 42%, transparent);
+  background:
+    radial-gradient(120% 120% at 30% 10%, color-mix(in srgb, var(--f-ink) 26%, transparent), transparent 65%),
+    color-mix(in srgb, var(--f-ink) 12%, var(--f-deep));
+  box-shadow: 0 1px 0 rgba(255, 240, 220, 0.08) inset;
+}
+
+.ragtag .rt-crest .rt-sigil { width: 68%; height: 68%; }
+
+.ragtag .rt-fname-wrap { min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+
+.ragtag .rt-fname {
+  font-weight: 750;
+  font-size: clamp(0.82rem, 0.76rem + 0.26vw, 0.98rem);
+  line-height: 1.15;
+  letter-spacing: 0.005em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ragtag .rt-ftags { display: flex; gap: 0.22rem; flex-wrap: wrap; }
+
+.ragtag .rt-tag {
+  font-size: 0.62rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--rt-dim);
+  border: 1px solid var(--rt-line);
+  border-radius: 0.6rem;
+  padding: 0.02rem 0.32rem;
+  white-space: nowrap;
+}
+
+.ragtag .rt-tag-cold {
+  color: var(--rt-power);
+  border-color: color-mix(in srgb, var(--rt-power) 45%, transparent);
+}
+
+.ragtag .rt-tag-hot {
+  color: #1c120c;
+  background: var(--f-ink);
+  border-color: var(--f-ink);
+  font-weight: 700;
+}
+
+.ragtag .rt-stats {
+  display: flex;
+  gap: 0.55rem;
+  align-items: center;
+  margin-top: 0.35rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ragtag .rt-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.2rem;
+  font-size: clamp(0.82rem, 0.76rem + 0.24vw, 0.96rem);
+}
+
+.ragtag .rt-stat b { font-weight: 750; line-height: 1; }
+.ragtag .rt-stat small { color: var(--rt-dim); font-size: 0.74em; font-weight: 500; }
+/* A DENOMINATOR sits inside the value, so it needs no gap ("16/16"); a unit
+   label is a sibling and keeps one ("13 health"). Pulling every `small` in with
+   a negative margin fixed the first and jammed the second into "13health". */
+.ragtag .rt-den { margin-left: 0; }
+.ragtag .rt-stat .rt-i { align-self: center; }
+.ragtag .rt-hp { color: var(--rt-hp); }
+.ragtag .rt-pw { color: var(--rt-power); }
+
+/* The health track.
+   One bar, one fill, one colour chosen by how much health is left -- so a
+   3-space Character and a 25-space Golem are comparable at a glance. The
+   special spaces stay as NOTCHES: a KO space, a Stop, a revive space and a
+   Spirit space are places on the board, and losing them entirely would lose
+   what makes these boards worth reading. */
+.ragtag .rt-track {
+  position: relative;
+  height: 0.5rem;
+  margin-top: 0.45rem;
+}
+
+.ragtag .rt-track-cap {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  /* Visible, so the missing health can actually be seen. It used to be pure
+     black on a dark panel, and a fighter at 22/25 looked untouched. */
+  background: #3a2b23;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+.ragtag .rt-track-gone {
+  border-radius: 999px;
+  background: repeating-linear-gradient(90deg,
+    #33251e 0 4px, transparent 4px 8px);
+  opacity: 0.7;
+}
+
+.ragtag .rt-track-hi { --tone: var(--rt-hp); }
+.ragtag .rt-track-mid { --tone: #e2a33e; }
+.ragtag .rt-track-lo { --tone: var(--rt-hit); }
+
+.ragtag .rt-track-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px 0 0 999px;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--tone) 55%, #000), var(--tone));
+  box-shadow: 0 0 10px -2px color-mix(in srgb, var(--tone) 70%, transparent);
+  transition: width 420ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+/* No knob. The fill's leading edge is the indicator; a floating circle on a
+   track is the visual language of a slider, and three reviewers independently
+   read the health bar as a control the player was failing to drag. */
+.ragtag .rt-track-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 2px;
+  background: var(--rt-ink);
+  opacity: 0.85;
+}
+
+/* min-height reserves one row: chips appear and disappear as tokens move, and
+   without it every fighter panel changed height mid-round and shunted the whole
+   column below it. */
+.ragtag .rt-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.22rem;
+  margin-top: 0.35rem;
+  min-height: 1.15rem;
+}
+
+.ragtag .rt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.18rem;
+  font-size: var(--rt-fs-sm);
+  border: 1px solid var(--rt-line);
+  border-radius: 0.6rem;
+  padding: 0.02rem 0.36rem;
+  color: var(--rt-dim);
+  background: rgba(0, 0, 0, 0.22);
+  white-space: nowrap;
+}
+
+.ragtag .rt-chip b { color: var(--rt-ink); font-weight: 700; }
+.ragtag .rt-chip-fire { color: #f2a04c; border-color: #6b3d18; background: rgba(120, 55, 12, 0.3); }
+
+/* The number that floats off a fighter. */
+.ragtag .rt-pop {
+  position: absolute;
+  right: 0.45rem;
+  top: 1.6rem;
+  font-weight: 800;
+  font-size: clamp(1rem, 0.85rem + 0.7vw, 1.45rem);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.85);
+  animation: rt-pop 1100ms cubic-bezier(0.15, 0.9, 0.3, 1) both;
+  z-index: 3;
+}
+
+.ragtag .rt-pop-hit { color: var(--rt-hit); }
+.ragtag .rt-pop-heal { color: var(--rt-heal); }
+.ragtag .rt-pop-pw { color: var(--rt-power); top: 3rem; font-size: 0.9rem; }
+
+.ragtag .rt-kostamp {
+  position: absolute;
+  inset: auto 0 0.5rem 0;
+  text-align: center;
+  font-weight: 800;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  font-size: clamp(0.8rem, 0.7rem + 0.5vw, 1.1rem);
+  color: var(--rt-hit);
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.9);
+  animation: rt-stamp 460ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
+  pointer-events: none;
+}
+
+/* ── The stage ──────────────────────────────────────────────────────────── */
+
+.ragtag .rt-stage {
+  padding: clamp(0.5rem, 0.35rem + 0.5vw, 0.85rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ragtag .rt-stage-idle { align-items: center; justify-content: center; min-height: 7rem; }
+.ragtag .rt-idle-word { color: var(--rt-faint); font-style: italic; position: relative; z-index: 1; }
+
+.ragtag .rt-stage-hd {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  position: relative;
+  z-index: 1;
+}
+
+.ragtag .rt-round {
+  font-size: var(--rt-fs-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  color: var(--rt-dim);
+  white-space: nowrap;
+}
+
+.ragtag .rt-round b { color: var(--rt-gold); font-size: 1.15em; letter-spacing: 0; }
+.ragtag .rt-round-sep { margin: 0 0.35rem; opacity: 0.5; }
+
+.ragtag .rt-steps {
+  display: flex;
+  gap: 0.2rem;
+  flex: 1 1 6rem;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+}
+
+.ragtag .rt-step {
+  width: 1.05rem;
+  height: 0.32rem;
+  min-width: 0.5rem;
+  flex: 0 1 1.05rem;
+  padding: 0;
+  border: 0;
+  position: relative;
+  border-radius: 999px;
+  background: #46332a;
+  cursor: pointer;
+  transition: background-color 200ms ease, transform 200ms ease, box-shadow 200ms ease;
+}
+
+/* The visible pill stays a pill; the TARGET is finger-sized. */
+.ragtag .rt-step::after {
+  content: "";
+  position: absolute;
+  inset: -0.85rem -0.15rem;
+}
+
+.ragtag .rt-step:hover { background: var(--rt-dim); }
+.ragtag .rt-step-done { background: color-mix(in srgb, var(--lby-accent) 55%, #46332a); }
+
+.ragtag .rt-step-on {
+  background: var(--lby-accent);
+  transform: scaleY(1.7);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--lby-accent) 70%, transparent);
+}
+
+.ragtag .rt-turnno {
+  font-size: var(--rt-fs-sm);
+  font-weight: 650;
+  color: var(--rt-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+
+.ragtag .rt-duel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: clamp(0.4rem, 0.25rem + 0.5vw, 0.75rem);
+  align-items: stretch;
+  position: relative;
+  z-index: 1;
+  perspective: 1000px;
+}
+
+.ragtag .rt-clash {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 2.2rem;
+}
+
+.ragtag .rt-clash-word {
+  font-weight: 800;
+  font-size: clamp(0.78rem, 0.7rem + 0.35vw, 1rem);
+  letter-spacing: 0.1em;
+  color: var(--rt-faint);
+  animation: rt-clash 520ms cubic-bezier(0.2, 1.5, 0.4, 1) both;
+}
+
+.ragtag .rt-clash-burst {
+  position: absolute;
+  width: 3.2rem;
+  height: 3.2rem;
+  border-radius: 50%;
+  border: 1px solid var(--lby-accent);
+  opacity: 0;
+  animation: rt-burst 700ms ease-out both;
+  pointer-events: none;
+}
+
+/* ── Cards ──────────────────────────────────────────────────────────────── */
+
+.ragtag .rt-card {
+  --f-ink: var(--rt-gold);
+  --f-deep: #33261c;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--rt-line);
+  border-radius: 0.6rem;
+  min-width: 0;
+  background: linear-gradient(180deg, var(--rt-panel-3), var(--rt-panel));
+  box-shadow: 0 1px 0 rgba(255, 236, 214, 0.06) inset, 0 12px 28px -16px rgba(0, 0, 0, 0.9);
+  animation: rt-flip 520ms cubic-bezier(0.2, 0.85, 0.3, 1) both;
+}
+
+/* A real art window. The emblem used to be blown up as a watermark behind the
+   body copy, where it was clipped by whichever card edge it happened to reach
+   and greyed out the text it sat under -- three reviewers independently read it
+   as a broken background image. Contained, lit and centred, the same drawing
+   does the job it was for. */
+.ragtag .rt-card-art {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: clamp(2.6rem, 1.8rem + 3.4vw, 3.9rem);
+  color: var(--f-ink);
+  border-bottom: 1px solid color-mix(in srgb, var(--f-ink) 32%, transparent);
+  background:
+    radial-gradient(78% 130% at 50% 4%, color-mix(in srgb, var(--f-ink) 32%, transparent), transparent 74%),
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--f-ink) 22%, var(--f-deep)),
+      color-mix(in srgb, var(--f-ink) 8%, var(--f-deep)));
+}
+
+.ragtag .rt-card-art .rt-sigil,
+.ragtag .rt-draft-art .rt-sigil {
+  color: color-mix(in srgb, var(--f-ink) 78%, #ffffff);
+  filter: drop-shadow(0 2px 7px rgba(0, 0, 0, 0.75));
+}
+
+.ragtag .rt-card-art .rt-sigil {
+  width: clamp(1.7rem, 1.1rem + 2.6vw, 2.6rem);
+  height: auto;
+}
+
+.ragtag .rt-card-art-empty {
+  border-bottom-style: dashed;
+  border-bottom-color: var(--rt-line);
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.ragtag .rt-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.45rem 0.6rem 0.55rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.ragtag .rt-card-empty { border-style: dashed; animation: none; }
+.ragtag .rt-card-empty .rt-card-body { display: grid; place-items: center; min-height: 2.4rem; }
+.ragtag .rt-card-none { color: var(--rt-faint); font-size: var(--rt-fs-sm); font-style: italic; }
+
+.ragtag .rt-card-hd { display: flex; flex-direction: column; min-width: 0; }
+
+.ragtag .rt-card-name {
+  font-weight: 750;
+  font-size: clamp(0.85rem, 0.78rem + 0.28vw, 1rem);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.ragtag .rt-card-by {
+  font-size: var(--rt-fs-sm);
+  color: var(--f-ink);
+  opacity: 0.9;
+  letter-spacing: 0.03em;
+}
+
+.ragtag .rt-card-ops {
+  list-style: none;
+  margin: 0.35rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.ragtag .rt-card-ops li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.32rem;
+  font-size: var(--rt-fs-sm);
+  line-height: 1.35;
+  color: var(--rt-ink);
+}
+
+.ragtag .rt-card-ops li .rt-i { color: var(--f-ink); margin-top: 0.16em; }
+.ragtag .rt-card-bonus { color: var(--rt-dim); }
+.ragtag .rt-card-bonus .rt-i { color: var(--rt-gold); }
+
+.ragtag .rt-card-flag {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.35rem;
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--rt-gold);
+  border: 1px solid color-mix(in srgb, var(--rt-gold) 50%, transparent);
+  border-radius: 0.5rem;
+  padding: 0 0.3rem;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+/* ── The ribbon: this beat, in words ────────────────────────────────────── */
+
+.ragtag .rt-ribbon {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.28rem 0.5rem;
+  min-height: 1.6rem;
+  align-items: center;
+  position: relative;
+  z-index: 1;
+  padding-top: 0.15rem;
+  border-top: 1px solid var(--rt-line-soft);
+}
+
+.ragtag .rt-rib {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  font-size: var(--rt-fs-sm);
+  line-height: 1.3;
+  color: var(--rt-dim);
+  border: 1px solid var(--rt-line-soft);
+  border-radius: 0.55rem;
+  padding: 0.12rem 0.45rem;
+  background: rgba(0, 0, 0, 0.24);
+  animation: rt-line-in 380ms cubic-bezier(0.2, 0.9, 0.3, 1) both;
+  animation-delay: var(--d, 0ms);
+}
+
+.ragtag .rt-tone-hit { color: var(--rt-hit); border-color: color-mix(in srgb, var(--rt-hit) 32%, transparent); }
+.ragtag .rt-tone-good { color: var(--rt-hp); border-color: color-mix(in srgb, var(--rt-hp) 30%, transparent); }
+.ragtag .rt-tone-heal { color: var(--rt-heal); border-color: color-mix(in srgb, var(--rt-heal) 30%, transparent); }
+.ragtag .rt-tone-power { color: var(--rt-power); border-color: color-mix(in srgb, var(--rt-power) 32%, transparent); }
+.ragtag .rt-tone-big { color: var(--rt-gold); border-color: color-mix(in srgb, var(--rt-gold) 40%, transparent); font-weight: 650; }
+.ragtag .rt-tone-info { color: var(--rt-dim); }
+
+/* ── Controls ───────────────────────────────────────────────────────────── */
+
+.ragtag .rt-resolved {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.5rem;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--rt-gold) 34%, transparent);
+  border-radius: 0.5rem;
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--rt-gold) 12%, transparent), transparent);
+  position: relative;
+  z-index: 1;
+  animation: rt-rise 340ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+
+.ragtag .rt-resolved-hd {
+  font-size: var(--rt-fs-sm);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: var(--rt-gold);
+}
+
+.ragtag .rt-tally {
+  font-size: var(--rt-fs-sm);
+  color: var(--rt-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.ragtag .rt-tally-down { color: var(--rt-hit); }
+.ragtag .rt-tally-up { color: var(--rt-hp); }
+
+.ragtag .rt-controls {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  align-items: center;
+  position: relative;
+  z-index: 1;
+}
+
+/* Sits with the buttons it describes. It used to be a dashed strip floating
+   below the whole team panel, ~350px from the control it referred to. */
+.ragtag .rt-controls-hint {
+  order: 9;
+  margin-left: auto;
+  font-size: var(--rt-fs-sm);
+  color: var(--rt-faint);
+  white-space: nowrap;
+}
+
+.ragtag .rt-ctl {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font: inherit;
+  font-size: var(--rt-fs-sm);
+  font-weight: 650;
+  color: var(--rt-ink);
+  border: 1px solid var(--rt-line);
+  border-radius: 0.5rem;
+  background: linear-gradient(180deg, var(--rt-panel-3), var(--rt-panel-2));
+  padding: 0.4rem 0.8rem;
+  min-height: var(--rt-tap);
+  cursor: pointer;
+  transition: border-color 180ms ease, transform 120ms ease, box-shadow 180ms ease, background-color 180ms ease;
+}
+
+.ragtag .rt-ctl:active:not([disabled]) { transform: translateY(0); }
+.ragtag .rt-ctl[disabled] { opacity: 0.5; cursor: default; color: var(--rt-dim); }
+
+.ragtag .rt-ctl:focus-visible,
+.ragtag .rt-pick:focus-visible,
+.ragtag .rt-drop:focus-visible,
+.ragtag .rt-go:focus-visible,
+.ragtag .rt-step:focus-visible {
+  outline: 2px solid var(--lby-accent);
+  outline-offset: 2px;
+}
+
+/* The one button the player is meant to press, so it pulls the eye. */
+.ragtag .rt-ctl-go {
+  position: relative;
+  overflow: hidden;
+  color: #1c120c;
+  font-weight: 750;
+  border-color: color-mix(in srgb, var(--lby-accent) 70%, #000);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--lby-accent) 88%, #fff), var(--lby-accent));
+  box-shadow: 0 6px 18px -10px var(--lby-accent);
+  flex: 0 1 auto;
+}
+
+.ragtag .rt-ctl-go:not([disabled])::after {
+  content: "";
+  position: absolute;
+  top: -60%;
+  left: -40%;
+  width: 30%;
+  height: 220%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+  transform: skewX(-18deg);
+  animation: rt-sheen 3.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.ragtag .rt-ctl-go:hover:not([disabled]) { filter: brightness(1.06); }
+.ragtag .rt-ctl-go[disabled] {
+  background: linear-gradient(180deg, var(--rt-panel-3), var(--rt-panel-2));
+  color: var(--rt-ink);
+  border-color: var(--rt-line);
+  box-shadow: none;
+}
+
+.ragtag .rt-ctl-go[disabled]::after { display: none; }
+
+/* ── Choices ────────────────────────────────────────────────────────────── */
+
+.ragtag .rt-prompt {
+  padding: clamp(0.5rem, 0.35rem + 0.5vw, 0.85rem);
+  border-color: color-mix(in srgb, var(--lby-accent) 60%, var(--rt-line));
+  animation: rt-rise 340ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+
+.ragtag .rt-prompt h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: var(--rt-fs-lg);
+  margin-bottom: 0.1rem;
+  position: relative;
+  z-index: 1;
+}
+
+.ragtag .rt-prompt h3 .rt-i { color: var(--lby-accent); }
+
+.ragtag .rt-step-of {
+  margin-left: auto;
+  font-size: 0.66rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--rt-faint);
+  border: 1px solid var(--rt-line);
+  border-radius: 0.5rem;
+  padding: 0 0.36rem;
+  white-space: nowrap;
+}
+
+.ragtag .rt-prompt p {
+  font-size: var(--rt-fs-sm);
+  color: var(--rt-dim);
+  margin-bottom: 0.5rem;
+  position: relative;
+  z-index: 1;
+}
+
+.ragtag .rt-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  position: relative;
+  z-index: 1;
+}
+
+/* Offers are cards in their own right, so they get a grid that keeps them
+   equal-width instead of ragged. */
+.ragtag .rt-picks-wide {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+}
+
+.ragtag .rt-pick {
+  --f-ink: var(--rt-gold);
+  --f-deep: #33261c;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  gap: 0.45rem;
+  align-items: flex-start;
+  text-align: left;
+  border: 1px solid var(--rt-line);
+  border-radius: 0.55rem;
+  background: linear-gradient(180deg, var(--rt-panel-3), var(--rt-panel-2));
+  color: var(--rt-ink);
+  padding: 0.5rem 0.6rem;
+  cursor: pointer;
+  min-width: 0;
+  font: inherit;
+  transition: border-color 170ms ease, transform 170ms ease, box-shadow 170ms ease;
+}
+
+.ragtag .rt-pick::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--f-ink);
+  opacity: 0.55;
+}
+
+@media (hover: hover) {
+  .ragtag .rt-pick:hover {
+    border-color: var(--lby-accent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--lby-accent) 60%, transparent),
+      0 10px 24px -14px color-mix(in srgb, var(--lby-accent) 80%, transparent);
+  }
+
+  .ragtag .rt-drop:hover { border-color: var(--lby-accent); color: var(--lby-accent); }
+  .ragtag .rt-ctl:hover:not([disabled]) { border-color: var(--rt-dim); transform: translateY(-1px); }
+}
+
+.ragtag .rt-pick.rt-sel {
+  border-color: var(--lby-accent);
+  box-shadow: 0 0 0 2px var(--lby-accent), 0 12px 26px -12px var(--lby-accent);
+}
+
+.ragtag .rt-pick.rt-sel::before { opacity: 1; width: 3px; background: var(--lby-accent); }
+
+/* The same art treatment the stage and draft cards use, at offer size -- these
+   are the same object at three moments of its life and were rendering as three
+   unrelated components, the offer being the one with no art at all. */
+.ragtag .rt-pick-crest {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2.6rem;
+  aspect-ratio: 1;
+  border-radius: 0.45rem;
+  color: color-mix(in srgb, var(--f-ink) 78%, #ffffff);
+  border: 1px solid color-mix(in srgb, var(--f-ink) 40%, transparent);
+  background:
+    radial-gradient(80% 120% at 50% 8%, color-mix(in srgb, var(--f-ink) 32%, transparent), transparent 74%),
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--f-ink) 22%, var(--f-deep)),
+      color-mix(in srgb, var(--f-ink) 8%, var(--f-deep)));
+}
+
+.ragtag .rt-pick-crest .rt-sigil {
+  width: 66%;
+  height: 66%;
+  filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.7));
+}
+.ragtag .rt-pick-body { min-width: 0; display: flex; flex-direction: column; gap: 0.12rem; }
+
+.ragtag .rt-pick-name {
+  font-weight: 720;
+  font-size: clamp(0.82rem, 0.77rem + 0.2vw, 0.95rem);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.ragtag .rt-pick-sub {
+  display: flex;
+  align-items: center;
+  gap: 0.24rem;
+  font-size: var(--rt-fs-sm);
+  color: var(--rt-dim);
+}
+
+.ragtag .rt-pick-sub .rt-i { color: var(--rt-power); }
+
+.ragtag .rt-pick-tags { display: flex; flex-wrap: wrap; gap: 0.2rem; margin-top: 0.1rem; }
+
+/* Two of the three build offers are routinely the same card. */
+.ragtag .rt-copy {
+  margin-left: 0.4rem;
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  color: var(--rt-faint);
+  border: 1px solid var(--rt-line);
+  border-radius: 0.5rem;
+  padding: 0 0.3rem;
+  white-space: nowrap;
+}
+
+/* Selection must not read the same as hover. */
+.ragtag .rt-pick-tick {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  display: grid;
+  place-items: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 50%;
+  background: var(--lby-accent);
+  color: #1c120c;
+}
+
+.ragtag .rt-pick-tick::after {
+  content: "";
+  width: 0.34rem;
+  height: 0.58rem;
+  margin-top: -0.12rem;
+  border: solid #1c120c;
+  border-width: 0 2px 2px 0;
+  transform: rotate(42deg);
+}
+.ragtag .rt-pick-plain { align-items: center; min-height: 2.6rem; }
+.ragtag .rt-cap::first-letter { text-transform: uppercase; }
+
+.ragtag .rt-pick-tags em {
+  font-style: normal;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--rt-dim);
+  border: 1px solid var(--rt-line);
+  border-radius: 0.5rem;
+  padding: 0 0.3rem;
+}
+
+.ragtag .rt-pick-ops { display: flex; flex-direction: column; gap: 0.12rem; margin-top: 0.15rem; }
+
+.ragtag .rt-pick-ops em {
+  font-style: normal;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.26rem;
+  font-size: var(--rt-fs-sm);
+  color: var(--rt-dim);
+  line-height: 1.3;
+}
+
+.ragtag .rt-pick-ops em .rt-i { color: var(--f-ink); margin-top: 0.14em; }
+
+/* ── The draft ──────────────────────────────────────────────────────────
+   The draft is the one screen a player looks at before they know anything
+   about the game, and it was a vertical list of thin rows in a strip with two
+   thirds of the screen black underneath. These are cards: a lit emblem panel,
+   the two numbers the choice actually turns on, and the fighter's tags.
+   Three across on a desktop rather than auto-fit, because auto-fit put SIX
+   fighters in a ragged 4-then-2. */
+.ragtag .rt-draft {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.55rem;
+}
+
+@media (min-width: 520px) { .ragtag .rt-draft { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 900px) { .ragtag .rt-draft { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+.ragtag .rt-draft-card {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.ragtag .rt-draft-card::before { width: 3px; }
+
+.ragtag .rt-draft-art {
+  display: grid;
+  place-items: center;
+  height: clamp(4.5rem, 2.6rem + 8vw, 9rem);
+  color: var(--f-ink);
+  border-bottom: 1px solid color-mix(in srgb, var(--f-ink) 32%, transparent);
+  background:
+    radial-gradient(76% 130% at 50% 4%, color-mix(in srgb, var(--f-ink) 34%, transparent), transparent 74%),
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--f-ink) 22%, var(--f-deep)),
+      color-mix(in srgb, var(--f-ink) 8%, var(--f-deep)));
+}
+
+.ragtag .rt-draft-art .rt-sigil {
+  width: clamp(2.9rem, 1.8rem + 4.6vw, 4.8rem);
+  height: auto;
+  filter: drop-shadow(0 2px 7px rgba(0, 0, 0, 0.55));
+}
+
+.ragtag .rt-draft-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  padding: 0.55rem 0.65rem 0.65rem;
+  min-width: 0;
+}
+
+.ragtag .rt-draft-stats { display: flex; gap: 0.7rem; align-items: center; }
+.ragtag .rt-draft-stats .rt-stat { font-size: clamp(0.86rem, 0.8rem + 0.24vw, 1rem); }
+
+/* The insert control: your Fight Deck as a stack, with a full-width, LABELLED
+   drop zone above, between and below every card. The old version was three
+   30px dashed squares holding an unlabelled caret -- smaller than the minimum
+   touch target, and the least prominent thing on the screen despite being the
+   round's actual decision. */
+.ragtag .rt-slots-hd { margin-top: 0.7rem; }
+
+.ragtag .rt-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.4rem;
+  position: relative;
+  z-index: 1;
+}
+
+.ragtag .rt-drop {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: var(--rt-tap);
+  padding: 0 0.65rem;
+  border: 1px solid var(--rt-line);
+  border-radius: 0.45rem;
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--rt-dim);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 160ms ease, color 160ms ease, background-color 160ms ease;
+}
+
+.ragtag .rt-drop-line { flex: 1 1 auto; height: 1px; background: currentColor; opacity: 0.32; }
+
+.ragtag .rt-drop-label {
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-size: 0.68rem;
+  font-weight: 650;
+}
+
+.ragtag .rt-drop.rt-sel {
+  border-style: solid;
+  border-color: var(--lby-accent);
+  color: var(--lby-accent);
+  background: color-mix(in srgb, var(--lby-accent) 14%, transparent);
+}
+
+.ragtag .rt-deck-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: var(--rt-tap);
+  padding: 0.42rem 0.6rem;
+  border: 1px solid var(--rt-line);
+  border-radius: 0.45rem;
+  background: linear-gradient(180deg, var(--rt-panel-3), var(--rt-panel-2));
+  min-width: 0;
+}
+
+.ragtag .rt-deck-n {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 50%;
+  background: #1b120e;
+  color: var(--rt-faint);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.ragtag .rt-deck-name {
+  font-size: var(--rt-fs);
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ragtag .rt-go {
+  margin-top: 0.65rem;
+  position: relative;
+  z-index: 1;
+  border: 1px solid color-mix(in srgb, var(--lby-accent) 70%, #000);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--lby-accent) 88%, #fff), var(--lby-accent));
+  color: #1c120c;
+  border-radius: 0.5rem;
+  padding: 0.5rem 1.1rem;
+  min-height: 2.3rem;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 750;
+  box-shadow: 0 6px 18px -10px var(--lby-accent);
+  transition: filter 160ms ease, transform 120ms ease;
+}
+
+.ragtag .rt-go:hover:not([disabled]) { filter: brightness(1.06); transform: translateY(-1px); }
+/* Disabled, this button now carries the REASON as its label ("Pick a card to
+   keep"), so it must stay readable rather than fading to a grey smear -- three
+   reviewers read the old 42%-opacity version as a broken primary action. */
+.ragtag .rt-go[disabled] {
+  cursor: default;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--rt-dim);
+  border-color: var(--rt-line);
+  box-shadow: none;
+}
+
+.ragtag .rt-go {
+  width: 100%;
+  max-width: 22rem;
+}
+
+.ragtag .rt-need {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.7rem 0 0;
+  font-size: var(--rt-fs);
+  color: var(--lby-accent);
+  font-weight: 600;
+  position: relative;
+  z-index: 1;
+}
+
+.ragtag .rt-need .rt-i { color: var(--lby-accent); }
+
+.ragtag .rt-waitline {
+  font-size: var(--rt-fs-sm);
+  color: var(--rt-dim);
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--rt-line-soft);
+  border-radius: 0.5rem;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.ragtag .rt-warn { color: var(--rt-gold); border-color: color-mix(in srgb, var(--rt-gold) 40%, transparent); }
+
+/* ── Result ─────────────────────────────────────────────────────────────── */
+
+.ragtag .rt-over {
+  padding: clamp(0.9rem, 0.6rem + 1vw, 1.4rem);
+  text-align: center;
+  animation: rt-rise 420ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+
+.ragtag .rt-over-crest {
+  display: grid;
+  place-items: center;
+  width: 2.6rem;
+  aspect-ratio: 1;
+  margin: 0 auto 0.4rem;
+  border-radius: 50%;
+  position: relative;
+  z-index: 1;
+  color: var(--rt-gold);
+  border: 1px solid color-mix(in srgb, var(--rt-gold) 45%, transparent);
+  background: radial-gradient(circle at 50% 30%, rgba(226, 181, 95, 0.24), transparent 70%);
+}
+
+.ragtag .rt-over-crest .rt-i { width: 1.5rem; height: 1.5rem; }
+.ragtag .rt-over h2 { font-size: clamp(1.25rem, 1rem + 1.1vw, 1.8rem); margin-bottom: 0.2rem; position: relative; z-index: 1; }
+.ragtag .rt-over p { color: var(--rt-dim); font-size: var(--rt-fs-sm); position: relative; z-index: 1; }
+.ragtag .rt-over-actions { margin-top: 0.9rem; position: relative; z-index: 1; }
+.ragtag .rt-over-win { border-color: color-mix(in srgb, var(--rt-hp) 55%, var(--rt-line)); }
+.ragtag .rt-over-win h2 { color: var(--rt-hp); }
+.ragtag .rt-over-lose { border-color: color-mix(in srgb, var(--rt-hit) 50%, var(--rt-line)); }
+.ragtag .rt-over-lose h2 { color: var(--rt-hit); }
+.ragtag .rt-over-lose .rt-over-crest { color: var(--rt-hit); border-color: color-mix(in srgb, var(--rt-hit) 45%, transparent); }
+
+/* ── The battle log ─────────────────────────────────────────────────────── */
+
+.ragtag .rt-log {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.22), rgba(0, 0, 0, 0.32));
+  border-color: var(--rt-line-soft);
+  box-shadow: none;
+}
+
+.ragtag .rt-log-hd {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: var(--rt-fs-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--rt-dim);
+  padding: 0.5rem 0.65rem;
+  border-bottom: 1px solid var(--rt-line-soft);
+  position: relative;
+  z-index: 1;
+}
+
+.ragtag .rt-log-hd .rt-i { color: var(--lby-accent); }
+
+/* min-height:0 is load-bearing on a flex child that scrolls — without it the
+   body grows to its content and the panel never scrolls at all. */
+.ragtag .rt-log-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 0.65rem 0.6rem;
+  position: relative;
+  z-index: 1;
+  max-height: clamp(14rem, 46vh, 34rem);
+  flex: 1 1 auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--rt-line) transparent;
+}
+
+@media (min-width: 940px) {
+  .ragtag .rt-log-body { max-height: none; }
+}
+
+.ragtag .rt-log-body::-webkit-scrollbar { width: 8px; }
+.ragtag .rt-log-body::-webkit-scrollbar-thumb { background: var(--rt-line); border-radius: 4px; }
+
+.ragtag .rt-log-round + .rt-log-round { margin-top: 0.6rem; }
+
+.ragtag .rt-log-round h4 {
+  font-size: var(--rt-fs-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--rt-gold);
+  padding-bottom: 0.2rem;
+  margin-bottom: 0.3rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--rt-gold) 22%, transparent);
+  position: sticky;
+  top: 0;
+  padding-top: 0.45rem;
+  background: var(--rt-panel-2);
+  box-shadow: 0 -0.5rem 0 0.01px var(--rt-panel-2);
+  z-index: 2;
+}
+
+.ragtag .rt-log-turn {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  margin: 0.45rem 0 0.2rem;
+  font-size: var(--rt-fs-sm);
+  min-width: 0;
+}
+
+.ragtag .rt-log-turn-n {
+  flex: none;
+  color: var(--rt-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.66rem;
+  border: 1px solid var(--rt-line);
+  border-radius: 0.5rem;
+  padding: 0 0.3rem;
+}
+
+.ragtag .rt-log-turn-cards {
+  color: var(--rt-dim);
+  font-style: italic;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ragtag .rt-log-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.32rem;
+  font-size: var(--rt-fs-sm);
+  line-height: 1.38;
+  padding: 0.08rem 0 0.08rem 0.3rem;
+  border-left: 2px solid var(--rt-line-soft);
+  animation: rt-line-in 300ms ease both;
+}
+
+.ragtag .rt-log-line .rt-i { margin-top: 0.16em; flex: none; }
+.ragtag .rt-log-line.rt-tone-hit { border-left-color: var(--rt-hit); }
+.ragtag .rt-log-line.rt-tone-good, .ragtag .rt-log-line.rt-tone-heal { border-left-color: var(--rt-hp); }
+.ragtag .rt-log-line.rt-tone-power { border-left-color: var(--rt-power); }
+.ragtag .rt-log-line.rt-tone-big { border-left-color: var(--rt-gold); }
+.ragtag .rt-log-empty { color: var(--rt-faint); font-style: italic; font-size: var(--rt-fs-sm); }
+
+/* ── Odds and ends ──────────────────────────────────────────────────────── */
+
+.ragtag .rt-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.2rem;
+  transform: translateX(-50%);
+  background: var(--rt-panel-2);
+  border: 1px solid var(--lby-accent);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.9rem;
+  font-size: var(--rt-fs);
+  z-index: 40;
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.9);
+  animation: rt-rise 260ms ease both;
+}
+
+.ragtag .rt-waiting { text-align: center; padding: clamp(2rem, 6vw, 3.5rem) 1rem; }
+.ragtag .rt-waiting h1 { font-size: clamp(1.5rem, 1.1rem + 2vw, 2.4rem); }
+
+.ragtag .rt-code {
+  font-size: clamp(1.4rem, 1rem + 2.4vw, 2.2rem);
+  letter-spacing: 0.24em;
+  font-weight: 800;
+  color: var(--lby-accent);
+  text-shadow: 0 0 24px color-mix(in srgb, var(--lby-accent) 45%, transparent);
+}
+
+/* ── The detail modal ───────────────────────────────────────────────────
+   Reached by right-click or press-and-hold on any fighter or card. It carries
+   what will not fit on a face: a board's oddities, and the per-card rules notes
+   from the data — which settle exactly the interactions a player stops and
+   wonders about mid-fight. */
+
+.ragtag .rt-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: clamp(0.6rem, 0.3rem + 1.5vw, 1.6rem);
+  background: rgba(8, 5, 4, 0.78);
+  backdrop-filter: blur(7px) saturate(0.45);
+  animation: rt-fade 180ms ease both;
+}
+
+.ragtag .rt-modal {
+  --f-ink: var(--rt-gold);
+  --f-deep: #33261c;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(38rem, 100%);
+  max-height: min(46rem, 92vh);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--f-ink) 42%, var(--rt-line));
+  border-radius: 0.8rem;
+  background: linear-gradient(180deg, var(--rt-panel-2), var(--rt-panel));
+  box-shadow: 0 34px 80px -28px rgba(0, 0, 0, 0.85),
+    0 1px 0 rgba(255, 255, 255, 0.07) inset;
+  animation: rt-modal-in 240ms cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+
+.ragtag .rt-modal-art {
+  flex: none;
+  display: grid;
+  place-items: center;
+  height: clamp(3.4rem, 2.6rem + 3.4vw, 4.6rem);
+  color: color-mix(in srgb, var(--f-ink) 62%, #ffffff);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.45);
+  background:
+    radial-gradient(70% 130% at 50% 4%, color-mix(in srgb, var(--f-ink) 34%, transparent), transparent 74%),
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--f-ink) 24%, var(--f-deep)),
+      color-mix(in srgb, var(--f-ink) 8%, var(--f-deep)));
+}
+
+.ragtag .rt-modal-medal {
+  display: grid;
+  place-items: center;
+  width: clamp(2.6rem, 2rem + 2.6vw, 3.4rem);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.38);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 14px -4px rgba(0, 0, 0, 0.7);
+}
+
+.ragtag .rt-modal-art .rt-sigil {
+  width: 62%;
+  height: 62%;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.6));
+}
+
+.ragtag .rt-modal-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: clamp(0.7rem, 0.5rem + 0.8vw, 1.1rem);
+  scrollbar-width: thin;
+  scrollbar-color: var(--rt-line) transparent;
+}
+
+.ragtag .rt-modal-body::-webkit-scrollbar { width: 8px; }
+.ragtag .rt-modal-body::-webkit-scrollbar-thumb { background: var(--rt-line); border-radius: 4px; }
+
+.ragtag .rt-modal-body h2 {
+  font-size: clamp(1.05rem, 0.9rem + 0.7vw, 1.4rem);
+  line-height: 1.2;
+}
+
+.ragtag .rt-modal-tags {
+  color: var(--rt-dim);
+  font-size: var(--rt-fs-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  margin-top: 0.15rem;
+}
+
+.ragtag .rt-modal-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.ragtag .rt-modal-stats .rt-stat { font-size: 1rem; }
+
+/* The health track, drawn. */
+.ragtag .rt-modal-track {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+
+.ragtag .rt-modal-track-name {
+  flex: none;
+  width: 5.2rem;
+  font-size: var(--rt-fs-sm);
+  color: var(--rt-dim);
+}
+
+.ragtag .rt-strip {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ragtag .rt-cell {
+  flex: 1 1 0;
+  max-width: 1.1rem;
+  height: 1.05rem;
+  border-radius: 2px;
+  background: #2f231c;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.45);
+}
+
+.ragtag .rt-cell-ko { background: var(--rt-hit); }
+.ragtag .rt-cell-stop { background: var(--rt-gold); }
+.ragtag .rt-cell-icon { background: color-mix(in srgb, var(--rt-gold) 45%, #2f231c); }
+.ragtag .rt-cell-revive,
+.ragtag .rt-cell-spirit { background: var(--rt-power); }
+
+.ragtag .rt-modal-key {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+  font-size: var(--rt-fs-sm);
+  color: var(--rt-dim);
+}
+
+.ragtag .rt-modal-key .rt-cell { flex: none; width: 0.7rem; height: 0.7rem; margin-left: 0.5rem; }
+.ragtag .rt-modal-key .rt-cell:first-child { margin-left: 0; }
+
+.ragtag .rt-modal-start {
+  margin-left: 0.32rem;
+  font-style: normal;
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--f-ink);
+}
+
+.ragtag .rt-modal-ops {
+  list-style: none;
+  margin: 0.7rem 0 0;
+  padding: 0.6rem 0 0;
+  border-top: 1px solid var(--rt-line-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.ragtag .rt-modal-ops li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  font-size: var(--rt-fs);
+  line-height: 1.4;
+}
+
+.ragtag .rt-modal-ops li .rt-i { color: var(--f-ink); margin-top: 0.18em; flex: none; }
+.ragtag .rt-modal-sep { color: var(--rt-dim); font-style: italic; margin-top: 0.3rem; }
+
+/* The FAQ note — the reason this modal exists. */
+.ragtag .rt-modal-note {
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.7rem;
+  border-left: 3px solid var(--f-ink);
+  border-radius: 0 0.4rem 0.4rem 0;
+  background: rgba(0, 0, 0, 0.28);
+  font-size: var(--rt-fs-sm);
+  line-height: 1.5;
+  color: var(--rt-ink);
+}
+
+.ragtag .rt-modal-facts {
+  margin: 0.75rem 0 0;
+  padding: 0.6rem 0 0 1.1rem;
+  border-top: 1px solid var(--rt-line-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: var(--rt-fs-sm);
+  line-height: 1.45;
+  color: var(--rt-dim);
+}
+
+.ragtag .rt-modal-facts li::marker { color: var(--f-ink); }
+
+.ragtag .rt-modal-h3 {
+  margin-top: 0.9rem;
+  font-size: var(--rt-fs-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--rt-dim);
+}
+
+.ragtag .rt-modal-h3-sub {
+  margin-left: 0.45rem;
+  letter-spacing: 0.06em;
+  color: var(--rt-faint);
+  text-transform: none;
+}
+
+.ragtag .rt-modal-deck {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.28rem;
+  margin-top: 0.4rem;
+}
+
+.ragtag .rt-modal-chip {
+  font-size: var(--rt-fs-sm);
+  border: 1px solid var(--rt-line);
+  border-radius: 0.5rem;
+  padding: 0.1rem 0.42rem;
+  color: var(--rt-dim);
+  background: rgba(0, 0, 0, 0.24);
+}
+
+.ragtag .rt-modal-chip-start {
+  border-color: color-mix(in srgb, var(--f-ink) 55%, transparent);
+  color: var(--rt-ink);
+}
+
+.ragtag .rt-modal-close {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.55rem;
+  width: var(--rt-tap);
+  height: var(--rt-tap);
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(3px);
+  color: var(--rt-ink);
+  font: inherit;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.ragtag .rt-modal-close:hover { background: rgba(0, 0, 0, 0.65); border-color: var(--f-ink); }
+.ragtag .rt-modal-close:focus-visible { outline: 2px solid var(--lby-accent); outline-offset: 2px; }
+
+@keyframes rt-fade { from { opacity: 0; } to { opacity: 1; } }
+
+@keyframes rt-modal-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ── Motion ─────────────────────────────────────────────────────────────── */
+
+@keyframes rt-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes rt-flip {
+  from { opacity: 0; transform: rotateY(-62deg) translateZ(-30px); }
+  60% { opacity: 1; }
+  to { opacity: 1; transform: rotateY(0) translateZ(0); }
+}
+
+@keyframes rt-shake {
+  0% { transform: translateX(0); }
+  15% { transform: translateX(-6px) rotate(-0.6deg); }
+  32% { transform: translateX(5px) rotate(0.5deg); }
+  50% { transform: translateX(-4px); }
+  68% { transform: translateX(3px); }
+  85% { transform: translateX(-1.5px); }
+  100% { transform: translateX(0); }
+}
+
+@keyframes rt-mend {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--rt-hp) 60%, transparent); }
+  40% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--rt-hp) 26%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+@keyframes rt-pop {
+  0% { opacity: 0; transform: translateY(6px) scale(0.7); }
+  22% { opacity: 1; transform: translateY(-2px) scale(1.12); }
+  38% { transform: translateY(-4px) scale(1); }
+  100% { opacity: 0; transform: translateY(-24px) scale(0.95); }
+}
+
+@keyframes rt-stamp {
+  0% { opacity: 0; transform: scale(2.2) rotate(-9deg); }
+  70% { opacity: 1; transform: scale(0.94) rotate(-2deg); }
+  100% { opacity: 1; transform: scale(1) rotate(-2deg); }
+}
+
+@keyframes rt-clash {
+  0% { opacity: 0; transform: scale(0.4); }
+  60% { opacity: 1; transform: scale(1.25); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes rt-burst {
+  0% { opacity: 0.85; transform: scale(0.2); }
+  100% { opacity: 0; transform: scale(1.5); }
+}
+
+@keyframes rt-line-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes rt-breathe {
+  0%, 100% { opacity: 0.75; }
+  50% { opacity: 1; }
+}
+
+@keyframes rt-sheen {
+  0%, 62% { transform: translateX(0) skewX(-18deg); }
+  100% { transform: translateX(520%) skewX(-18deg); }
+}
+
+/* Motion is decoration here — every animation has a settled end state, so
+   turning them all off costs nothing but the flourish. */
+@media (prefers-reduced-motion: reduce) {
+  .ragtag *,
+  .ragtag *::before,
+  .ragtag *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .ragtag .rt-pop { opacity: 1; animation: none; }
+}
+
+/* ── Narrow screens ─────────────────────────────────────────────────────── */
+
+@media (max-width: 620px) {
+  /* Two fighter boards side by side stops being readable well before the cards
+     do, so the boards stack first and the duel follows at a smaller width. */
+  .ragtag .rt-fighters { grid-template-columns: 1fr; }
+  .ragtag .rt-turnno { margin-left: 0; width: 100%; }
+  .ragtag .rt-ctl { flex: 1 1 0; justify-content: center; }
+  .ragtag .rt-ctl-go { flex: 1.4 1 0; }
+}
+
+@media (max-width: 460px) {
+  .ragtag .rt-duel { grid-template-columns: 1fr; }
+  .ragtag .rt-clash { min-height: 1.6rem; }
+  .ragtag .rt-clash-burst { width: 2.2rem; height: 2.2rem; }
+  .ragtag .rt-card { min-height: 0; }
+}

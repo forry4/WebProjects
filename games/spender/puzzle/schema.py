@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import json
 
-from games.spender.ai.az import actions as A
-from games.spender.ai.az import engine as E
+from games.spender.ai.serving import actions as A
+from games.spender.ai.serving import engine as E
 
 SCHEMA_VERSION = 1
 

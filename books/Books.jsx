@@ -1,6 +1,14 @@
 import { useState, useEffect, useRef } from "react";
 import { baseCss } from "../shared/theme.js";
 
+// CSS lives in the sibling .css file(s) imported below, NOT in a JS template
+// literal. `?inline` hands us the stylesheet as a STRING, so it is still injected
+// by this component's own <style> tag only while it is mounted — behaviour is
+// unchanged. What goes away is the footgun: a single stray backtick inside a css
+// template literal silently reparsed the rest of the file as a tagged template and
+// blanked the whole page. A .css file cannot do that, and editors lint it properly.
+import _cssText from "./Books.css?inline";
+
 // ─── Config ────────────────────────────────────────────────────────────────
 // Derive the HTTP base the same way Spender.jsx does, so dev (localhost:8000)
 // and prod (Render) both work without extra config.
@@ -581,100 +589,4 @@ export default function Books({ authUser, onExit }) {
 }
 
 // ─── Styles (uses the shared theme tokens/fonts from shared/theme.js) ─────────
-const css = `
-.bk-app{min-height:100vh;background:var(--bg);color:var(--text);padding:0 0 80px;}
-.bk-header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;
-	padding:12px 20px;background:rgba(15,14,12,.92);backdrop-filter:blur(6px);
-	border-bottom:1px solid var(--border);}
-.bk-headtitle{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;letter-spacing:.08em;
-	text-transform:uppercase;color:var(--gold);font-size:.95rem;}
-.bk-headright{margin-left:auto;display:flex;gap:8px;}
-.bk-hero{text-align:center;padding:40px 20px 26px;}
-.bk-logo{font-family:'Cinzel','Cinzel Fallback',serif;font-size:clamp(2rem,6vw,2.8rem);font-weight:700;
-	color:var(--gold);letter-spacing:.06em;}
-.bk-tagline{color:var(--text-dim);margin:10px 0 0;font-style:italic;font-size:1.02rem;}
-.bk-list{max-width:720px;margin:0 auto;padding:0 20px;}
-/* two-column layout: bookshelf left, suggestions top-right (stacks on narrow screens) */
-.bk-columns{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:32px;align-items:start;
-	max-width:1160px;margin:0 auto;padding:0 20px;}
-.bk-columns>.bk-list{max-width:none;margin:0;padding:0;}
-.bk-columns>.bk-section{max-width:none;margin:0;padding:0;border-top:none;}
-@media(max-width:920px){
-	.bk-columns{display:block;max-width:720px;}
-	.bk-columns>.bk-section{margin-top:40px;padding-top:24px;border-top:1px solid var(--border);}
-}
-.bk-empty{text-align:center;color:var(--text-dim);padding:30px 0;font-style:italic;}
-.bk-tier{margin-bottom:30px;}
-.bk-tier-head{margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px;}
-.bk-tier-empty{color:var(--text-muted);font-size:.85rem;font-style:italic;padding:6px 0 14px;}
-.bk-stars{font-size:20px;letter-spacing:2px;}
-.bk-star{color:var(--surface3);}
-.bk-star.on{color:var(--gold-gem);}
-.bk-cards{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;}
-.bk-card{display:flex;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--border);
-	border-radius:var(--radius-lg);padding:12px 14px;}
-.bk-rank{flex:none;width:26px;text-align:center;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;
-	color:var(--gold);font-size:1.05rem;}
-.bk-cover{flex:none;width:42px;height:60px;object-fit:cover;border-radius:5px;background:var(--bg);
-	display:flex;align-items:center;justify-content:center;font-size:22px;}
-.bk-cover-blank{color:var(--text-muted);}
-.bk-meta{min-width:0;}
-.bk-title{font-weight:600;font-size:1.05rem;color:var(--text);}
-.bk-author{color:var(--text-dim);font-size:.85rem;margin-top:2px;font-style:italic;}
-.bk-note{color:var(--text);opacity:.85;font-size:.9rem;margin-top:5px;line-height:1.45;}
-/* edit mode */
-.bk-edit-row{display:flex;gap:10px;background:var(--surface);border:1px solid var(--border);
-	border-radius:var(--radius-lg);padding:12px;align-items:flex-start;}
-.bk-edit-row.bk-dragover{border-color:var(--gold);box-shadow:inset 0 3px 0 0 var(--gold);}
-.bk-reorder{flex:none;display:flex;flex-direction:column;align-items:center;gap:2px;}
-.bk-move{background:var(--surface2);border:1px solid var(--border);color:var(--text-dim);
-	border-radius:var(--radius);width:30px;height:26px;line-height:1;font-size:12px;cursor:pointer;padding:0;}
-.bk-move:hover:not(:disabled){border-color:var(--gold);color:var(--gold);}
-.bk-move:disabled{opacity:.3;cursor:default;}
-.bk-handle{cursor:grab;color:var(--text-muted);font-size:18px;user-select:none;line-height:1;}
-.bk-handle:active{cursor:grabbing;}
-.bk-fields{flex:1;min-width:0;display:flex;flex-direction:column;gap:7px;}
-.bk-field-line{display:flex;gap:7px;}
-.bk-in{background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:var(--radius);
-	padding:8px 11px;font-size:.92rem;width:100%;box-sizing:border-box;font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;}
-.bk-in:focus{outline:none;border-color:var(--gold);}
-.bk-in-title{flex:1;font-weight:600;}
-.bk-in-rating{flex:none;width:64px;font-family:'Cinzel','Cinzel Fallback',serif;}
-.bk-in-note{resize:vertical;}
-.bk-del{flex:none;background:transparent;border:1px solid var(--border);color:var(--text-dim);
-	border-radius:var(--radius);width:34px;cursor:pointer;font-size:14px;}
-.bk-del:hover{border-color:var(--red-gem);color:var(--red-gem);}
-.bk-add{display:block;width:100%;margin:10px auto 0;background:transparent;border:1px dashed var(--border);
-	color:var(--text-dim);border-radius:var(--radius);padding:12px;cursor:pointer;
-	font-family:'Cinzel','Cinzel Fallback',serif;font-size:.78rem;letter-spacing:.06em;text-transform:uppercase;}
-.bk-add:hover{border-color:var(--gold);color:var(--gold);}
-.bk-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
-	background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:10px 20px;
-	border-radius:var(--radius);font-size:.9rem;box-shadow:0 8px 24px rgba(0,0,0,.5);}
-/* search-to-add */
-.bk-search{position:relative;margin-bottom:24px;}
-.bk-search-in{font-size:1rem;padding:11px 14px;font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;letter-spacing:normal;}
-.bk-results{margin-top:6px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
-	overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.5);}
-.bk-result-hint{padding:12px 14px;color:var(--text-dim);font-size:.9rem;font-style:italic;}
-.bk-result{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:none;
-	border:none;border-bottom:1px solid var(--border);color:var(--text);padding:9px 14px;cursor:pointer;
-	font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;}
-.bk-result:last-child{border-bottom:none;}
-.bk-result:hover{background:var(--surface2);}
-.bk-result-cover{flex:none;width:34px;height:48px;object-fit:cover;border-radius:4px;
-	background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:18px;}
-.bk-result-text{display:flex;flex-direction:column;min-width:0;}
-.bk-result-title{font-weight:600;font-size:.92rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.bk-result-sub{color:var(--text-dim);font-size:.8rem;margin-top:2px;font-style:italic;}
-/* suggestions section */
-.bk-section{max-width:720px;margin:40px auto 0;padding:24px 20px 0;border-top:1px solid var(--border);}
-.bk-section-head{display:flex;align-items:flex-start;gap:12px;margin-bottom:18px;}
-.bk-section-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.4rem;font-weight:700;color:var(--gold);letter-spacing:.04em;}
-.bk-section-sub{color:var(--text-dim);font-size:.9rem;margin-top:4px;font-style:italic;}
-.bk-sugg-group{margin-bottom:26px;}
-.bk-sugg-by{color:var(--gold);font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;font-weight:600;
-	text-transform:uppercase;letter-spacing:.12em;margin-bottom:10px;}
-.bk-counter{color:var(--text-dim);font-family:'Cinzel','Cinzel Fallback',serif;font-size:.78rem;letter-spacing:.06em;margin-bottom:10px;}
-.bk-login-note{color:var(--text-dim);font-size:1rem;padding:14px 0;font-style:italic;}
-`;
+const css = _cssText;

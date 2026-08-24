@@ -1,0 +1,1371 @@
+"""Dissonance bots — the Easy tier, server-side.
+
+The card-play policy is a direct port of ``policy.rs`` from the Rust core: one
+trick deep, take the +2 tricks as cheaply as possible and shed the -1 tricks as
+expensively as possible. It is the floor the searching bot has to clear: a
+CRN-paired arena on the v2 rules puts ``pimc:8`` **+1.10 +/- 0.10 trick points
+per round** ahead of it, on a pool of 5. (Skat mode scores CAPTURED CARDS since
+2026-08-09 -- its branch of the policy reads the cards, its bidding runs a
+card-currency curve and level map, and that arena figure describes the parity
+modes only.)
+
+THIS FILE IS ALSO WHAT HARD FALLS BACK TO. The Hard tier is the Rust core
+compiled to WASM and run client-side, and when the browser does not answer a
+decision ``_bot_move_sync`` lands here -- so a Hard room with no working WASM is
+playing Normal. That is the whole reason the client tier exists; there is no
+server-side search at any tier.
+"""
+
+from __future__ import annotations
+
+import math
+import os
+import random
+
+from . import engine as E
+
+# --- card play -------------------------------------------------------------
+
+
+#: How many scoring tricks the declarer must have PASSED UP before a defender
+#: reads it as a run at the Null consolation. One ducked trick is ordinary card
+#: play (they had nothing worth spending); two is a pattern.
+#:
+#: SWEPT, because the trade-off is real in both directions -- 400 rounds of a
+#: deliberately ducking declarer against this policy, and 300 rounds of
+#: ordinary bot-vs-bot self-play (defender's margin, higher is better):
+#:
+#:   ducks | Nulls conceded | ordinary margin
+#:     0   |     18/400     |  -16.17   <- gifts the first scoring trick of
+#:     1   |     39/400     |  -14.00      EVERY round; a fix that loses more
+#:     2   |     47/400     |  -12.73      than it saves
+#:     3   |     69/400     |  -12.70
+#:
+#: 2 is the knee: the most denial that costs nothing in ordinary play (the
+#: baseline without the rule at all is -13.00). Waiting is cheap because a
+#: trick forced at trick 9 denies the consolation exactly as well as one
+#: forced at trick 2 -- the declarer needs ZERO all round.
+_DUCKS_BEFORE_DENYING = 2
+
+
+def _want_win(g: dict, seat: int) -> bool:
+    """Whether the mover wants THIS trick. PARITY MODES ONLY -- in skat's card
+    scoring a trick has no value until the cards are in it, so `policy_score`
+    reads the cards instead of calling this.
+
+    Everyone wants the +2 tricks and nobody wants the -1s -- EXCEPT that a
+    defender must sometimes force one onto the declarer. See below.
+
+    IT STILL DOES NOT CHASE THE CONSOLATION AS DECLARER, and that half is a
+    known gap rather than an oversight: a declarer whose contract has gone
+    wrong should switch to ducking everything, but "already gone wrong" is a
+    lookahead judgement and this tier is one trick deep. Reading it off the
+    current total (duck once you are behind) would throw away contracts it was
+    still winning. The searching tiers get it for free -- since 2026-08-07 they
+    solve the contract PAYOFF rather than trick points, so ducking for Null and
+    defending against it both fall out of the minimax. (The old wording here
+    said Hard could not see Null either; that stopped being true with the
+    payoff-aware search and is corrected.)
+
+    DEFENDING AGAINST IT IS DIFFERENT, AND IS NOW HANDLED (2026-08-14).
+    Reported from real games: the bot "keeps trying to win positive tricks"
+    against an opponent ducking for Null -- which is precisely how the Null is
+    handed over, because the declarer scores it by winning NO scoring trick and
+    a defender who takes them all guarantees exactly that. Denying it needs no
+    lookahead at all: "the declarer has won no scoring trick" is a fact on the
+    board (`etricks`), not a judgement, and one forced trick is enough.
+
+    TWO GUARDS, and the first one is the whole difference between a fix and a
+    regression -- MEASURED, both ways, before it shipped:
+
+    * **The declarer must have DUCKED, not merely not-yet-won.** At the start of
+      every round `etricks[declarer]` is 0 because nothing has been played, so
+      keying on that alone made the bot hand over the first scoring trick of
+      EVERY round: ordinary self-play went -13.00 -> -16.17 for the defender,
+      a 3.2-point regression bought in exchange for the Null case. Requiring
+      that at least `_DUCKS_BEFORE_DENYING` scoring tricks have already been
+      completed AND the declarer took none of them is the actual evidence of
+      ducking, and it costs nothing to wait: forcing a trick at trick 9 denies
+      the consolation exactly as well as forcing one at trick 2.
+    * **Giving it away must not buy them the contract**, so this only fires
+      while the declarer would still be short after taking it. That leaves the
+      genuinely balanced case (is a flat 20 worth less to them than the cheap
+      contract they would make?) to the tiers that can price it.
+    """
+    value = E.trick_value_in(g, g["trick"])
+    if value <= 0:
+        return False
+    decl = g["auction"]["declarer"]
+    if (decl >= 0 and seat != decl and g["etricks"][decl] == 0
+            # `sum` is every scoring trick COMPLETED so far, by either seat --
+            # so this reads "they have passed up this many and taken none".
+            and sum(g["etricks"]) >= _DUCKS_BEFORE_DENYING
+            and g["pts"][decl] + value < g["auction"]["level"]):
+        return False
+    return True
+
+
+#: How much a +2 card sitting in an OWN hand is worth defending, as a multiple
+#: of its face value, before and after the hand gets short.
+#:
+#: THE KEEPS ARE THE MODE'S SECOND CURRENCY and a policy that ignores them
+#: throws away a measured 3.5 points a round (`tools/quartet_keeps.py`: random
+#: play keeps +0.91, greedy protection +4.41). But protecting from trick 1
+#: is wrong -- a twelve-card hand has nine cards it must spend and only three
+#: it keeps, so early on almost nothing is at risk and the cost of ducking a
+#: trick you wanted is real. The pressure ramps as the hand approaches the
+#: three it will end with.
+_QUARTET_KEEP_EARLY = 0.45
+_QUARTET_KEEP_LATE = 1.0
+#: Cards left in hand at or below which a keeper is treated as fully at risk.
+_QUARTET_KEEP_SHORT = 5
+
+
+def _quartet_keep_cost(g: dict, c: int, pos: int) -> float:
+    """What spending `c` out of position `pos` costs in KEEP value.
+
+    Zero out of a dummy (positions 2 and 3), whose three kept cards score
+    nothing -- which is the asymmetry the mode is built on and the bot has to
+    know: an own hand hoards, a dummy spends freely to attack.
+    """
+    if pos >= E.QUARTET_HANDS:
+        return 0.0
+    v = E.card_points(c)
+    if v <= 0:
+        return 0.0
+    left = len(g["hands"][pos])
+    ramp = (_QUARTET_KEEP_LATE if left <= _QUARTET_KEEP_SHORT
+            else _QUARTET_KEEP_EARLY)
+    return v * ramp
+
+
+def _quartet_score(g: dict, c: int, seat: int, r: float) -> float:
+    """QUARTET's card policy. Four hands, parity tricks, and a second currency.
+
+    Three things the two-seat parity branch below cannot express, and each is a
+    real losing move if left out:
+
+    * **The trick must be FOLDED, not compared against `led`.** With four cards
+      down, the card to beat is whichever is currently winning -- against `led`
+      alone the bot reads a ruffed trick as still open and throws good cards
+      after it.
+    * **DO NOT OVERTAKE YOUR OWN SIDE.** A player holds two of the four hands,
+      so on half the plies the trick is already theirs; beating your own card
+      wins nothing and spends a better one. Compared on SIDES via `side_of`,
+      the same fix dummy mode needed.
+    * **A 9/10/J/Q left in an own hand scores +2.** So spending one has an
+      opportunity cost the parity branch knows nothing about, and an A/K is a
+      LIABILITY to keep (-1) that the bot should be happy to dump.
+    """
+    pos = E.to_play(g)
+    trump = g["trump"]
+    led = g["led"]
+    want = _want_win(g, seat)
+    keep = _quartet_keep_cost(g, c, pos)
+    # Shedding a card that would COST points to keep is a small free win --
+    # the aces and kings, which are also this game's best trick-winners, so
+    # the two pulls genuinely compete rather than always agreeing.
+    dump = 0.35 * max(0, -E.card_points(c))
+    if led is None:
+        trumpish = 1.0 if E.esuit(c, trump) == E.trump_class(trump) else 0.0
+        base = (1.0 + r + trumpish) if want else (1.0 + (1.0 - r) - trumpish)
+        return base - keep + dump
+    plays = g.get("plays") or [[g["leader"], led]]
+    best_pos, best_card = plays[0]
+    for p, card in plays[1:]:
+        if E.beats(best_card, card, trump):
+            best_pos, best_card = p, card
+    ours = E.side_of(g, best_pos) == E.side_of(g, pos)
+    wins = E.beats(best_card, c, trump)
+    last = len(plays) + 1 >= E.trick_size(g)
+    if ours:
+        # Already ours. Overtaking buys nothing; if the trick is still open the
+        # opponent may yet take it, but answering that with a better card is
+        # what "do not overtake your own side" exists to stop.
+        return 2.2 + (1.0 - r) - keep + dump - (0.8 if wins else 0.0)
+    if want:
+        # Cheapest card that actually takes it, else get out of the way.
+        return (3.0 - r - keep + dump) if wins else (1.0 - r + dump)
+    # An odd trick we do not want: duck, and dump a liability while we are here.
+    # Winning it anyway is the worst outcome, so it is scored below everything.
+    return (0.4 - r - keep) if wins else (3.0 + dump - 0.3 * r)
+
+
+def policy_score(g: dict, c: int, seat: int | None = None) -> float:
+    """Higher is more attractive for the player to move.
+
+    CARD SCORING (skat, 2026-08-09) has its own branch, because "do I want this
+    trick" stops being a property of the trick number: following, the trick's
+    value IS the two cards (led + this candidate), so the score is the exact
+    one-trick delta -- win it and bank the sum, duck and hand the sum over --
+    with a small tie-break toward spending the lower rank either way. Leading,
+    the reply is unknown; lead LOW (a low card usually loses the trick, and
+    mandatory follow-suit makes the opponent capture it) and keep the +2 cards
+    back rather than leading them into the opponent's ducking range. Kept in
+    the same rough 0..4 range as the parity branch so `policy_probs`'
+    temperature means the same thing in both currencies.
+    """
+    if seat is None:
+        seat = E.to_play(g)
+    # "How high is this card", 0..1 -- normalised over the ranks THIS MODE
+    # deals, so the wide deck's two extra low ranks do not silently compress
+    # the term against everything else in the sum for the 32-card modes.
+    _lo, _hi = E.rank_bounds(E.mode_of(g))
+    r = (E.rank(c) - _lo) / float(_hi - _lo)
+    led = g["led"]
+    trump = g["trump"]
+    if E.is_quartet(E.mode_of(g)):
+        return _quartet_score(g, c, seat, r)
+    if E.uses_card_points(E.mode_of(g)):
+        if led is not None:
+            # THE TRICK SO FAR, folded the same way the engine folds it, so a
+            # three-card trick (dummy mode) and a two-card one take one path.
+            plays = g.get("plays") or [[g["leader"], led]]
+            running = sum(E.card_points(card) for _, card in plays)
+            best_pos, best_card = plays[0]
+            for p, card in plays[1:]:
+                if E.beats(best_card, card, trump):
+                    best_pos, best_card = p, card
+            my_pos = E.to_play(g)
+            win_pos = my_pos if E.beats(best_card, c, trump) else best_pos
+            # SIDES, not positions -- and this is what stops the bot
+            # OVERTAKING ITS OWN DUMMY. If the declarer's first card is
+            # already winning the trick, a dummy card that beats it wins
+            # nothing new; what the choice is really about is how much the
+            # trick ends up worth.
+            mine = E.side_of(g, win_pos) == E.side_of(g, my_pos)
+            total = running + E.card_points(c)
+            # A card played BEFORE the last one can still be taken off you, so
+            # the same total is worth backing less confidently -- which is
+            # exactly the dummy's dilemma at position two, with the defender
+            # still to answer.
+            w = 0.5 if len(plays) + 1 >= E.trick_size(g) else 0.3
+            return 2.0 + w * (total if mine else -total) - 0.05 * r
+        trumpish = 1.0 if E.esuit(c, trump) == E.trump_class(trump) else 0.0
+        s = 1.0 + (1.0 - r) - 0.4 * max(0, E.card_points(c)) - trumpish
+        # THE EXTRACTION LEAD, and it is the whole of what must-head buys the
+        # leader (measured: it is the ONLY trick shape whose outcome the rule
+        # changes). Lead a card that is itself a liability and whose every
+        # surviving beater is ALSO a liability -- in the shipped table that is
+        # a king against an unplayed ace -- and the opponent cannot duck it:
+        # they must take the trick and eat both. Without must-head they slide
+        # a 9 under it and the leader eats it instead, a three-point swing.
+        #
+        # Read off `played` plus this seat's own holding, so it is honest
+        # counting rather than a peek, and it decays to nothing once the ace
+        # is gone. Weight 1.6: enough to outrank the lead-low default for a
+        # king specifically, not enough to make the bot lead high generally.
+        if E.must_head_mode(E.mode_of(g)) and E.card_points(c) < 0:
+            cls, seen = E.esuit(c, trump), set(g["played"]) | set(E.playable(g, seat))
+            out = [x for x in range(E.deck_size(E.mode_of(g)))
+                   if x not in seen and E.esuit(x, trump) == cls
+                   and E.beats(c, x, trump)]
+            if out and all(E.card_points(x) < 0 for x in out):
+                s += 1.6
+        return s
+    want_win = _want_win(g, seat)
+    if led is not None:
+        w = E.beats(led, c, trump)
+        if want_win:
+            return 3.0 - r if w else 1.0 - r
+        return 0.6 - r if w else 3.0 + r
+    # Grand counts here too: its trump class is a real one, it is just made
+    # of the four tens rather than a suit.
+    trumpish = 1.0 if E.esuit(c, trump) == E.trump_class(trump) else 0.0
+    if want_win:
+        return 1.0 + r + trumpish
+    # Lead low: under mandatory follow-suit this is how a -1 trick gets forced
+    # onto the opponent.
+    return 1.0 + (1.0 - r) - trumpish
+
+
+def choose_card(g: dict, seat: int) -> int:
+    moves = E.legal_moves(g, seat)
+    if not moves:
+        raise ValueError("no legal move")
+    return max(moves, key=lambda c: (policy_score(g, c, seat), -c))
+
+
+# --- bidding ---------------------------------------------------------------
+
+#: Rough worth of each rank as a trick-winner. The game needs LOW cards too (to
+#: force the -1 tricks onto the opponent), so the curve is deliberately
+#: shallower than a normal high-card-point count.
+#:
+#: `E.NRANKS` ENTRIES, INDEXED BY `E.rank` -- i.e. by STRENGTH, the 2 first.
+#: The five leading entries are the low ranks only a wider deck deals, and the
+#: base deck's eight are byte-identical to what they were before any widening,
+#: so classic and minor bid exactly as they did. `_unknown_rank_value` slices
+#: by `rank_bounds`, so each mode averages only over ranks it can be dealt.
+#:               2    3    4    5    6    7    8    9   10    J    Q    K    A
+_RANK_VALUE = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.2, 0.5, 1.0, 1.6, 2.4]
+
+
+#: What a card the seat cannot identify is worth: the mean of `_RANK_VALUE`.
+#:
+#: A seat holds thirteen cards but can only NAME eleven of them -- the two outer
+#: pile bottoms are dealt face down to their owner as well as to the opponent.
+#: Dropping them entirely would under-rate every hand by two cards and quietly
+#: re-tune every threshold in `_level_for`; counting them at their expectation
+#: keeps the scale where it was. It is the unconditional deck mean rather than
+#: one conditioned on what the seat can see, which is the right refinement for a
+#: tier that has any lookahead at all -- this one has none.
+#:
+#: OVER THE RANKS THE MODE ACTUALLY DEALS. Averaging the whole ten-entry curve
+#: in a 32-card room would fold in two ranks that room has never seen and move
+#: every threshold in `_level_for` by the width of the change -- exactly the
+#: silent re-tune the paragraph above exists to prevent.
+def _unknown_rank_value(curve, mode: str) -> float:
+    lo = E.rank_bounds(mode)[0]
+    return sum(curve[lo:]) / len(curve[lo:])
+
+
+_UNKNOWN_RANK_VALUE = _unknown_rank_value(_RANK_VALUE, E.DEFAULT_MODE)
+
+
+#: CARD-SCORING rank worth (skat mode since 2026-09 -- the mode scores captured
+#: cards, 9/10/J/Q +2 and 7/8/K/A -1, so this curve answers a different
+#: question than `_RANK_VALUE`: not "does this rank win tricks" but "how many
+#: card points does holding it tend to bring home". The +2 ranks carry most of
+#: it (a card you hold is a card you decide the timing of); the aces and kings
+#: keep real worth as CONTROL (they decide who wins the tricks the +2s fall
+#: into) despite being -1 themselves; the 7/8 are the ducking material that
+#: refuses the -2 tricks. Shallow on purpose, like `_RANK_VALUE` -- the LEVEL
+#: MAP below is what was calibrated, so only the curve's shape matters here.
+#:
+#: The wide deck's 5 and 6 lead it (see `_RANK_VALUE` for the indexing). They
+#: are worth ZERO points, which makes them the curve's weakest cards in a way
+#: no other rank is: a 7 at least DUCKS a trick you want to lose and costs the
+#: taker a point, while a 5 neither wins nor stings. It is still a safe
+#: discard, which is worth something under free discard, hence 0.45 rather
+#: than 0 -- a guess whose only job is to sit below the 8, with the LEVEL MAP
+#: doing the calibrated work as always.
+#:                     2    3    4     5     6    7    8    9   10    J    Q    K    A
+_SKAT_RANK_VALUE = [0.0, 0.0, 0.0, 0.45, 0.45, 0.6, 0.5, 0.8, 0.9, 1.1, 1.3, 1.0, 1.5]
+
+_SKAT_UNKNOWN_RANK_VALUE = _unknown_rank_value(_SKAT_RANK_VALUE, E.DEFAULT_MODE)
+
+
+def hand_strength(g: dict, seat: int, denom: int) -> float:
+    """Cheap estimate of the points this seat could take in `denom`.
+
+    ONLY THE CARDS THE SEAT MAY ACTUALLY NAME. This used to read every pile
+    bottom it owned, and two of the three are face down to their owner too -- so
+    the bot bid a hand it could see two cards more of than the player across the
+    table could see of theirs. Not opponent knowledge, so it never played a card
+    it could not have played; it simply valued its own hand with information the
+    rules do not give it, in both auctions and in the talon swap.
+
+    The rank curve is per CURRENCY: the parity modes rate ranks as
+    trick-winners (`_RANK_VALUE`); card scoring rates them as points brought
+    home (`_SKAT_RANK_VALUE`). Same shape, same unknown-card treatment, and
+    `_level_for`'s per-mode maps absorb the different scales.
+    """
+    def visible(q):
+        return (E.playable(g, q)
+                + [p[0] for i, p in enumerate(g["piles"][q])
+                   if len(p) == 2 and i == 1])
+
+    cards = visible(seat)
+    unknown = sum(1 for i, p in enumerate(g["piles"][seat]) if len(p) == 2 and i != 1)
+    if E.has_dummy(E.mode_of(g)):
+        # THE DUMMY COUNTS TOWARDS WHOEVER WINS THE AUCTION, so both bidders
+        # rate their hand WITH it -- that is the judgement the mode is asking
+        # for, and the dummy is face up, so this is reading the table rather
+        # than peeking. Its outer bottoms are hidden from everyone, so they
+        # come in at the deck mean exactly like a player's own do.
+        cards = cards + visible(E.DUMMY_POS)
+        unknown += sum(1 for i, p in enumerate(g["piles"][E.DUMMY_POS])
+                       if len(p) == 2 and i != 1)
+    if E.is_quartet(E.mode_of(g)):
+        # BOTH HANDS THIS PLAYER COMMANDS. Unlike dummy mode's third hand this
+        # one is PRIVATE, so it is the player's own information rather than
+        # something read off the table -- and it is the whole reason a quartet
+        # auction can be a judgement at all: 24 cards is half the deck, against
+        # the 11 nameable cards a classic seat bids on.
+        cards = cards + visible(seat + E.QUARTET_HANDS)
+    mode = E.mode_of(g)
+    curve = _SKAT_RANK_VALUE if E.uses_card_points(mode) else _RANK_VALUE
+    mean = _unknown_rank_value(curve, mode)
+    total = sum(curve[E.rank(c)] for c in cards)
+    total += unknown * mean
+    if denom == E.GRAND:
+        # There are only four trumps in a Grand game, so LENGTH is not the
+        # question -- holding any of them at all is. Each is worth roughly a
+        # stolen trick, and the rest of the hand is valued as if at no-trump.
+        total += sum(1.4 for c in cards if E.rank(c) == E.TEN_RANK)
+        longest = max(sum(1 for c in cards if E.suit(c) == s) for s in range(4))
+        total -= max(0, longest - 5) * 0.8
+    elif denom < E.NOTRUMP:
+        n = sum(1 for c in cards if E.suit(c) == denom)
+        total += max(0, n - 3) * 1.2  # length is worth something, shortage is not
+    else:
+        # No-trump rewards balance: penalise a long suit that would be trump.
+        longest = max(sum(1 for c in cards if E.suit(c) == s) for s in range(4))
+        total -= max(0, longest - 5) * 0.8
+    if E.is_quartet(E.mode_of(g)):
+        # THE KEEPS ARE PART OF THE CONTRACT, so a hand that can protect three
+        # +2 cards is worth more than the same hand in trick terms alone.
+        # Valued at what the OWN hand's best three are worth -- the ceiling,
+        # not the achieved figure, because `_level_for`'s thresholds are
+        # calibrated against whatever scale this returns.
+        own = sorted((E.card_points(c) for c in g["hands"][seat]), reverse=True)
+        total += sum(own[:3])
+    return total
+
+
+#: Minor mode's strength -> level map, CALIBRATED BY SELF-PLAY (2026-08-09,
+#: tools/minor_calibration.py). A minor level is far more than "half a classic
+#: level": each even trick swung to the declarer moves the pts DIFFERENCE by 2
+#: rather than classic's 4, so margins accumulate at half speed against the
+#: same target spacing -- measured, a p90 hand overtaking to level 2 made it
+#: only ~12-18% of the time, which is negative EV against every set price
+#: tried. So the map is deliberately COMPRESSED against the strength scale
+#: (best-denomination strength runs median 10.7 / p90 13.8 / p99 16.4): level
+#: 2 fires around p96 and the rungs above 3 are effectively sacrifice space,
+#: the same role classic's unused 7..12 play. The settled distribution this
+#: yields is ~87% at level 1 -- an honest floor for a mode whose par is
+#: NEGATIVE (-0.5), where even the floor contract is a real ask (~45% made
+#: under greedy play; the searching tiers do better, and the Null consolation
+#: is the declarer's escape).
+_MINOR_LEVEL_NEEDS = ((6, 25.0), (5, 22.5), (4, 20.0), (3, 17.5), (2, 15.0))
+
+_CLASSIC_LEVEL_NEEDS = ((6, 15.0), (5, 12.5), (4, 10.5), (3, 8.5), (2, 6.5))
+
+#: CARD SCORING's strength -> level map (skat mode, 2026-08-09), CALIBRATED BY
+#: SELF-PLAY (tools/skat_calibration.py -- see that file's header for the run).
+#: The scale is nothing like classic's: the pool is ~13 rather than 5, the
+#: declarer (lead + talon + free choice of game) banks well above half of it,
+#: so mid levels are routine where classic's were a stretch. The map runs off
+#: `_SKAT_RANK_VALUE` totals (median best-denomination strength ~11.5) and is
+#: deliberately looser at the bottom: a level under the floor here is a bid
+#: wasted, not a contract saved.
+_SKAT_LEVEL_NEEDS = ((9, 18.6), (8, 17.2), (7, 16.2), (6, 15.5), (5, 14.9),
+                     (4, 14.3), (3, 13.7), (2, 13.0))
+
+
+#: DUMMY mode's strength -> level map, CALIBRATED BY SELF-PLAY
+#: (tools/dummy_calibration.py). Its scale is unlike any other mode's because
+#: `hand_strength` counts the DUMMY's cards too, and since the wide deck a seat
+#: holds 13 rather than 10 -- so the numbers run about 27-31 where skat's run
+#: 13-19. Placed against the measured distribution, not scaled by feel.
+#:
+#: RE-ANCHORED for the thirteen-card deal, and the first map is the reason this
+#: says so: at ten cards a seat the thresholds ran 18.4-23.9, and against the
+#: wider hands EVERY hand cleared the top one -- 100% of contracts settled at
+#: level 12 and 13% of them were made. A level map is a set of quantiles on a
+#: distribution, so it does not survive the distribution moving.
+#:
+#: What it produces now (400 self-play rounds): settled levels 2-10 spread
+#: 2/5/15/21/28/19/6/3/2% with the mode at SIX -- which is where the forced-
+#: level EV curve peaks (`tools/dummy_auction_design.py`: +21.4 at level 6,
+#: falling to -8.0 at 12, so there is such a thing as bidding too high now) --
+#: and 74% made against classic's 82% and skat's 85%.
+_DUMMY_LEVEL_NEEDS = ((10, 30.6), (9, 29.8), (8, 29.0), (7, 28.1),
+                      (6, 27.2), (5, 26.4), (4, 25.5), (3, 24.5),
+                      (2, 23.0))
+
+
+#: QUARTET's strength -> level map, FITTED 2026-08-21 (`tools/quartet_ladder.py`
+#: for the profile, and a 6000-hand sweep for the quantiles it is placed on).
+#:
+#: Best-denomination strength runs mean 21.84, sd 3.10, p50 21.9 -- a much
+#: tighter distribution than the other modes' because a quartet seat rates
+#: TWENTY-FOUR cards rather than eleven, so the sampling noise that widens a
+#: classic hand's estimate mostly cancels. The rungs are therefore packed ~2.0
+#: apart rather than classic's 2.0-2.5 over a much wider spread.
+#:
+#: The profile it buys, 400 rounds of self-play: settles 1..10 with the MODE AT
+#: 6, 75% made, and the busiest rung holding 27% -- inside the "no level above
+#: 40%" constraint the classic campaign works to. Against classic's 82% made
+#: and dummy's 74%.
+#:
+#: WATCH THE SIGN when re-tuning: a threshold is the strength a level DEMANDS,
+#: so RAISING it lowers the settled mode. The first re-fit here pushed every
+#: rung up to chase the forced-EV peak at level 8 and moved the mode the wrong
+#: way (6 -> 5).
+_QUARTET_LEVEL_NEEDS = ((10, 29.4), (9, 27.7), (8, 26.0), (7, 24.4),
+                        (6, 22.4), (5, 20.4), (4, 18.6), (3, 16.6), (2, 14.8))
+
+
+def _level_for(strength: float, mode: str = "classic") -> int:
+    """Map a strength estimate onto a contract level.
+
+    `mode` picks the ladder scale: minor's rungs are dearer per level because
+    even tricks pay half, and skat's run on the card-scoring currency (pool
+    ~13, so the whole map sits higher and reaches deeper into the ladder).
+    """
+    if mode == E.QUARTET:
+        needs = _QUARTET_LEVEL_NEEDS
+    elif mode == E.DUMMY:
+        needs = _DUMMY_LEVEL_NEEDS
+    elif mode == "skat":
+        needs = _SKAT_LEVEL_NEEDS
+    elif mode == "minor":
+        needs = _MINOR_LEVEL_NEEDS
+    else:
+        needs = _CLASSIC_LEVEL_NEEDS
+    for lvl, need in needs:
+        if strength >= need:
+            return lvl
+    return E.MIN_LEVEL
+
+
+def choose_bid(g: dict, seat: int, rng=None) -> dict:
+    """Return {"pass": True} or {"level": n, "denom": d}."""
+    rng = rng or random.Random()
+    opt = E.auction_options(g)
+    bids = list(opt["bids"])
+    if not bids:
+        return {"pass": True} if opt["may_pass"] else {"pass": True}
+
+    denoms = sorted({d for _, d in bids})
+    best_d = max(denoms, key=lambda d: hand_strength(g, seat, d))
+    want = _level_for(hand_strength(g, seat, best_d), E.mode_of(g))
+    mine = [lvl for lvl, d in bids if d == best_d]
+    if not mine:
+        return {"pass": True}
+    if g["auction"]["level"] == 0:
+        # Opening: name what the hand is worth, floored at the minimum.
+        return {"level": max(mine[0], min(want, mine[-1])), "denom": best_d}
+    # Overtaking: take the cheapest rung in the best denomination, but only
+    # when the hand genuinely supports that contract. A same-level overtake in
+    # a higher rank is the cheapest of all and needs the same strength.
+    if want >= mine[0]:
+        return {"level": mine[0], "denom": best_d}
+    return {"pass": True}
+
+
+# --- skat mode: the number ladder, the declaration, Kontra ------------------
+#
+# All three reuse `hand_strength` / `_level_for` — the arithmetic the mode
+# needs is exactly the arithmetic already here, pointed at a different question.
+# A hand's BID CEILING is max over denominations of (base x the level that
+# denomination is worth), because bidding a number V forces you to declare at
+# ceil(V / base) in whichever denomination you pick.
+#
+# The thresholds below (`_KONTRA_TARGET`, `_KONTRA_STRENGTH`) are GUESSES, not
+# measurements. SKAT_MODE.md's open question 4 — "Kontra should double
+# 10–20% of contracts, correctly more often than not" — is a `skatlab`
+# self-play sweep that has not been run; until it is, this tier is deliberately
+# reluctant rather than tuned.
+
+#: A defender only doubles a promise this greedy... Re-anchored for card
+#: scoring (2026-08-09): the target is card points on a ~13-point pool, where a
+#: mid hand banks 6-8, so "greedy" starts around 9 rather than the parity
+#: game's 8-of-12 ceiling. Still guesses, not measurements, as before.
+_KONTRA_TARGET = 9
+#: ...and only when its own holding in the declared denomination backs the read
+#: (a `_SKAT_RANK_VALUE` total; median best-denomination strength is ~11.5).
+_KONTRA_STRENGTH = 12.5
+
+
+def skat_ceiling(g: dict, seat: int) -> int:
+    """The largest number this hand can afford to be held to."""
+    best = 0
+    for d in E.SKAT_DENOMS:
+        want = _level_for(hand_strength(g, seat, d), "skat")
+        best = max(best, E.SKAT_BASE[d] * want)
+    return best
+
+
+def choose_skat_bid(g: dict, seat: int) -> dict:
+    """Return {"pass": True} or {"value": v}: march up the ladder while the
+    standing number is still below the ceiling."""
+    # The ladder is ascending, so the first rung above the standing bid is the
+    # cheapest way to stay in — there is never a reason to jump past it.
+    above = E.auction_options(g)["values"]
+    if above and above[0] <= skat_ceiling(g, seat):
+        return {"value": above[0]}
+    return {"pass": True}
+
+
+def choose_declare(g: dict, seat: int) -> dict:
+    """Name the game that satisfies the bid with the least stretch.
+
+    Never announces: Hand, Sharp and Open all multiply a contract this bot is
+    not confident enough to have bought in the first place.
+    """
+    bid = g["auction"]["value"]
+    best, best_key = None, None
+    for opt in E.skat_declarable(bid):
+        d = opt["denom"]
+        strength = hand_strength(g, seat, d)
+        # How far past what the hand is worth this bid drags the level.
+        stretch = opt["min_level"] - _level_for(strength, "skat")
+        key = (max(0, stretch), -strength)
+        if best_key is None or key < best_key:
+            best, best_key = opt, key
+    return {"denom": best["denom"], "level": best["min_level"],
+            "sharp": False, "open": False}
+
+
+#: THE SERVER TIER NEVER DOUBLES, and that is a measured decision rather than a
+#: gap. Doubling wins N when the contract goes down and costs N^2 when it does
+#: not, so break-even climbs 50/67/75/80/83/86% across levels 1-6 while
+#: contracts bid NORMALLY fail only 4/9/18/24/37/56% (2000 rounds of self-play).
+#: Against ordinary bidding no level is a profitable Double.
+#:
+#: BUT THE MECHANIC IS NOT FOR ORDINARY BIDDING. It is for the SACRIFICE: a
+#: player about to concede a big made contract overtakes at a level they cannot
+#: reach, purely to deny it -- 6C over 5S because 25 points is worse than being
+#: set. Forced sacrifices measure completely differently: 78% set at level 6
+#: against 56% for a genuine one. (EV -0.13 rather than -12.60 -- break-even, and
+#: it was +0.97 before the set base moved N-1 -> N; see the note in CLAUDE.md.)
+#:
+#: THIS TIER STILL CANNOT DO IT, because it cannot TELL the two apart. The
+#: obvious signal is the defender's own holding, and it does not work: within
+#: normal play the set rate is 38-43% at every strength gate, and within
+#: sacrifices 78% at every gate. A gate at strength 11 fires on 58% of
+#: sacrifices but also 6% of genuine high contracts, which only pays if
+#: sacrifices are about half as common as real contracts. They are not.
+#:
+#: What separates them is whether the contract is REACHABLE, which is a solve,
+#: not a rank sum. So the HARD tier does this one: the server hands it both
+#: branches priced (`auction_payoff_options`) and it compares them against its
+#: own double-dummy solve, so it doubles exactly when the contract is dead.
+def choose_double(g: dict, seat: int) -> bool:
+    """Classic's Double, from the defender's seat. Measured: always decline."""
+    return False
+
+
+def choose_kontra(g: dict, seat: int) -> bool:
+    a = g["auction"]
+    target = a["level"] + (E.SHARP_BONUS if g["contract"]["sharp"] else 0)
+    return (target >= _KONTRA_TARGET
+            and hand_strength(g, seat, a["denom"]) >= _KONTRA_STRENGTH)
+
+
+def swap_denom(g: dict, seat: int) -> int:
+    """Which denomination the talon exchange should be valued in.
+
+    Classic mode swaps AFTER the auction, so the declared denomination is the
+    right answer and is already sitting in `auction["denom"]`. Skat mode
+    inverts the order -- the talon resolves BEFORE the game is named, so that
+    key is still -1 and reading it silently disables both contract-aware terms
+    in `worth()` below. Use the denomination this hand is actually worth most
+    in; `choose_declare` picks from the post-swap hand on the same measure, so
+    the two agree.
+    """
+    denom = g["auction"]["denom"]
+    if denom >= 0:
+        return denom
+    # Only skat mode reaches here, and Grand is one of its games -- leaving it
+    # out would value the talon as if the tens were ordinary cards.
+    return max(E.SKAT_DENOMS, key=lambda d: hand_strength(g, seat, d))
+
+
+#: The CLASSIC swap policy's weights -- FITTED, not styled (2026-08-08).
+#:
+#: The policy this replaced took the highest card shown and threw the lowest
+#: card held (its 3x7 "search" was separable, so that is all it could ever do),
+#: and it measured **-0.477 +- 0.226 score/round against standing pat** over
+#: 3000 paired deals, firing in 64% of rounds. Backwards by construction in a
+#: game where 7 of 13 tricks are penalties and low cards are the tool for
+#: forcing them onto the opponent -- the card play's own "lead low" branch
+#: depends on exactly the cards it discarded.
+#:
+#: These weights are a ridge fit on 300 ORACLE-labelled decisions
+#: (`tools/swaplab.py`: every candidate exchange resolved by an exact
+#: double-dummy solve of the real deal), features restricted to what the seat
+#: may legally see. The oracle's own take-histogram is U-SHAPED -- it takes 7s
+#: almost as often as Aces -- and the fit found the same shape on its own:
+#: rank weights below run +0.92 for a 7, negative through the middle, +2.05
+#: for an Ace. Held-out (a second 300 decisions): regret vs the oracle 1.92
+#: against the old policy's 2.50. Under greedy playout, paired over 3000
+#: deals: **+1.500 +- 0.208 vs standing pat, +1.976 +- 0.194 vs the old
+#: policy** -- a gain under BOTH resolutions, which matters because the swap's
+#: value depends on who plays the cards afterwards (the old policy was +1.6 vs
+#: pat under exact play and -0.48 under greedy).
+#:
+#: Indexed by `E.rank` (5 6 7 8 9 10 J Q K A). `_SWAP_GIVE_W`'s Ace entry is a
+#: bare 0.0 because an Ace was never the best discard anywhere in the 6600
+#: labelled candidates -- the weight is unlearnable there; the entry only
+#: keeps the row indexable.
+#:
+#: THE WIDER DECKS' FIVE LEADING ENTRIES ARE UNREACHABLE and are 0.0 for that
+#: reason: only dummy deals a 5 or a 6 and only the four-hand mode deals a 2, 3
+#: or 4, and NEITHER of those modes has a talon. They exist so the row is
+#: indexable by rank like every other curve here. `swap_policy_terms` ships the
+#: BASE-DECK SLICE over the wire, because Rust's `SwapPolicy` indexes by its
+#: own 0..7 rank -- shipping the full row would silently price a 7 as a 2.
+#:               2    3    4    5    6     7      8      9     10      J      Q     K     A
+_SWAP_TAKE_W = (0.0, 0.0, 0.0, 0.0, 0.0, 0.92, -1.36, -1.16, -1.33, -0.44, -0.57, 0.99, 2.05)
+_SWAP_GIVE_W = (0.0, 0.0, 0.0, 0.0, 0.0, 0.32,  0.10,  1.51,  0.88,  0.95, -0.10, -1.04, 0.0)
+_SWAP_TAKE_TRUMP = 1.57
+_SWAP_GIVE_TRUMP = -1.24
+#: Discarding a suit's LAST card (a void beats a singleton, but both help --
+#: shape is real value the old rank-only policy could not see).
+_SWAP_VOID = 1.47
+_SWAP_SINGLETON = 0.67
+#: Lengthening the take-card's suit, per card of it already held / 7.
+#:
+#: There is deliberately NO level-scaled bar on top of these. The ridge fit
+#: produced one (-1.89 x level/6, the oracle swaps less at high stakes), but a
+#: per-decision constant cancels out of the argmax between swaps and, applied
+#: as an explicit stand-pat threshold, it measured NO better on held-out
+#: decisions (regret 2.03 vs 1.92 without). The policy the arenas actually
+#: measured is this one: threshold zero, argmax over the score below.
+_SWAP_LENGTH = 1.24
+
+
+def swap_policy_terms() -> dict:
+    """The fitted classic swap weights, AS DATA for the armed auction request.
+
+    The Hard/Expert auction leaf models the talon (`bid::SwapPolicy` in the
+    Rust core): each determinized world gives the prospective declarer its best
+    exchange from that world's sampled talon before solving. The weights cross
+    the wire from here so a re-fit moves the leaf with no Rust change and no
+    wasm rebuild; only the feature arithmetic lives twice, and
+    `tests/fixtures/swap_policy.jsonl` holds the two copies to one answer.
+
+    The rank rows go over SLICED TO THE BASE DECK (`E.BASE_OFFSET`): Rust
+    indexes them by its own 0..7 rank, and the wider decks' five extra entries
+    only exist here to keep the rows indexable by `E.rank`. A talon is a
+    classic/skat thing anyway -- neither mode that deals a wider deck has one.
+    """
+    return {"take_w": list(_SWAP_TAKE_W[E.BASE_OFFSET:]),
+            "give_w": list(_SWAP_GIVE_W[E.BASE_OFFSET:]),
+            "take_trump": _SWAP_TAKE_TRUMP, "give_trump": _SWAP_GIVE_TRUMP,
+            "void": _SWAP_VOID, "singleton": _SWAP_SINGLETON,
+            "length": _SWAP_LENGTH}
+
+
+#: THE AUCTION AS EVIDENCE ABOUT THE DECLARER'S HAND (2026-08-14) -- how hard to
+#: tilt the searcher's world sample toward hands that would have bid this high.
+#:
+#: MEASURED, and the measurement is the whole reason this exists
+#: (`tools/beliefprobe.py`, 400 real rounds driven to the double phase, 200
+#: uniform resamples each): the declarer's REAL holding sits at the **0.765
+#: percentile** of the resampled distribution and above its median in 87.5% of
+#: rounds -- so every world the searcher looks at hands the declarer a weaker
+#: hand than they actually have. Contracts therefore look likelier to fail than
+#: they are, which is exactly the shape of the defender's measured over-doubling.
+#:
+#: The gap GROWS with the bid, which is why this is a map and not a constant:
+#: 0.706 at level 3, 0.770 at 4, 0.830 at 5, 0.850 at 6. The tilts below are
+#: fitted per level by the same probe, each chosen to re-centre that level's
+#: mean percentile on 0.500 -- measured 0.516 / 0.509 / 0.514 / 0.500 / 0.512
+#: at levels 2..6. A single tilt of 0.40 re-centres the pooled sample at 0.509
+#: and is what an unmapped level falls back to.
+#:
+#: STATED CAVEAT: the probe's auctions were driven by THIS bot, which bids on
+#: the same rank curve the probe measures with, so the two share a yardstick and
+#: the magnitude is inflated even though the direction is not -- winning an
+#: auction selects strong hands under any bidder. Re-fit against Expert-driven
+#: auctions before treating these as final.
+#: FLAT, AND THE PER-LEVEL MAP THAT PRECEDED IT WAS AN ARTIFACT OF THE BIDDER
+#: IT WAS FITTED ON (re-fitted 2026-08-14, same day, against Expert auctions).
+#:
+#: The first fit ran on auctions the SERVER bot bid, where the bias grows with
+#: the level (0.706 at 3 → 0.850 at 6) — because that bot maps hand strength
+#: onto a level monotonically, so a bigger bid really does mean a bigger hand.
+#: EXPERT DOES NOT BID THAT WAY. It searches, so it opens low to CAP an auction,
+#: sacrifices into contracts it cannot make, and picks levels off exact solves —
+#: and against it the bias is FLAT: 0.742 / 0.708 / 0.707 / 0.630 at levels
+#: 4/5/6/7 over 163 positions recorded mid-arena (`ARENA_DEALS=1`, then
+#: `beliefprobe --from-arena=`).
+#:
+#: Shipping the rising map anyway OVER-corrected exactly where contracts settle:
+#: it read 0.357 at level 5 and 0.383 at level 6 (57 and 43 positions), i.e. the
+#: sample came out biased the OTHER way and the searcher imagined the declarer
+#: holding MORE than they do — which makes a defender double too little, and
+#: compounds with `DOUBLE_MARGIN`. Pooled it read 0.421 against a target of
+#: 0.500; a flat 0.35 reads **0.496**.
+#:
+#: The lesson is the one `_DUMMY_LEVEL_NEEDS` already paid for, one level up: a
+#: map fitted against one distribution does not survive the distribution moving,
+#: and "which bot did the bidding" IS the distribution here.
+_BID_TILT = 0.35
+#: Candidate worlds drawn per world kept. Sampling is cheap next to the solve
+#: that follows it, so this buys the resampling real resolution for nothing:
+#: a tilt can only prefer among the candidates it was actually offered.
+_BID_TRIES = 24
+
+
+def bid_prior_terms(g: dict) -> dict | None:
+    """The belief prior, AS DATA for the armed request -- see `bid::BidPrior`.
+
+    The LIKELIHOOD IS A MODELLING CHOICE, not a rule, and that is why only the
+    curve crosses the wire rather than `hand_strength` being mirrored in Rust:
+    it does not have to reproduce the bidder, only to ORDER two holdings the way
+    a bidder would. So a re-fit moves the sampler with no Rust change and no
+    wasm rebuild, and nothing needs a parity fixture holding two copies of a
+    suit-length term to one answer.
+
+    Returns None where there is no bid to condition on -- no settled contract,
+    or a mode whose currency this curve does not describe.
+    """
+    a = g["auction"]
+    if a.get("declarer", -1) < 0 or not a.get("level"):
+        return None
+    # CLASSIC ONLY. `_BID_TILT` was fitted against classic auctions bid by the
+    # tier that plays them, and neither the curve nor the dose describes another
+    # mode: minor runs the same auction shape on a 1..6 ladder in a quarter-sized
+    # currency, skat bids a number rather than a level, and dummy's hand includes
+    # a third seat's cards. Each needs its own probe run, not this on faith.
+    if E.mode_of(g) != "classic":
+        return None
+    return {
+        # Sliced to the base deck, exactly like `swap_policy_terms`: Rust takes
+        # its offset from the LENGTH, so a wider deck needs no flag.
+        "curve": list(_RANK_VALUE[E.BASE_OFFSET:]),
+        "trump_mult": 2.0,
+        "tilt": _BID_TILT,
+        "tries": _BID_TRIES,
+    }
+
+
+#: SKAT'S TALON SWAP, FITTED (2026-08-21). Worth **+4.086 +- 0.183 a round**
+#: over the rule it replaced, and it took two fits to get there -- the first one
+#: was measurably better and shipped nothing, which is the part worth reading.
+#:
+#: THE RULE IT REPLACED was `worth(take) - worth(give)`, which is SEPARABLE, so
+#: its 3x7 "search" could only ever mean "take the highest card shown, throw the
+#: lowest card held". Classic ran the identical shape until 2026-08-08.
+#:
+#: THE FIRST FIT was trained on ORACLE LABELS -- every candidate exchange
+#: resolved by an exact double-dummy solve of the real deal (`tools/swaplab.py`,
+#: 614 decisions). It won on every diagnostic it was scored on: held-out regret
+#: against that oracle 4.35 against the old rule's 5.16 and standing pat's 7.54.
+#: Then the paired arena (`tools/swaparena.py`) said:
+#:
+#:     card play                        first fit - old
+#:     dd    exact double-dummy         +0.817 +- 0.212   (n=6000)
+#:     play  the shipped server bot     -2.132 +- 0.168   (n=30000)
+#:
+#: It was a better policy FOR A SOLVER and cost 2.1 a round in front of the card
+#: play the server actually runs. The histograms said why and it was not subtle:
+#: skat scores the CARDS captured -- 9/10/J/Q at +2, 7/8/K/A at -1 -- and it
+#: GAVE A JACK on 24% of exchanges (the old rule 0.7%) while taking kings on
+#: 19.6% (7.7%). It threw +2 cards out of play and took -1 cards into hand,
+#: because a solver converts top cards into tempo and the greedy bot cannot.
+#:
+#: THE SECOND FIT -- these weights -- is the same enumeration relabelled by the
+#: SHIPPED CARD PLAY (`swaplab.py skat <n> <lo> <hi> play`, 40000 decisions,
+#: which costs no solver at all and so buys 65x the corpus). Gated on deals
+#: DISJOINT from the ones it was fitted on:
+#:
+#:     card play                        this fit - old      this fit - pat
+#:     play  the shipped server bot   +4.086 +- 0.183   +6.027 +- 0.185  n=30000
+#:     hard  the tier's own k=8 PIMC  +2.602 +- 1.157                    n=440
+#:     dd    exact double-dummy       -4.758 +- 0.430                    n=4000
+#:
+#: A GAIN UNDER BOTH CARD PLAYERS THAT EXIST, and a loss only against a solver
+#: holding the opponent's cards, which no tier is. The old rule was +1.941 +-
+#: 0.197 vs pat, so the talon's value roughly triples. The `hard` figure is the
+#: one that decided it: five disjoint 88-deal windows, every one positive, run
+#: through `bidserve`'s `pick` -- the same `wire::answer_card` the browser
+#: worker calls -- so it is the tier's card play and not a proxy for it.
+#:
+#: WHAT THE WEIGHTS SAY. `card-point delta` +2.52 and `give trump` -4.48 are the
+#: two the separable rule could not hold at any weights: take the points, never
+#: discard a trump. Giving an ace (+2.27) or a king (+1.34) is good and TAKING
+#: one is bad (-2.07 / -1.38) -- they are the -1 cards, and a discard leaves
+#: play entirely, so the talon is where a liability goes to be deleted. And
+#: `take suit len` +2.11 is a preference about the HAND rather than either card:
+#: take into the suit you are already long in.
+#: THE TABLES ARE `E.NRANKS` LONG, NOT `E.NRANK`. `E.rank` scores a card on the
+#: FULL deck's scale (0..12, the 2 through the ace) even in a 32-card mode where
+#: only 5..12 are reachable, so the five leading zeros are the unreachable 2..6
+#: and are not fitted. The first cut of this policy sized both tables by `NRANK`
+#: (8) and the fit's feature vector with them, which OVERLAPPED the give block
+#: onto the trump features -- "give a king" and "the take is trump" were one
+#: weight -- and made the policy raise IndexError on an ace. `_SWAP_TAKE_W`
+#: above has always been `NRANKS` long; the guard is
+#: `test_swap_policy.py::test_the_skat_weight_tables_span_every_rank`, and it
+#: is what caught every one of these rows when the deck went to 52.
+_SK_TAKE_W = (0.000, 0.000, 0.000, 0.000, 0.000, 2.345, 0.161, -1.035,
+              0.995, 0.142, 0.880, -1.381, -2.067)
+_SK_GIVE_W = (0.000, 0.000, 0.000, 0.000, 0.000, -2.353, -0.516, 0.747,
+              0.002, -0.307, -1.141, 1.340, 2.268)
+_SK_TAKE_TRUMP = 2.851
+_SK_GIVE_TRUMP = -4.481
+_SK_VOID = 0.685
+_SK_SINGLETON = -0.532
+_SK_TAKE_LEN = 2.111
+#: Skat scores the CARDS captured and a discard leaves play entirely, so what
+#: the talon swallows changes what the round is worth to both seats. Classic has
+#: no analogue of this term.
+_SK_POINTS = 2.521
+_SK_BAR = 0.040
+#: THE BAR AN EXCHANGE MUST CLEAR TO BE WORTH MAKING -- the fit's intercept, and
+#: the only term that can teach this policy to do nothing, since standing pat is
+#: itself a candidate scored at exactly zero. Classic fitted one and dropped it
+#: because there it cancels out of the argmax (every candidate carried it
+#: equally); here it does not cancel. It came back at +0.04, i.e. no bar at all:
+#: under the shipped card play an exchange is almost always worth making, and
+#: the policy stands pat on ~1% of decisions.
+
+
+def _skat_swap_fitted(g: dict, seat: int, denom: int) -> dict:
+    """The fitted skat exchange, or stand pat. See the weights above.
+
+    Mirrors `tools/skat_swapfit.py::feats` term for term -- the fit's features
+    ARE this function, and a drift between them is a policy scoring itself with
+    weights that were trained for a different vector.
+
+    Not shipped to the auction leaf. `main.py` sends `swap_policy_terms()` on a
+    classic or minor auction request and deliberately not on a skat one, so this
+    is a server-side change with no wire shape and no wasm rebuild behind it --
+    at the cost of widening skat's talon blind spot in the auction search, which
+    now under-prices winning a skat auction by ~6 rather than ~2.
+    """
+    hand = list(g["hands"][seat])
+    tc = E.trump_class(denom)
+    best, best_score = {"take": None, "give": None}, 0.0
+    for t in g["shown"]:
+        for h in hand:
+            s = _SK_TAKE_W[E.rank(t)] + _SK_GIVE_W[E.rank(h)] + _SK_BAR
+            if E.esuit(t, denom) == tc:
+                s += _SK_TAKE_TRUMP
+            if E.esuit(h, denom) == tc:
+                s += _SK_GIVE_TRUMP
+            gs = sum(1 for c in hand if E.esuit(c, denom) == E.esuit(h, denom))
+            ts = sum(1 for c in hand if E.esuit(c, denom) == E.esuit(t, denom))
+            if gs == 1:
+                s += _SK_VOID
+            elif gs == 2:
+                s += _SK_SINGLETON
+            s += _SK_TAKE_LEN * ts / 7.0
+            s += _SK_POINTS * (E.card_points(t) - E.card_points(h)) / 2.0
+            if s > best_score:
+                best_score, best = s, {"take": t, "give": h}
+    return best
+
+
+def skat_swap_old() -> bool:
+    """Fall back to the OLD separable rank rule for skat's talon?
+
+    Off. The fitted policy above ships (2026-08-21), and this exists so
+    `tools/swaparena.py` can put the incumbent in one arm without a second copy
+    of it living in the harness -- a copy of a policy measures the copy."""
+    return bool(os.environ.get("DIS_SKAT_SWAP_OLD"))
+
+
+def choose_swap(g: dict, seat: int, denom: int | None = None) -> dict:
+    """Pick the talon exchange, or stand pat.
+
+    CLASSIC (the contract is settled): the fitted policy above.
+
+    SKAT (the talon resolves BEFORE the game is named): its OWN fitted policy
+    since 2026-08-21, from its own `swaplab` run -- never classic's weights,
+    which were fitted where the denomination and level are already known.
+    `DIS_SKAT_SWAP_OLD` restores the separable rank rule it replaced, for the
+    arena's incumbent arm.
+    """
+    if denom is None:
+        denom = swap_denom(g, seat)
+    hand = list(g["hands"][seat])
+
+    if g["auction"]["denom"] >= 0:
+        tc = E.trump_class(denom)
+        best = {"take": None, "give": None}
+        best_score = 0.0
+        for t in g["shown"]:
+            for h in hand:
+                s = _SWAP_TAKE_W[E.rank(t)] + _SWAP_GIVE_W[E.rank(h)]
+                if E.esuit(t, denom) == tc:
+                    s += _SWAP_TAKE_TRUMP
+                if E.esuit(h, denom) == tc:
+                    s += _SWAP_GIVE_TRUMP
+                give_suit = sum(1 for c in hand if E.esuit(c, denom) == E.esuit(h, denom))
+                take_suit = sum(1 for c in hand if E.esuit(c, denom) == E.esuit(t, denom))
+                if give_suit == 1:
+                    s += _SWAP_VOID
+                elif give_suit == 2:
+                    s += _SWAP_SINGLETON
+                s += _SWAP_LENGTH * take_suit / 7.0
+                if s > best_score:
+                    best_score = s
+                    best = {"take": t, "give": h}
+        return best
+
+    if not skat_swap_old():
+        return _skat_swap_fitted(g, seat, denom)
+
+    def worth(c: int) -> float:
+        # Card scoring rates the talon differently: a card TAKEN joins the
+        # played pool (a +2 is points you now control the timing of) and the
+        # discard leaves it entirely (shipping a -1 to the talon deletes the
+        # liability from the round). The skat curve encodes exactly that
+        # preference; still the old separable rule, per the swaplab note above.
+        v = (_SKAT_RANK_VALUE if E.uses_card_points(E.mode_of(g))
+             else _RANK_VALUE)[E.rank(c)]
+        if E.esuit(c, denom) == E.trump_class(denom):
+            v += 0.8  # a trump is worth having -- a Grand ten most of all
+        return v
+
+    best = {"take": None, "give": None}
+    best_gain = 0.0
+    for t in g["shown"]:
+        for h in hand:
+            gain = worth(t) - worth(h)
+            if gain > best_gain:
+                best_gain = gain
+                best = {"take": t, "give": h}
+    return best
+
+
+def act(g: dict, seat: int, rng=None):
+    """One bot action for whichever phase the game is in.
+
+    Returns ``(kind, payload)``. ``"move"`` means the payload is already a
+    complete move dict — the skat phases have no shared shape worth flattening.
+    """
+    phase = g["phase"]
+    skat = E.mode_of(g) == "skat"
+    if phase == "auction":
+        if skat:
+            b = choose_skat_bid(g, seat)
+            return ("move", {"kind": "pass"} if b.get("pass")
+                    else {"kind": "bid", "value": b["value"]})
+        return ("bid", choose_bid(g, seat, rng))
+    if phase == "commit":
+        return ("move", {"kind": "commit", **choose_commit(g, seat)})
+    if phase == "swap":
+        return ("swap", choose_swap(g, seat))
+    if phase == "talon":
+        # Always look. Hand is worth x2, but a tier that cannot evaluate the
+        # gamble should not take it — and looking is also how the bot finds out
+        # whether the talon fixes a denomination for it.
+        if not g.get("looked"):
+            return ("move", {"kind": "look"})
+        sw = choose_swap(g, seat)
+        return ("move", {"kind": "swap", "take": sw["take"], "give": sw["give"]})
+    if phase == "declare":
+        return ("move", {"kind": "declare", **choose_declare(g, seat)})
+    if phase == "double":
+        return ("move", {"kind": "double", "on": choose_double(g, seat)})
+    if phase == "kontra":
+        return ("move", {"kind": "kontra", "on": choose_kontra(g, seat)})
+    if phase == "re":
+        # Doubling back is a read on the defender's read; not this tier.
+        return ("move", {"kind": "re", "on": False})
+    if phase == "play":
+        return ("play", choose_card(g, seat))
+    return (None, None)
+
+
+def choose_commit(g: dict, seat: int) -> dict:
+    """QUARTET's stage-two declaration: which hand leads, and the one swap.
+
+    THE SWAP IS THE EASY HALF and it falls straight out of the scoring. Only an
+    own hand's kept cards score, so the right trade is to pull a +2 card out of
+    the dummy and push a liability (an A or K, worth -1 to keep) the other way.
+    Taken only when it strictly improves the own hand's keep ceiling, so the
+    bot never spends its one swap on a wash.
+
+    WHICH HAND LEADS defaults to the DUMMY, and the reason is the asymmetry the
+    mode is built on: leading gives the opponent the informed last seat
+    (`trick_order`), so the hand that leads is the one that would rather act on
+    less information -- and that is the dummy, which has no keeps to protect
+    and can spend freely. Overridden when the OWN hand is meaningfully longer
+    in trump, because drawing trumps from the hand that holds them is worth
+    more than the seat it costs.
+    """
+    decl = g["auction"]["declarer"]
+    dummy = decl + E.QUARTET_HANDS
+    hand, dhand = g["hands"][decl], g["hands"][dummy]
+
+    def keep_ceiling(cards):
+        return sum(sorted((E.card_points(c) for c in cards), reverse=True)[:3])
+
+    take = give = None
+    best = keep_ceiling(hand)
+    for t in dhand:
+        for gv in hand:
+            after = keep_ceiling([c for c in hand if c != gv] + [t])
+            if after > best:
+                best, take, give = after, t, gv
+    trump = g["auction"]["denom"]
+    lead = dummy
+    if trump < E.NOTRUMP:
+        mine = sum(1 for c in hand if E.suit(c) == trump)
+        theirs = sum(1 for c in dhand if E.suit(c) == trump)
+        if mine >= theirs + 2:
+            lead = decl
+    out = {"lead": lead}
+    if take is not None:
+        out["take"], out["give"] = take, give
+    return out
+
+
+def cross_fit() -> float:
+    """HOW MUCH of the auction tree's cross-fit correction to apply. 0 unless
+    `DIS_XFIT` sets a weight, so shipped behaviour is bit-identical.
+
+    THE DEFECT. `min` and `max` over noisy estimates are biased -- the winner is
+    partly whichever estimate's noise favoured it, so a min reads LOW and a max
+    reads HIGH. The tree takes one such aggregation per ply, so the bias is
+    DEPTH-DEPENDENT, and the auction's two branch kinds have different depths:
+    PASSING settles immediately, while RAISING buys one more opponent `min`
+    before anything settles. Every raise is therefore shaded down against every
+    pass, at every strength.
+
+    That is exactly what the abstraction's equilibrium says is wrong with the
+    shipped bidder: it concedes level 4 on 31-67% of decisions where the
+    equilibrium concedes on 0-5%, and the attribution repeats one sentence --
+    wants `bid 5` or `bid 6`, does `pass`. It is not leaf accuracy (an exact
+    leaf was built and measured: no change), not the opening's marginal shape
+    (the opening bias: no change), and not the denomination forever-ban
+    (`cfrlab banned`: 44% against 44%). It is the selection itself.
+
+    THE FIX costs no solves: choose the action using every sampled world EXCEPT
+    one, then score it on the one held out, and average over which is held out.
+    See `auc_search::Search::combine`.
+
+    A WEIGHT RATHER THAN A FLAG, because the FULL correction overshoots and that
+    is measured, not feared: at 1.0 the tree does exactly what it was built to
+    do -- concedes less and bids higher (settled mean 4.48 -> 4.92, probe-pass
+    81.7% -> 77.0%) -- and its contracts stop coming home (made 68.5% -> 49.2%,
+    exploitability 5.45 -> 6.11). Removing a selection bias entirely costs the
+    selection: when sampling noise exceeds the gap between two actions, a
+    cross-fitted choice cannot tell them apart and returns roughly their MEAN
+    where the truth is their MIN.
+    """
+    return float(os.environ.get("DIS_XFIT", "0") or 0)
+
+
+def jump_weight() -> float:
+    """How heavily the auction SEARCH weights the jump bonus, against how
+    heavily the room PAYS it. 1.0 (the shipped scoring) unless `DIS_JUMP_W`
+    says otherwise.
+
+    NOT A RULES CHANGE: the engine still scores a set at `JUMP_SET_BONUS x j`
+    and nothing about what a round pays moves. This scales only what the tree
+    BELIEVES that term is worth while it decides -- the `DOUBLE_MARGIN` /
+    `open_bias` shape, a per-decision nudge the server computes.
+
+    WHY. Measured against the abstraction's equilibrium, the tree's concession
+    is FLAT in the jump where the equilibrium's rotates hard on it: at standing
+    4 the equilibrium concedes 2% of one-rung climbs and 28% of leaps, the tree
+    52% and 53%. The term does reach the argmax -- editing only `state.jump`
+    moves the option sums by a median of 54 and flips 2 decisions in 40 -- so it
+    is a magnitude question, and 44.4% of the tree's attributed exploitability
+    sits at jump 1, the cheap climbs it hands over.
+
+    It is the first treatment in this campaign that ROTATES the policy rather
+    than SHIFTING it. Four uniform ones (the opening bias, the exact leaf,
+    opponent softening, cross-fitting) came back null or monotonically worse,
+    and a shift cannot produce a rotation at any dose.
+    """
+    return float(os.environ.get("DIS_JUMP_W", "1") or 1)
+
+
+def belief_worlds() -> int:
+    """How many deals the modelled opponent gets to choose against, drawn from
+    THEIR OWN information set. 0 (the shipped default) means no belief sample is
+    drawn and the tree is exactly the one that has always run.
+
+    THE LAST STRUCTURAL FLAW IN THE AUCTION TREE, and the only one five separate
+    re-weightings could not touch. The tree searches from OUR information set:
+    our hand is identical in every sampled world and only theirs varies, so at a
+    MIN node the modelled opponent picks the reply that punishes OUR EXACT
+    HOLDING. A real opponent must reply into their own uncertainty and cannot.
+
+    `EXPERT_OPP_TEMP` prices the CONSEQUENCE of that -- they miss the punishing
+    reply when it is barely better -- and measured slightly worse (5.70 against
+    Hard's 5.45). This builds the CAUSE, and it is qualitatively different in
+    one way no temperature can reach: a softmax gives ONE mixed reply shared
+    across every world, where a belief search gives a DIFFERENT reply per world,
+    correlated with the hand that would be making it.
+
+    IT COSTS SOLVES, which is why it is a number and not a flag: `k x m` extra
+    determinizations, each solved in every denomination on both sides. At the
+    shipped k = 8, m = 4 is about 4x the auction's solve budget -- an offline
+    arm first, a serving question only if it earns one.
+    """
+    return int(os.environ.get("DIS_BELIEF_W", "0") or 0)
+
+
+#: THE MEASURED GAP BETWEEN THE SOLVER'S LADDER AND THE REAL ONE.
+#:
+#: `cfrlab playnoise`, 794 imposed contracts played out by the SHIPPED search on
+#: both seats: a real declarer finishes **+0.95 points** above the double-dummy
+#: guarantee on average, with **sd 1.94**, and the ladder that follows is 16%
+#: looser than the solver believes (a rung costs 19.4 points of make-chance
+#: double-dummy and 16.3 in real play). The mean shrinks with the level -- a
+#: defender leaks less to a declarer who is straining -- which is why the slope
+#: is separate rather than folded into a pooled constant.
+#:
+#: These are the numbers `cfrlab`'s own real-play leaf already uses, quoted here
+#: so the bot and the yardstick can finally be the same game.
+PLAY_CAL = {"shift": 1.45, "slope": -0.11, "sd": 1.94}
+
+
+def play_calibration() -> dict | None:
+    """The auction leaf's real-play correction, or None for the double-dummy
+    guarantee the tree has always searched. OFF unless `DIS_PLAY_CAL` is set.
+
+    THE MISALIGNMENT THIS ADDRESSES, and it went unnoticed through six failed
+    treatments. The exploitability instrument scores every arm with the
+    REAL-PLAY leaf while the tree it grades optimises the DOUBLE-DUMMY one -- so
+    the bot has been maximising an objective it is not marked on, and every
+    previous arm tuned a coefficient inside that mismatch.
+
+    `DIS_PLAY_CAL` is a scale on `PLAY_CAL`, so `1` is the measurement and `0`
+    is today. `DIS_PLAY_SD` overrides the spread alone, because the mean and the
+    spread do different jobs: the mean says contracts are easier than the solver
+    thinks, the SPREAD is what flattens P(make) per rung and is the half that
+    changes shape rather than level.
+
+    **NEGATIVE SCALES ARE MEANT, not a guard nobody removed.** Correcting the
+    leaf toward measured reality made the tier much WORSE (5.45 -> 6.60 with the
+    spread, 7.77 without it), which says the guarantee's pessimism is doing
+    necessary work rather than being an error. The reading that explains it is
+    a RISK PREMIUM: bidding is a commitment to TAKE the points, and this payoff
+    punishes a set far harder than an overtrick pays, so the right estimate to
+    bid against sits below the mean. A negative scale tests that directly -- it
+    predicts more pessimism should help -- and a prediction a knob can already
+    express is one worth checking before it becomes a story.
+    """
+    w = float(os.environ.get("DIS_PLAY_CAL", "0") or 0)
+    if w == 0:
+        return None
+    out = {k: v * w for k, v in PLAY_CAL.items()}
+    if os.environ.get("DIS_PLAY_SD") is not None:
+        out["sd"] = float(os.environ["DIS_PLAY_SD"])
+    return out
+
+
+def search_rules_overrides() -> dict:
+    """Every EXPERIMENT knob the auction search's `rules` block takes, in ONE
+    place -- and that is the whole point of the function.
+
+    `engine.auction_search_payload` is pure and knows nothing about arms; the
+    flags are the caller's. But there are two callers -- `main.py` and
+    `tools/cfrlab.py` -- and a harness that rebuilds a payload the server
+    assembles somewhere else silently ships the DEFAULT for whatever it forgot.
+    That has now happened three times in this package (the `expertto` suffix
+    collision, `dblsweep`'s live margin, and cfrlab omitting `opp_model` and so
+    measuring Hard's auction for the entire CFR campaign while its docstring
+    said Expert). Both callers `update()` from here.
+
+    `opp_model` is deliberately NOT here: it is a TIER, not an arm, and the two
+    callers choose it differently on purpose -- the server from the room's
+    difficulty, the lab from `CFR_OPP_TEMP`. It is stamped on every recorded
+    row instead, which is the guard that fits its shape.
+    """
+    out = {}
+    if cross_fit() > 0:
+        out["xfit"] = cross_fit()
+    if jump_weight() != 1.0:
+        out["jump_weight"] = jump_weight()
+    return out
+
+
+def exact_leaf() -> bool:
+    """Should the auction search price its leaves EXACTLY? OFF unless
+    `DIS_EXACT_LEAF` is set, so shipped behaviour is byte-identical.
+
+    THE DEFECT IT ADDRESSES is the crate's one documented leaf error. The search
+    prices a candidate contract as `max(what I can guarantee on points, the Null
+    consolation if I can guarantee ducking)` -- the better of two SEPARATELY
+    guaranteed plans. A real defence has to stop both at once and often cannot,
+    so the shipped leaf under-prices declaring: measured over 900 (deal,
+    contract) pairs it agrees with an exact solve 93.3% of the time and every
+    single gap is POSITIVE.
+
+    `dd::threat_value` closes it for one extra solve per DENOMINATION -- not per
+    contract, which is what makes it affordable in a tree that reaches fifty
+    settlements. See `Option_::payoff_exact` and the Rust sweep that proves the
+    two scalars price every level and every jump exactly.
+
+    An EXPERIMENT until it is measured: the gate is `cfrlab br` exploitability
+    (the baseline is 5.87 against this abstraction's own 1.47 floor), and only
+    after that moves is an arena worth its hours.
+    """
+    return bool(os.environ.get("DIS_EXACT_LEAF"))
+
+
+#: THE OPENING BIAS -- strength-conditioned, and OFF unless `DIS_OPEN_BIAS` sets
+#: a weight. Measured defect: Expert's opening moves 1.38 -> 4.48 across the
+#: eight strength buckets while its make rate over the same range runs 36% ->
+#: 80%, and an exact best response to its fitted auction policy wins 5.87 payoff
+#: points a deal (9.06 when this was written, under the pre-2026-08-16 prices;
+#: re-measured 2026-08-19 against this abstraction's own 1.47 floor). The equilibrium ramps 2.25 -> 4.84 over the same buckets, so
+#: the gap is concentrated at the WEAK end -- Expert opens at the floor with
+#: hands the equilibrium opens at 2.25.
+#:
+#: The cuts are octiles of `hand_strength` over the seat's best denomination,
+#: measured on the 2000-deal real-play cache; the targets are that cache's CFR+
+#: equilibrium opening, monotonised (its one inversion, 3.86 at bucket 3 against
+#: 3.41 at 4, is inside the per-seed sd of 0.14-0.30 and is pooled to 3.63).
+#:
+#: A DIRECTION, NOT A TABLE TO COPY. It biases the search's own ranking rather
+#: than replacing it, so where the search has a real opinion it still wins.
+#:
+#: KNOWN LIMITATION -- IT CANNOT MIX. The equilibrium's per-bucket opening is a
+#: MIXTURE (bucket 0 plays some 1s, some 2s, some higher, averaging 1.59); a
+#: quadratic pull toward that mean is a point target, and a point target between
+#: two rungs simply picks the nearer one. Measured: at target 1.59 the bias
+#: favours level 2 at every weak bucket and level-1 openings vanish entirely
+#: (18% -> 0% in the arena), which is NOT what the equilibrium does. In an
+#: imperfect-information game the mixing is often the point, so this is a real
+#: gap and not a rounding detail -- reproducing it would mean sampling the
+#: per-bucket distribution rather than pulling toward its mean, at the cost of
+#: overriding the search's per-deal opinion. Unresolved; see CLAUDE.md.
+#: RE-FITTED 2026-08-16 for the re-priced scoring (L^2+4 make, 2L+2+6j set).
+#: The old targets came from the old economics and do not transfer: under the
+#: doubled jump penalty the equilibrium OPENS LOW AND CLIMBS, and only the top
+#: bucket leaps. That is the jump rule doing its designed job -- leaping to 5
+#: costs 42 on a set against 18 for walking there.
+#:
+#: THE FULL DISTRIBUTION, NOT ITS MEAN. The first cut pulled quadratically toward
+#: the per-bucket MEAN opening, which cannot express a mixture: bucket 0 plays
+#: 53% level 1 and 38% level 2, and a point target at their mean of 1.59 simply
+#: picks the nearer rung -- measured, level-1 openings vanished entirely, 18% ->
+#: 0%, which is not what the equilibrium does. In an imperfect-information game
+#: the mixing is frequently the point. So the bias is now the equilibrium's LOG
+#: PROBABILITY per level, normalised so its favourite rung costs nothing: rungs
+#: it mixes over stay cheap, rungs it never plays are dear, and the search still
+#: chooses within the shape.
+#:
+#: The CUTS are strength octiles of the deal cache and do not depend on the
+#: scoring at all, so they are unchanged.
+_OPEN_CUTS = [7.82, 8.92, 9.82, 10.62, 11.43, 12.32, 13.43]
+#: P(open at level L) by strength bucket, CFR+ at 120k averaged over four seeds.
+_OPEN_DIST = [
+    [0.531, 0.377, 0.070, 0.015, 0.003, 0.001, 0.001, 0.001],
+    [0.361, 0.337, 0.263, 0.029, 0.005, 0.002, 0.001, 0.000],
+    [0.353, 0.355, 0.199, 0.081, 0.008, 0.002, 0.002, 0.001],
+    [0.101, 0.188, 0.346, 0.351, 0.008, 0.003, 0.002, 0.000],
+    [0.301, 0.219, 0.236, 0.224, 0.012, 0.004, 0.003, 0.001],
+    [0.142, 0.111, 0.350, 0.352, 0.036, 0.005, 0.003, 0.001],
+    [0.258, 0.302, 0.156, 0.087, 0.186, 0.007, 0.003, 0.001],
+    [0.007, 0.009, 0.021, 0.436, 0.460, 0.057, 0.007, 0.002],
+]
+#: Never log(0): a rung the equilibrium abandons should be expensive, not
+#: impossible, because the search sees the actual deal and this table does not.
+_OPEN_FLOOR = 0.02
+
+
+def open_bias_terms(g: dict, seat: int, options: list[dict]) -> list[float] | None:
+    """A per-option nudge toward the level this hand's strength wants, or None.
+
+    Only the OPENING, which is where the defect was measured -- nothing stands,
+    so `auction.level` is 0. Every other decision is left exactly as it was.
+    """
+    w = float(os.environ.get("DIS_OPEN_BIAS", "0") or 0)
+    if w <= 0 or E.mode_of(g) != "classic":
+        return None
+    a = g.get("auction") or {}
+    if g.get("phase") != "auction" or a.get("level", 0) != 0:
+        return None
+    best = max(hand_strength(g, seat, d) for d in range(E.NOTRUMP + 1))
+    b = 0
+    while b < len(_OPEN_CUTS) and best >= _OPEN_CUTS[b]:
+        b += 1
+    dist = _OPEN_DIST[b]
+    lp = [math.log(max(p, _OPEN_FLOOR)) for p in dist]
+    top = max(lp)
+    out = []
+    for o in options:
+        mv = o.get("move") or {}
+        lvl = mv.get("level") if mv.get("kind") == "bid" else None
+        if lvl is None or not 1 <= lvl <= len(lp):
+            out.append(0.0)
+        else:
+            out.append(w * (lp[lvl - 1] - top))
+    return out

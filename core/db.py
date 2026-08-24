@@ -18,6 +18,7 @@ table, Castles of Crimson's ``coc_games``, and the Books tables.
 import logging
 import os
 import sqlite3
+import threading
 import time
 
 LOG = logging.getLogger("core.db")
@@ -209,11 +210,19 @@ def init_core_schema(conn) -> None:
 
 
 # ── Game retention / cleanup ──────────────────────────────────────────────────
-# Shared by both game tables (`games`, `coc_games`), which share the same shape:
-# player1_id / player2_id (a registered user's id is a row in `users`; a guest's
-# is a random id that isn't) + updated_at (epoch seconds, last activity).
+# Shared by every game table (`games`, `coc_games`, …), which share the same
+# shape: player1_id / player2_id (a registered user's id is a row in `users`; a
+# guest's is a random id that isn't) + status + updated_at (epoch seconds, last
+# activity).
 DEFAULT_GUEST_RETENTION = 24 * 3600        # guest games: 24 hours
 DEFAULT_USER_RETENTION = 30 * 24 * 3600    # registered-user games: 30 days
+# A row still `status='open'` is a waiting room nobody ever started. Unlike a
+# finished game it is not history worth keeping, and unlike a `playing` one it
+# has no state anyone can resume — it just sits in every player's Open list,
+# outliving the game version it was created under (a real 4-day-old lobby
+# prompted this: created before a release, join-able forever after it).
+# So open rooms age out on their own, registered host or not.
+DEFAULT_OPEN_RETENTION = 48 * 3600         # never-started open lobbies: 48 hours
 
 # Throttle: this runs opportunistically off lobby browsing, so cap it to once per
 # hour per table per process (races are harmless — the DELETE is idempotent).
@@ -222,8 +231,12 @@ _last_cleanup: dict[str, int] = {}
 
 
 def cleanup_stale_games(table: str, guest_seconds: int = DEFAULT_GUEST_RETENTION,
-                        user_seconds: int = DEFAULT_USER_RETENTION) -> int:
+                        user_seconds: int = DEFAULT_USER_RETENTION,
+                        open_seconds: int = DEFAULT_OPEN_RETENTION) -> int:
     """Delete stale rows from a games table by LAST ACTIVITY (`updated_at`):
+      * a never-started open lobby (`status='open'`) once it's older than
+        `open_seconds` (default 48h) — registered host or not, since a waiting
+        room nobody joined has no state to resume and no history to keep,
       * an all-guest game (no player id present in `users`) once it's older than
         `guest_seconds` (default 24h),
       * a game with ANY registered player once it's older than `user_seconds`
@@ -233,6 +246,7 @@ def cleanup_stale_games(table: str, guest_seconds: int = DEFAULT_GUEST_RETENTION
     Returns the number of rows deleted (counted first, since the driver-agnostic
     cursor has no reliable rowcount on libsql)."""
     now = int(time.time())
+    open_where = "updated_at < ? AND status = 'open'"
     guest_where = ("updated_at < ? "
                    "AND (player1_id IS NULL OR player1_id NOT IN (SELECT id FROM users)) "
                    "AND (player2_id IS NULL OR player2_id NOT IN (SELECT id FROM users))")
@@ -242,7 +256,11 @@ def cleanup_stale_games(table: str, guest_seconds: int = DEFAULT_GUEST_RETENTION
     try:
         cur = conn.cursor()
         deleted = 0
-        for where, cutoff in ((guest_where, now - guest_seconds), (user_where, now - user_seconds)):
+        # The open clause runs FIRST so a row that is both stale-open and
+        # stale-by-players is counted once, under the reason it goes.
+        for where, cutoff in ((open_where, now - open_seconds),
+                              (guest_where, now - guest_seconds),
+                              (user_where, now - user_seconds)):
             cur.execute(f"SELECT COUNT(*) FROM {table} WHERE {where}", (cutoff,))
             n = cur.fetchone()[0]
             if n:
@@ -256,13 +274,30 @@ def cleanup_stale_games(table: str, guest_seconds: int = DEFAULT_GUEST_RETENTION
         conn.close()
 
 
-def maybe_cleanup_games(table: str, **kwargs) -> int:
-    """Throttled `cleanup_stale_games` — a no-op unless at least an hour has passed
-    since this process last cleaned `table`. Safe to call on every lobby fetch."""
+def _cleanup_worker(table: str, kwargs: dict) -> None:
+    try:
+        cleanup_stale_games(table, **kwargs)
+    except Exception as e:  # noqa: BLE001 - cleanup must never break a lobby request
+        LOG.warning("cleanup_stale_games(%s) failed: %s", table, e)
+
+
+def maybe_cleanup_games(table: str, background: bool = False, **kwargs) -> int:
+    """Throttled `cleanup_stale_games` — a no-op unless at least an hour has passed since
+    this process last cleaned `table`.
+
+    With ``background=True`` (the lobby routes) the delete runs in a daemon THREAD so it
+    never blocks the request — the stale-game DELETE's `NOT IN (SELECT id FROM users)`
+    scans were adding ~1-2s to the FIRST open-games fetch each hour. The throttle slot is
+    claimed synchronously first, so only ONE thread is spawned per window; returns 0
+    immediately. ``background=False`` (default) keeps the old synchronous behavior +
+    row-count return (used by tests and the module-import warm cleanup)."""
     now = int(time.time())
     if now - _last_cleanup.get(table, 0) < _CLEANUP_MIN_INTERVAL:
         return 0
     _last_cleanup[table] = now
+    if background:
+        threading.Thread(target=_cleanup_worker, args=(table, kwargs), daemon=True).start()
+        return 0
     try:
         return cleanup_stale_games(table, **kwargs)
     except Exception as e:  # noqa: BLE001 - cleanup must never break a lobby request

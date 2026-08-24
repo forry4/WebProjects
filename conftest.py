@@ -1,7 +1,7 @@
 """Root pytest conftest — keep the shared engine deck globals isolated across the suite.
 
 `wwsd/app.py` installs the friend's deck into the SHARED engine globals
-(`games.spender.ai.az.engine.COST/PTS/BONUS/...`) via `analyze.prepare()` **at import time**
+(`games.spender.ai.serving.engine.COST/PTS/BONUS/...`) via `analyze.prepare()` **at import time**
 (deliberate for the process-isolated wwsd Render service). But pytest imports every test module
 during COLLECTION before running any test, so importing `wwsd.app` to collect `test_wwsd.py`
 rewrites the deck for the whole session — which silently broke 45 spender tests (replay/review/
@@ -12,7 +12,7 @@ This conftest loads before any test module, so it snapshots the REAL deck first,
   - restores it after every test — undoes any in-test `prepare()`/`analyze()` call (wwsd tests),
 keeping the override scoped to the code that intends it, in any test order.
 """
-from games.spender.ai.az import engine as E
+from games.spender.ai.serving import engine as E
 import pytest
 
 _ENGINE_DECK_ATTRS = (

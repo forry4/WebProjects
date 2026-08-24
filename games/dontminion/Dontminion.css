@@ -1,0 +1,797 @@
+/* Dontminion — game-local styles. Rides the shared .card frame (splendorCardCss)
+   via --card-w/--card-h; everything here is .dm-scoped. NO BACKTICKS in this file. */
+
+.dm { color: var(--text, #e8dfc8); }
+.dm-center { min-height: 60vh; display: flex; align-items: center; justify-content: center; }
+
+/* ── lobby ── */
+/* The column grid, its breakpoints and the tab bar are the shared `.lby-cols` /
+   `.lby-tabs` (shared/lobby.lobby-css.css) — only the page width is DM's own.
+   Nothing here may set display/grid-template-columns/gap: this sheet is
+   concatenated AFTER the shared one, so a base rule would out-order the shared
+   MEDIA rules and pin the lobby to three columns on a phone. */
+/* FULL-BLEED, like Spender's and CoC's lobbies (both `max-width:none`) and Duel's
+   (no cap at all). This carried `max-width:1280px;margin:0 auto` and was the only
+   three-column lobby that stopped short of the screen edge — the columns got
+   narrower on a wide monitor while the space beside them went unused. The cap is
+   lobby-only, so the game board's own width rules are untouched. */
+.dm-lobby-cols { padding: 12px 18px 40px; width: 100%; }
+/* ...and the tab bar has to match that inset. Every other game gets its side
+   padding from a PAGE wrapper (.browser / .coc-wrap / .duel), so their tab bar
+   and columns line up for free; Dontminion's lobby root has none and the padding
+   lives on the grid itself, which is why the bar it used to own carried an
+   explicit `margin: 0 18px`. Keep them equal or the bar runs to the screen edge
+   while the cards below it sit inset. */
+.dm .lby-tabs { margin-left: 18px; margin-right: 18px; }
+.dm-toast {
+  position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+  background: var(--surface2, #242018); border: 1px solid var(--border, #3a342a);
+  color: var(--text, #e8dfc8); padding: 10px 18px; border-radius: 8px; z-index: 60;
+}
+/* the expansion list scrolls ITSELF (CoC's board strip), so adding a set never
+   pushes the Create button out of the modal */
+.dm-checks {
+  display: flex; flex-direction: column; gap: 6px;
+  /* The cap is a BUDGET, not a look: .cm-panel is max-height 88vh — 633px on a
+     720px laptop — and the MODAL must never be the thing that scrolls (Create
+     slides below the fold). Adding a row means re-measuring the panel at 720px,
+     not guessing; the two side-by-side rows below are what buys this its 148px
+     back. */
+  max-height: 148px; overflow-y: auto; padding: 2px 4px 2px 0; min-width: 0;
+}
+/* The Require picker is a FIXED three (one per bonus the dealer knows), so it
+   sits INLINE beside its label as a wrapping row of chips — three full-width
+   rows plus a label was 61px of a 56px overspend. It deliberately does NOT
+   carry `.dm-checks`: that class means "the expansion list" to the screens
+   gate, and sharing it made Select all count these buttons too. */
+/* Bots + Bot style share one line (see the JSX). Bots sizes to its three single
+   digits and Bot style takes the rest, so the two-word tier name never wraps.
+   BOTH selectors are `.cm-row.X`, not a bare `.X`: the shared kit's own
+   `.cm-row{flex-direction:column}` has EQUAL specificity, so a single class
+   loses on source order alone — these rows silently stayed stacked (measured:
+   119px instead of 56px) until the second class went on. */
+.cm-row.dm-cm-two { flex-direction: row; align-items: flex-start; gap: 12px; }
+.dm-cm-col { display: flex; flex-direction: column; gap: 7px; min-width: 0; flex: 0 0 auto; }
+.dm-cm-botstyle { flex: 1 1 0; }
+.cm-row.dm-req-row { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 10px; }
+.dm-req-row .cm-label { flex: none; }
+.dm-checks-req { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.dm-checks-req .dm-check { padding: 7px 10px; }
+.dm-check-all { margin-top: 2px; border-style: dashed; }
+.dm-check {
+  background: var(--surface2, #242018); border: 1px solid var(--border, #3a342a);
+  color: var(--text-dim, #8a7d6a); border-radius: 8px; padding: 8px 14px;
+  cursor: pointer; font: inherit; flex: none; text-align: left;
+}
+.dm-check-on { color: var(--gold-light, #e8c96a); border-color: var(--gold, #c9a84c); }
+
+
+/* On touch, :hover STICKS to the last-tapped button until you tap elsewhere, so a
+   just-DESELECTED pick-option (a .btn-outline) kept the gold hover fill and looked
+   selected (the reported bug). Kill the hover fill where the device can't truly
+   hover — the selected state (.btn-gold, solid gold) then reads unambiguously. */
+@media (hover: none) {
+  .dm .btn-outline:hover { background: transparent; color: var(--gold, #c9a84c); }
+  .dm .btn-gold:hover { background: var(--gold, #c9a84c); }
+}
+
+/* ── waiting room ── */
+.dm-wait { max-width: 520px; margin: 40px auto; padding: 0 18px; text-align: center; }
+.dm-wait h2 { font-family: 'Cinzel','Cinzel Fallback',serif; letter-spacing: 2px; }
+.dm-wait-note { color: var(--text-dim, #8a7d6a); margin: 6px 0; }
+.dm-wait-players { margin: 22px 0; }
+.dm-wait-players ul { list-style: none; padding: 8px 0 0; margin: 0; }
+.dm-wait-players li { padding: 6px 0; border-bottom: 1px solid var(--border, #3a342a); }
+
+/* ── game frame ── */
+.dm-gamescreen {
+  min-height: 100vh; display: flex; flex-direction: column;
+  /* nothing may widen the page — iOS Safari zooms out to fit an overflowing
+     element and KEEPS that zoom until reload (clip ≠ hidden: no scroll
+     container, sticky top bar unaffected) */
+  overflow-x: clip;
+}
+.dm-top {
+  display: flex; align-items: center; gap: 14px; padding: 8px 14px;
+  border-bottom: 1px solid var(--border, #3a342a); background: var(--surface, #1a1814);
+  position: sticky; top: 0; z-index: 20;
+}
+/* equal-flex side slots (basis 0, not auto) — the title centres on the PAGE and
+   doesn't drift when the menu label or the reconnect notice changes width */
+.dm-top-side { flex: 1 1 0; min-width: 0; display: flex; align-items: center; }
+.dm-top-right { justify-content: flex-end; }
+.dm-title {
+  font-family: 'Cinzel', 'Cinzel Fallback', serif;
+  font-size: 1.05rem; font-weight: 700; letter-spacing: .07em;
+  color: var(--text, #e8dfc8); margin: 0; white-space: nowrap;
+}
+.dm-reconn { color: var(--red-gem, #dc4040); font-size: 13px; }
+
+.dm-main {
+  display: grid; grid-template-columns: 340px minmax(0, 1fr);
+  gap: 16px; padding: 14px 18px 30px; flex: 1; align-items: start;
+  width: 100%;   /* fill the whole screen — no max-width */
+}
+.dm-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.dm-center-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+/* ── sidebar PLAYER boxes (identity + score; one per seat, above the Trash) ── */
+.dm-pboxes { display: flex; flex-direction: column; gap: 8px; }
+.dm-pbox {
+  background: var(--surface, #1a1814); border: 1px solid var(--border, #3a342a);
+  border-radius: var(--radius-lg, 14px); padding: 10px 12px;
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+}
+.dm-pbox-acting { border-color: var(--gold, #c9a84c); }
+.dm-pbox-name { font-weight: 600; font-size: 16px; }
+.dm-vp { color: var(--gold-light, #e8c96a); font-weight: 700; margin-left: auto; white-space: nowrap; }
+.dm-opp-turns { color: var(--text-dim, #8a7d6a); font-size: 13px; font-weight: 400; white-space: nowrap; }
+
+/* ── opponent PLAY box (center column, same width as your area): backs for
+      their hand, faces for what they played, real piles ── */
+.dm-opp {
+  background: var(--surface, #1a1814); border: 1px solid var(--border, #3a342a);
+  border-radius: var(--radius-lg, 14px); padding: 6px 12px;
+  --card-w-s: 56px; --card-h: calc(var(--card-w-s) * 1.3);
+  container-type: inline-size;
+}
+.dm-opp-acting { border-color: var(--gold, #c9a84c); }
+/* The box holds nothing but this row, so its own margin/padding was pure dead
+   space above and below the cards — the count labels already sit inside it. */
+.dm-opp-zones {
+  display: flex; gap: 18px; align-items: flex-start; margin-top: 0; padding-bottom: 8px;
+}
+.dm-opp-hand { flex: none; }
+.dm-fan { display: flex; }
+.dm-fan .dm-card + .dm-card { margin-left: calc(var(--card-w-s, 56px) * -0.62); }
+.dm-opp-inplay {
+  display: flex; flex-wrap: wrap; gap: 6px; flex: 1; align-items: center;
+  min-height: calc(var(--card-w-s, 56px) * 1.3); min-width: 0;
+}
+
+/* ── real piles (deck face-down, discard top face-up) + card backs ── */
+.dm-zpile { flex: none; }
+.dm-pilewrap { position: relative; }
+.dm-pile-stacked .dm-card {
+  box-shadow: 2px 2px 0 #0e0c09, 2px 2px 0 1px #3a342a, 4px 4px 0 1px #0e0c09;
+}
+.dm-card-back {
+  background:
+    radial-gradient(circle at 50% 42%, rgba(201, 168, 76, .16), transparent 58%),
+    repeating-linear-gradient(135deg, #2a2418 0 6px, #201b11 6px 12px);
+  border-color: #4a4030;
+  display: flex; align-items: center; justify-content: center;
+}
+.dm-back-emblem {
+  font-family: 'Cinzel','Cinzel Fallback',serif; font-weight: 700;
+  color: rgba(201, 168, 76, .55);
+  font-size: calc(var(--card-w-s, 84px) * .48); line-height: 1;
+}
+.dm-empty-slot {
+  width: var(--card-w-s, 84px); min-height: calc(var(--card-w-s, 84px) * 1.3);
+  border: 1px dashed var(--border, #3a342a); border-radius: 10px;
+}
+.dm-trash {
+  background: var(--surface, #1a1814); border: 1px dashed var(--border, #3a342a);
+  border-radius: 8px; padding: 8px 12px; font-size: 13px; cursor: pointer;
+  color: var(--text-dim, #8a7d6a);
+}
+.dm-trash-list { margin-top: 6px; color: var(--text, #e8dfc8); font-size: 12px; }
+.dm-log {
+  background: var(--surface, #1a1814); border: 1px solid var(--border, #3a342a);
+  border-radius: var(--radius-lg, 14px); padding: 8px 12px;
+  font-size: 13px; line-height: 1.6; overflow-y: auto;
+  max-height: min(640px, calc(100vh - 300px));
+}
+/* CHRONOLOGICAL: the newest entry is the LAST child, and the JSX auto-scrolls
+   to it. Both the highlight and the entry animation below key off :last-child —
+   they were :first-child while the list was reversed, so leaving them there
+   would have brightened and re-animated the OLDEST line on every move. */
+.dm-log-line { color: var(--text-dim, #8a7d6a); }
+.dm-log-line:last-child { color: var(--text, #e8dfc8); }
+/* sub-effects indent under the play that caused them (engine log depth) */
+.dm-log-d1 { padding-left: 16px; }
+.dm-log-d2 { padding-left: 32px; }
+.dm-log-d3 { padding-left: 48px; }
+.dm-log-turn { color: var(--text, #e8dfc8); font-weight: 600; margin-top: 6px; }
+
+/* ── supply ── */
+.dm-supply {
+  background: var(--surface, #1a1814); border: 1px solid var(--border, #3a342a);
+  border-radius: var(--radius-lg, 14px); padding: 14px 14px 6px;
+  container-type: inline-size;
+  /* supply piles render as SMALL card faces, which size from --card-w-s;
+     10 kingdom piles across on a wide screen, wrapping below that */
+  --card-w-s: clamp(88px, calc((100cqw - 9 * 10px - 30px) / 10), 180px);
+  --card-h: calc(var(--card-w-s) * 1.18);   /* drives the face font clamps */
+}
+.dm-supply-row { display: flex; flex-wrap: wrap; gap: 10px; row-gap: 24px; justify-content: center; padding-bottom: 14px; }
+.dm-basics { margin-bottom: 8px; border-bottom: 1px solid var(--border, #3a342a); }
+/* Non-Supply set-aside piles (Ferryman's pile, Joust's Rewards): shown so the
+   player can see what those effects gain, visually fenced off from the Supply. */
+.dm-aside-piles { margin-top: 6px; border-top: 1px dashed var(--border, #3a342a); padding-top: 10px; }
+.dm-aside-label {
+  text-align: center; font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--muted, #9a8f7a); margin-bottom: 10px;
+}
+.dm-pile-slot { position: relative; }
+.dm-disc {
+  position: absolute; top: -7px; right: -4px; background: var(--gold, #c9a84c);
+  color: #1a1408; border-radius: 8px; font-size: 10px; padding: 1px 6px; font-weight: 700;
+}
+
+/* ── the card face (rides the shared .card frame) ── */
+.dm-card {
+  position: relative; display: flex; flex-direction: column;
+  background: #221d15; overflow: hidden; text-align: left;
+  /* ONE inset for the whole face. The shared .card frame's own 8/6/6 padding
+     stacked on top of each row's 5px and made the real buffer 12px on every
+     side — a fifth of a 56px card's width, per side. The face owns its layout,
+     so it takes the padding off the frame and applies --cf-pad itself: every
+     row now sits the SAME distance from the edge (border + --cf-pad). */
+  --cf-pad: 4px; padding: 0;
+  /* the cost-coin size and the potion-bottle height, shared by the coin, the
+     potion, and the text carve-out so they always agree */
+  --coin-sz: clamp(13px, calc(var(--card-h, 120px) * .16), 22px);
+  --pot-h: clamp(15px, calc(var(--card-h, 120px) * .19), 26px);
+  /* press-and-hold opens the detail modal, so the OS must not answer the hold
+     first: iOS pops a selection callout / magnifier over the card otherwise,
+     and a text selection would swallow the gesture on every platform */
+  -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+  touch-action: manipulation;
+  /* FIXED height — a card never grows for its content; the text shrinks */
+  height: var(--card-h, 120px); min-height: 0;
+  /* the shared frame animates transition:all — narrow it so container-query
+     resizes don't animate as a shrink on load (the Duel lesson) */
+  transition: border-color .15s, transform .15s, box-shadow .15s, opacity .15s;
+}
+.dm-card-small, .dm-card.dm-card-small { width: var(--card-w-s, 84px); height: calc(var(--card-w-s, 84px) * 1.3); }
+.dm-clickable { cursor: pointer; }
+.dm-clickable:hover { transform: translateY(-2px); }
+.dm-sel { outline: 2px solid var(--gold-light, #e8c96a); transform: translateY(-3px); }
+.dm-hl { border-color: var(--gold, #c9a84c); box-shadow: 0 0 8px rgba(201, 168, 76, .35); }
+.dm-dis { opacity: .55; }
+/* Name on top — FitText shrinks it only as far as the card's full width
+   demands; rules text shrinks to fit and the card never grows; foot row =
+   types bottom-left + cost coin bottom-right. */
+.dm-card-name {
+  font-family: 'Cinzel','Cinzel Fallback',serif; font-weight: 700;
+  /* +15% over the original .105/14/9 — the title is the card's identity and
+     had room to spare on every face. FitText still shrinks any name that
+     needs it, so a bigger base only helps the names that already fit. */
+  font-size: clamp(10.35px, calc(var(--card-h, 120px) * .12075), 16.1px);
+  letter-spacing: .3px; line-height: 1.1;
+  padding: var(--cf-pad) var(--cf-pad) 2px;
+}
+.dm-fitspan { display: inline-block; white-space: nowrap; }
+.dm-card-text {
+  flex: 1; font-size: clamp(8px, calc(var(--card-h, 120px) * .082), 11px);
+  color: var(--text-dim, #8a7d6a); padding: 0 var(--cf-pad); white-space: pre-line;
+  overflow: hidden; line-height: 1.25; min-height: 0;
+}
+.dm-card-text.dm-text-l { font-size: clamp(7px, calc(var(--card-h, 120px) * .07), 10px); line-height: 1.2; }
+.dm-card-text.dm-text-xl { font-size: clamp(6px, calc(var(--card-h, 120px) * .06), 9px); line-height: 1.18; }
+.dm-card-text.dm-text-xxl { font-size: clamp(6px, calc(var(--card-h, 120px) * .05), 8px); line-height: 1.15; }
+/* Supply faces opt into fitted body text via <DmCardFace body>. FitBodyText sizes
+   it inline (fill within a 10-16px band, then a trailing "…"), so it needs no
+   length-tier class — it carries .dm-card-text too, inheriting the colour, the
+   --cf-pad inset, pre-line wrapping and overflow:hidden. The large hand/modal
+   faces keep the .dm-text-* classes above. .dm-body-clip is a hook for a future
+   "more" cue; the ellipsis already signals it, and a fade would blur the "…". */
+.dm-card-body { min-height: 0; }
+.dm-card-foot {
+  margin-top: auto; display: flex; align-items: flex-end; gap: 2px 2px;
+  padding: 0 var(--cf-pad) var(--cf-pad);
+  /* tiny faces (56px opponent piles) can't fit label + coin side by side —
+     the coin wraps under the types instead of overlapping them */
+  flex-wrap: wrap; justify-content: flex-end;
+}
+.dm-types {
+  /* incompressible: when the coin doesn't fit beside the labels it WRAPS
+     below them instead of overlapping (min-width: 0 let flex shrink the box
+     underneath the coin) */
+  flex: 1 1 auto; min-width: max-content;
+  display: flex; flex-direction: column; gap: 1px;
+  align-items: flex-start; text-align: left;
+}
+.dm-cost {
+  background: radial-gradient(circle at 35% 30%, #f5d98a, #c9a84c 70%);
+  color: #221a05; font-weight: 800; border-radius: 50%;
+  width: var(--coin-sz); height: var(--coin-sz);
+  display: flex; align-items: center; justify-content: center;
+  font-size: clamp(9px, calc(var(--card-h, 120px) * .1), 13px); flex: none;
+}
+/* the Potion component of a cost: a little blue potion bottle (body tapering up
+   into a corked spout) sitting just ABOVE the coin. Absolutely placed so it does
+   NOT grow the foot row and squeeze the rules text — the text carves around it. */
+.dm-cost-p {
+  position: absolute; right: var(--cf-pad, 4px);
+  bottom: calc(var(--cf-pad, 4px) + var(--coin-sz) + 2px);
+  width: var(--coin-sz); height: var(--pot-h);
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none; z-index: 2;
+}
+.dm-cost-p svg { width: 100%; height: 100%; display: block; overflow: visible; }
+/* the DEBT component of a cost (Empires): an orange hexagon in the same slot
+   the Potion uses. The two never appear together on a printed card, so they
+   share the position rather than stacking. A pure-Debt card prints no coin at
+   all, so the hexagon drops down into the coin's place. */
+.dm-cost-d {
+  position: absolute; right: var(--cf-pad, 4px);
+  bottom: calc(var(--cf-pad, 4px) + var(--coin-sz) + 2px);
+  width: var(--coin-sz); height: var(--coin-sz);
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none; z-index: 2;
+}
+/* ...and when the card prints NO coin cost, it drops into the coin's slot. */
+.dm-cost-d.dm-cost-d-solo { bottom: var(--cf-pad, 4px); }
+.dm-cost-d svg { width: 100%; height: 100%; display: block; overflow: visible; }
+/* Carve the potion's bottom-right footprint out of the rules-text flow so the
+   text wraps AROUND it and keeps using the rest of the card. A ::before float
+   survives FitBodyText's textContent rewrites (a pseudo-element is not a child
+   node), and shape-outside limits the exclusion to just the potion's corner —
+   the text still flows full-width above it. */
+.dm-card-text.dm-has-potion::before {
+  content: ""; float: right; height: 100%;
+  width: calc(var(--coin-sz) + 6px);
+  shape-outside: inset(calc(100% - (var(--pot-h) + 6px)) 0 0 0);
+  shape-margin: 3px;
+}
+.dm-type {
+  display: block;
+  /* +15% on the SCALE and the cap (.068/11). The FLOOR stays 5.5px on purpose:
+     it is what the 56px play face lands on, and raising it there pushes the
+     widest label past the coin and wraps the foot — the thing we just fixed.
+     Above ~70px card height the scale term wins and the full +15% applies. */
+  font-size: clamp(5.5px, calc(var(--card-h, 120px) * .0782), 12.65px);
+  text-transform: uppercase; letter-spacing: .3px; color: #cfc4a6;
+  white-space: nowrap;
+}
+.dm-f-action .dm-card-name { color: #e8dfc8; }
+.dm-f-treasure { background: #2a2410; }
+.dm-f-treasure .dm-card-name { color: #f0cf72; }
+.dm-f-victory { background: #1c2417; }
+.dm-f-victory .dm-card-name { color: #9fd57e; }
+.dm-f-curse { background: #241a2b; }
+.dm-f-curse .dm-card-name { color: #c79bdd; }
+.dm-edge { position: absolute; top: 0; bottom: 0; width: 3px; }
+.dm-edge-atk { left: 0; background: var(--red-gem, #dc4040); }
+.dm-edge-rx { right: 0; background: var(--blue-gem, #4257ff); }
+.dm-edge-dur { left: 0; background: #b3762e; }   /* duration = the Seaside orange */
+.dm-pile-count {
+  /* sits on the SLOT (not inside the overflow-hidden card), so it never clips */
+  /* Sits BELOW the face, clear of it. The foot row now ends --cf-pad from the
+     card's bottom edge, so a pill that reached back up into the card covered
+     the type label (measured: 7px of overlap on every supply pile). */
+  position: absolute; bottom: -14px; left: 50%; transform: translateX(-50%);
+  background: var(--surface3, #2c2820); border: 1px solid var(--border, #3a342a);
+  border-radius: 10px; font-size: 12px; line-height: 1.15; padding: 1px 9px;
+  color: var(--text, #e8dfc8);
+  white-space: nowrap; z-index: 2;
+}
+.dm-card-badge {
+  position: absolute; top: -7px; right: -7px; background: var(--gold, #c9a84c);
+  color: #1a1408; width: 20px; height: 20px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px;
+}
+
+/* ── prompts ── */
+.dm-waitbar {
+  background: var(--surface2, #242018); border: 1px solid var(--border, #3a342a);
+  border-radius: 8px; padding: 8px 14px; text-align: center; color: var(--text-dim, #8a7d6a);
+}
+.dm-dots { margin-left: 4px; }
+.dm-prompt {
+  background: var(--surface2, #242018); border: 1px solid var(--gold, #c9a84c);
+  border-radius: var(--radius-lg, 14px); padding: 12px 14px;
+  container-type: inline-size;
+  --card-w-s: 84px; --card-h: calc(var(--card-w-s) * 1.3);
+}
+.dm-prompt-hd { font-weight: 700; margin-bottom: 8px; }
+/* the decision modal (minimizable — the restore button takes the hint slot);
+   double-class beats the later plain .dm-modal sizing */
+.dm-modal.dm-prompt-modal {
+  max-width: min(760px, calc(100vw - 32px)); width: auto; min-width: min(420px, calc(100vw - 32px));
+  max-height: calc(100vh - 24px); overflow-y: auto;
+}
+.dm-prompt-hdrow {
+  display: flex; gap: 12px; align-items: baseline; justify-content: space-between;
+}
+.dm-prompt-hdrow .dm-prompt-hd { margin-bottom: 10px; }
+.dm-reshint-btn { margin-left: auto; white-space: nowrap; }
+.dm-prompt-cards { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.dm-prompt-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+/* a button never outgrows its box; FitLabel then shrinks the TEXT to fit */
+.dm-prompt-actions .btn, .dm-turnbtns .btn, .dm-reshint-btn {
+  max-width: 100%; min-width: 0; overflow: hidden;
+}
+.dm-fitlabel { display: block; white-space: nowrap; max-width: 100%; }
+/* the two-row form: FitLabel adds this when one row can't hold the label, and
+   the button grows with it (no fixed height anywhere on these buttons) */
+.dm-fitlabel-wrap {
+  white-space: normal; line-height: 1.16; overflow-wrap: anywhere;
+}
+.dm-slots button, .dm-names button { padding: 6px 10px; font-size: 13px; }
+.dm-names { max-height: 180px; overflow-y: auto; }
+
+/* ── my area ── */
+.dm-me {
+  background: var(--surface, #1a1814); border: 1px solid var(--border, #3a342a);
+  border-radius: var(--radius-lg, 14px); padding: 12px 14px;
+  container-type: inline-size;   /* mobile sizes the hand off 100cqw */
+  --card-w: 120px; --card-h: 168px;
+}
+.dm-resbar {
+  display: flex; flex-wrap: wrap; gap: 26px; align-items: baseline;
+  background: var(--surface2, #242018); border: 1px solid var(--gold, #c9a84c);
+  border-radius: 10px; padding: 10px 18px; margin-bottom: 10px;
+  font-size: 16px; color: var(--text-dim, #8a7d6a);
+}
+.dm-resbar b { color: var(--gold-light, #e8c96a); font-size: 21px; margin-left: 4px; }
+/* Coffers and the later spendable counters (Villagers, Favors): a count plus
+   its spend controls, kept on one baseline with the rest of the bar. */
+.dm-counter { display: inline-flex; align-items: baseline; gap: 6px; }
+/* DEBT (Empires): read as a WARNING rather than as a resource — it is the one
+   counter that stops you doing something, so it must not look like money.
+   Same class on the seat row and in the resource bar. */
+.dm-debt { color: #e0736a; white-space: nowrap; }
+.dm-resbar .dm-debt b { color: #ff9a90; }
+/* Young Witch's Bane marker — a lavender "B" in the pile's top-right corner
+   (the Potion cost now renders as a coin on the card face itself) */
+.dm-bane {
+  position: absolute; top: 2px; right: 3px; z-index: 2;
+  font-size: 12px; font-weight: 800; line-height: 1;
+  color: #c8a2ff; text-shadow: 0 1px 2px rgba(0,0,0,.85);
+}
+/* Adventures tokens ON a Supply pile (pile.attach.tokens). Top-LEFT corner —
+   the Bane marker owns top-right and the count pill straddles the bottom edge,
+   so this is the one corner left. Small and stacked horizontally; a player has
+   at most a handful of tokens and they very rarely share a pile. */
+.dm-tokens {
+  position: absolute; top: 2px; left: 3px; z-index: 2;
+  display: flex; gap: 2px; pointer-events: none;
+}
+/* gathered VP and Tax's Debt sitting ON a pile (Empires). Top-RIGHT, the one
+   corner the token strip (top-left), the Bane marker and the count pill leave
+   free on a pile that has no Bane. */
+.dm-pile-attach {
+  position: absolute; top: 2px; right: 3px; z-index: 2;
+  display: flex; gap: 3px; pointer-events: none;
+}
+.dm-pile-vp, .dm-pile-debt {
+  font-size: 9px; font-weight: 800; line-height: 1; padding: 1px 4px;
+  border-radius: 6px; background: rgba(20, 16, 10, .82);
+  border: 1px solid var(--border, #3a342a);
+}
+.dm-pile-vp { color: var(--gold-light, #e8c96a); }
+.dm-pile-debt { color: #e8a06a; }
+.dm-tok {
+  font-size: 9px; font-weight: 800; line-height: 1; padding: 1px 3px;
+  border-radius: 6px; background: rgba(20,16,10,.82);
+  color: var(--muted, #9a8f7a); border: 1px solid var(--border, #3a342a);
+}
+.dm-tok-mine { color: #1a1408; background: var(--gold, #c9a84c); border-color: var(--gold, #c9a84c); }
+/* the Adventures tokens that sit in front of a PLAYER, in their sidebar box */
+.dm-seat-tok {
+  font-size: 10px; font-weight: 700; line-height: 1; padding: 2px 5px;
+  border-radius: 8px; white-space: nowrap;
+  background: rgba(20,16,10,.6); color: var(--gold-light, #e8c96a);
+  border: 1px solid var(--border, #3a342a);
+}
+
+/* ── LANDSCAPES (Events, Projects, ...) ──
+   Landscape ORIENTATION: they are wide where a card is tall, which is what
+   tells them apart from the Supply at a glance. The row only exists when the
+   game dealt some, so nothing here can shift the board's layout otherwise. */
+.dm-lscape-row {
+  display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
+  padding-bottom: 14px; margin-bottom: 8px;
+  border-bottom: 1px solid var(--border, #3a342a);
+}
+.dm-lscape {
+  position: relative; display: flex; flex-direction: column; gap: 3px;
+  width: clamp(150px, 26cqw, 240px); min-height: 74px; padding: 6px 8px;
+  text-align: left; cursor: pointer;
+  background: #1e2a22; color: var(--text, #e8dfc8);
+  border: 1px solid var(--border, #3a342a); border-radius: 8px;
+  animation: dm-enter .34s ease-out backwards;   /* same entrance as a pile */
+}
+.dm-ls-name { font-weight: 700; font-size: 12px; line-height: 1.15; }
+.dm-ls-text {
+  font-size: 10px; line-height: 1.25; color: var(--muted, #9a8f7a);
+  flex: 1; overflow: hidden;
+}
+.dm-ls-foot { display: flex; align-items: baseline; justify-content: space-between; gap: 4px; }
+.dm-ls-kind { font-size: 9px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted, #9a8f7a); }
+.dm-ls-cost { font-size: 12px; font-weight: 800; color: var(--gold, #c9a84c); }
+/* a LANDMARK's VP store, shown where an Event shows its price */
+.dm-ls-vp { font-size: 12px; font-weight: 800; color: var(--gold-light, #e8c96a); }
+/* PROJECT CUBES: one per owner. A Project's ability is on for whoever has a
+   cube, for the rest of the game, so these are permanent table state — and
+   they are per PLAYER, hence the seat-indexed colours. */
+.dm-ls-cubes { display: inline-flex; gap: 3px; align-items: center; }
+.dm-cube { width: 8px; height: 8px; border-radius: 2px; display: inline-block;
+  border: 1px solid rgba(0, 0, 0, .45); }
+.dm-cube-0 { background: #d9534f; }
+.dm-cube-1 { background: #4a90d9; }
+.dm-cube-2 { background: #5cb85c; }
+.dm-cube-3 { background: #e8c96a; }
+.dm-ls-buyable { border-color: var(--gold, #c9a84c); box-shadow: 0 0 0 1px var(--gold, #c9a84c) inset; }
+.dm-ls-spent { opacity: .45; cursor: default; }
+.dm-ls-tick { position: absolute; top: 4px; right: 6px; font-size: 12px; color: var(--gold, #c9a84c); }
+/* a Way is consulted, never bought — it must not read as a purchasable price */
+.dm-ls-way, .dm-ls-landmark, .dm-ls-trait, .dm-ls-prophecy { background: #241f2e; }
+.dm-ls-way .dm-ls-cost, .dm-ls-landmark .dm-ls-cost,
+.dm-ls-trait .dm-ls-cost, .dm-ls-prophecy .dm-ls-cost { display: none; }
+/* An ARTIFACT card in the Kingdom browser. Not a landscape and not a card — it
+   borrows the landscape's wide shape because that is the shape "a thing on the
+   table with rules on it, that is not a Supply pile" already means here. */
+.dm-ls-artifact { background: #2a2418; }
+.dm-ls-holder { font-size: 10px; color: var(--gold-light, #e8c96a); white-space: nowrap; }
+
+.dm-spend { padding: 2px 8px; font-size: 12px; align-self: center; }
+/* the what-you-can-do hint rides the right edge of the resource bar */
+.dm-reshint {
+  margin-left: auto; font-style: italic; color: var(--gold-light, #e8c96a) !important;
+  align-self: center; text-align: right;
+}
+.dm-inplay {
+  display: flex; flex-wrap: wrap; gap: 8px; min-height: 38px; align-items: center;
+  border-bottom: 1px dashed var(--border, #3a342a); padding-bottom: 10px; margin-bottom: 10px;
+  /* small faces: --card-h must follow, or fonts size for the big hand cards.
+     Same 56px as the opponents' play row — one card size for "in play" on
+     BOTH sides of the table, so a played card doesn't change size depending
+     on who played it. */
+  --card-w-s: 56px; --card-h: calc(var(--card-w-s) * 1.3);
+}
+.dm-zone-hint { color: var(--text-muted, #5a5248); font-size: 13px; font-style: italic; }
+/* duration cards stay on the table — a warm halo marks them */
+.dm-durwrap { position: relative; }
+.dm-durwrap .dm-card { border-color: #b3762e; box-shadow: 0 0 7px rgba(219, 143, 60, .35); }
+.dm-durwrap::after {
+  content: "next turn"; position: absolute; top: -8px; left: 50%; transform: translateX(-50%);
+  background: #b3762e; color: #1a1408; border-radius: 8px; font-size: 9px;
+  padding: 0 6px; font-weight: 700; white-space: nowrap;
+}
+.dm-mat-chip {
+  background: var(--surface3, #2c2820); border: 1px solid var(--border, #3a342a);
+  border-radius: 10px; padding: 3px 10px; font-size: 13px; color: var(--text, #e8dfc8);
+  white-space: nowrap;
+}
+/* a mat whose cards are known is tappable to open the viewer (touch has no
+   hover, so the title tooltip alone hid the contents on a phone) */
+.dm-mat-chip-view { cursor: pointer; border-color: var(--gold, #c9a84c); }
+.dm-mat-chip-view:hover { background: var(--surface2, #242018); color: var(--gold-light, #e8c96a); }
+.dm-handrow { display: flex; gap: 18px; align-items: flex-end; flex-wrap: wrap; }
+.dm-mypiles {
+  display: flex; gap: 16px; align-items: flex-start; flex: none; padding-bottom: 14px;
+  --card-w-s: 84px; --card-h: calc(var(--card-w-s) * 1.3);
+}
+.dm-myhand { flex: 1; min-width: 0; padding-bottom: 12px; }
+.dm-hand { display: flex; flex-wrap: wrap; gap: 8px; }
+.dm-turnbtns { display: flex; flex-direction: column; gap: 8px; }
+
+/* ── modals ── */
+.dm-backdrop {
+  position: fixed; inset: 0; background: rgba(10, 8, 5, .72);
+  display: flex; align-items: center; justify-content: center; z-index: 70;
+}
+/* decision prompts open at the TOP — the board stays readable underneath and
+   the modal lands where the eye already is (the phase bar) */
+.dm-backdrop-top { align-items: flex-start; padding-top: 12px; }
+.dm-modal {
+  background: var(--surface, #1a1814); border: 1px solid var(--gold, #c9a84c);
+  border-radius: var(--radius-lg, 14px); padding: 22px 26px; max-width: 460px; width: calc(100% - 40px);
+}
+.dm-modal h2 { font-family: 'Cinzel','Cinzel Fallback',serif; margin: 0 0 8px; }
+.dm-winline { color: var(--gold-light, #e8c96a); }
+.dm-scores { width: 100%; border-collapse: collapse; margin: 12px 0 16px; }
+.dm-scores th, .dm-scores td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border, #3a342a); }
+.dm-scores .dm-win td { color: var(--gold-light, #e8c96a); font-weight: 700; }
+/* Each score row opens that player's final deck (the drilldown below) */
+.dm-score-row { cursor: pointer; transition: background .12s; }
+.dm-score-row:hover { background: var(--surface2, #242018); }
+.dm-score-deck { color: var(--text-dim, #8a7d6a); font-size: 12px; text-align: right; white-space: nowrap; }
+
+/* ── game-over: a player's final deck (name → count over every zone) ── */
+.dm-deckview { max-width: 460px; }
+.dm-deck-list {
+  display: flex; flex-direction: column; gap: 5px; margin: 12px 0 16px;
+  max-height: min(56vh, 460px); overflow-y: auto;
+}
+.dm-deck-row {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  background: var(--surface2, #242018); border: 1px solid var(--border, #3a342a);
+  border-radius: 8px; font-size: 15px;
+}
+.dm-deck-row.dm-f-treasure { border-left: 3px solid #c9a84c; }
+.dm-deck-row.dm-f-victory { border-left: 3px solid #6fae55; }
+.dm-deck-row.dm-f-curse { border-left: 3px solid #9a6fc0; }
+.dm-deck-row.dm-f-action { border-left: 3px solid var(--border, #3a342a); }
+.dm-deck-count { color: var(--gold-light, #e8c96a); font-weight: 800; min-width: 30px; }
+.dm-deck-name { flex: 1; min-width: 0; color: var(--text, #e8dfc8); }
+.dm-deck-cost { color: var(--text-dim, #8a7d6a); font-weight: 700; white-space: nowrap; }
+
+/* ── detail modal (a card, a landscape, or any not-a-card thing) ──
+   ONE panel for all three: the reader learns one thing to read, not three. Only
+   the left column changes — a card face, a landscape face, or an emblem. */
+.dm-cardinfo { max-width: 560px; --card-w: 180px; --card-h: 252px; }
+.dm-cardinfo-cols { display: flex; gap: 18px; margin-bottom: 8px; }
+.dm-cardinfo .dm-card { flex: none; }
+.dm-cardinfo-detail { min-width: 0; }
+.dm-cardinfo-detail h2 { margin-top: 0; }
+.dm-cardinfo-meta { color: var(--text-dim, #8a7d6a); margin: 4px 0 10px; }
+.dm-cardinfo-text { white-space: pre-line; line-height: 1.5; margin: 0; }
+/* a landscape is WIDE, so its column is sized by the face itself rather than by
+   the card vars — and it must not be stretched to the text column's height */
+.dm-cardinfo-lscape { flex: none; align-self: flex-start; }
+.dm-cardinfo-lscape .dm-lscape { width: 180px; cursor: default; animation: none; }
+/* ...and a mat / token / counter has no face at all: an emblem in a card-shaped
+   well, so the panel keeps the same silhouette whatever is being read */
+.dm-cardinfo-emblem {
+  flex: none; align-self: flex-start;
+  width: 120px; height: 120px; display: flex; align-items: center; justify-content: center;
+  font-size: 46px; line-height: 1; text-align: center;
+  background: var(--surface2, #242018); border: 1px solid var(--border, #3a342a);
+  border-radius: var(--radius, 10px);
+}
+/* anything wearing the info gesture is a live target — say so on a pointer */
+.dm-chip-info { cursor: pointer; }
+.dm-chip-info:hover { color: var(--gold-light, #e8c96a); }
+
+/* the Undo button lives at the TOP of the play box's button stack during a
+   game — greyed when nothing to take back */
+.dm-undo[disabled] { opacity: .4; cursor: default; }
+.dm-kingdom-btn { width: 100%; border: 1px solid var(--border, #3a342a); }
+
+/* ── kingdom browser modal ── */
+.dm-kingdom-modal {
+  max-width: min(1200px, calc(100vw - 48px)); width: calc(100% - 48px);
+  max-height: 86vh; overflow-y: auto;
+  --card-w: 158px; --card-h: 220px;
+}
+.dm-kingdom-modal h3 { font-family: 'Cinzel','Cinzel Fallback',serif; margin: 6px 0; }
+/* the mat viewer reuses the kingdom grid's card sizing (incl. its mobile
+   3-per-row rules) but is narrower — a mat holds a few cards, not a whole
+   supply. Placed AFTER .dm-kingdom-modal so its max-width wins on desktop. */
+.dm-matview { max-width: min(560px, calc(100vw - 48px)); }
+.dm-matview .dm-kgrid { justify-content: center; }
+/* full faces at the FIXED card size — long text shrinks (dm-text-* tiers), the
+   card never grows */
+.dm-kgrid { display: flex; flex-wrap: wrap; gap: 14px; row-gap: 28px; margin: 12px 0 20px; }
+/* The landscape/Artifact sections: wide faces, so they need neither the card
+   row-gap (nothing hangs below them) nor the card sizing. This is a REFERENCE
+   SHELF, not the board — the faces share the row evenly and show their text in
+   FULL (the board's copy clips to keep the row a fixed height; here there is
+   nothing to keep short, and a half-read Event is the reason this section
+   exists). `.dm-lscape` sizes off `26cqw` of the Supply's container query, which
+   the modal is not inside, so the width is stated outright. */
+.dm-kgrid-wide { row-gap: 12px; align-items: stretch; }
+.dm-kgrid-wide .dm-lscape {
+  animation: none; flex: 1 1 230px; width: auto; max-width: 340px; min-height: 92px;
+}
+.dm-kgrid-wide .dm-ls-text { overflow: visible; font-size: 11px; }
+/* one line under a section heading saying what that KIND of thing is — the half
+   a first-time reader is missing, and printed on none of the cards */
+.dm-kg-note {
+  margin: 0; color: var(--text-dim, #8a7d6a); font-size: 13px; line-height: 1.45;
+  max-width: 70ch;
+}
+
+/* ── mobile (single column; every override .dm-prefixed — cascade-order rule) ── */
+@media (max-width: 980px) {
+  .dm .dm-main { grid-template-columns: minmax(0, 1fr); }
+  .dm .dm-side { order: 2; }
+  .dm .dm-center-col { order: 1; }
+  .dm .dm-log { max-height: 180px; }
+}
+@media (max-width: 640px) {
+  /* THREE cards per row, filling it — the supply, the hand, and prompt cards
+     all size off their own container's width (100cqw) minus the gaps */
+  .dm .dm-supply { --card-w-s: calc((100cqw - 20px) / 3); }
+  .dm .dm-supply-row { gap: 10px; row-gap: 22px; justify-content: flex-start; }
+  .dm .dm-me { --card-w: calc((100cqw - 16px) / 3); --card-h: calc(var(--card-w) * 1.4); }
+  .dm .dm-hand { gap: 8px; }
+  .dm .dm-prompt { --card-w-s: calc((100cqw - 16px) / 3); }
+  .dm .dm-prompt-cards { gap: 8px; }
+  /* Kingdom browser: THREE cards per row. The modal takes nearly the full
+     width (a thin 8px side buffer, down from 24px) and its padding is trimmed
+     to 10px, so three (100vw-60)/3 faces + two 8px gaps clear the content box
+     with room to spare instead of wrapping to two. */
+  .dm .dm-kingdom-modal {
+    width: calc(100% - 16px); max-width: none; padding: 16px 10px;
+    --card-w: calc((100vw - 60px) / 3); --card-h: calc(var(--card-w) * 1.4);
+  }
+  .dm .dm-kgrid { gap: 8px; row-gap: 24px; justify-content: center; }
+  .dm .dm-resbar { gap: 14px; font-size: 14px; padding: 8px 12px; }
+  .dm .dm-resbar b { font-size: 17px; }
+  /* stack the piles above the hand so the hand row spans the FULL width — with
+     them beside it, three (100cqw/3)-wide cards can't fit and it wraps at 2 */
+  .dm .dm-handrow { flex-direction: column; align-items: stretch; gap: 8px; }
+  .dm .dm-mypiles { --card-w-s: 72px; gap: 12px; }
+  /* The count pills hang 14px BELOW their slot, which is fine when the piles sit
+     beside the hand — but this breakpoint stacks the row, so "hand N" landed 6px
+     into the buttons underneath it (measured). Lift the pills in your own area
+     and widen the stack gap: the pill still clears the card's own foot content
+     (it stops ~2px into the card's bottom padding, where nothing is drawn). */
+  .dm .dm-me .dm-pile-count { bottom: -4px; }
+  .dm .dm-handrow { gap: 12px; }
+  /* three buttons (Undo / Play all treasures / End turn) don't fit one row on
+     a phone — WRAP; unwrapped rows were what iOS zoomed out for */
+  .dm .dm-turnbtns { flex-direction: row; flex-wrap: wrap; width: 100%; }
+  .dm .dm-turnbtns .btn { flex: 1 1 auto; }
+  .dm .dm-title { font-size: .92rem; }
+  /* opponent zones swipe sideways instead of burying the board */
+  .dm .dm-opp-zones { gap: 12px; overflow-x: auto; padding-bottom: 16px; }
+  .dm .dm-opp-inplay { flex-wrap: nowrap; }
+
+  /* Card detail on a phone: the WHOLE modal reads as the card — tinted by its
+     type, the little thumbnail dropped, and the rules text shown big and
+     legible instead of shrunk onto a 180px face. Close sits centered at the
+     bottom. (Cards are text-only faces, so the tinted panel + big text IS the
+     card, just readable.) */
+  .dm .dm-cardinfo {
+    width: calc(100% - 20px); max-width: 420px; padding: 0; overflow: hidden;
+  }
+  .dm .dm-cardinfo.dm-f-treasure { background: #2a2410; }
+  .dm .dm-cardinfo.dm-f-victory { background: #1c2417; }
+  .dm .dm-cardinfo.dm-f-curse { background: #241a2b; }
+  .dm .dm-cardinfo.dm-f-action { background: #221d15; }
+  .dm .dm-cardinfo-cols { flex-direction: column; margin: 0; gap: 0; }
+  .dm .dm-cardinfo-face { display: none; }
+  .dm .dm-cardinfo-detail { padding: 24px 22px 10px; width: 100%; box-sizing: border-box; }
+  .dm .dm-cardinfo-detail h2 { font-size: 1.6rem; }
+  .dm .dm-cardinfo-meta { font-size: 14px; margin: 6px 0 14px; }
+  .dm .dm-cardinfo-text { font-size: 16px; line-height: 1.6; }
+  .dm .dm-cardinfo .dm-prompt-actions { justify-content: center; padding: 4px 22px 22px; }
+
+}
+
+/* ── motion ────────────────────────────────────────────────────────────────
+   Entrance animations use fill-mode BACKWARDS, never BOTH: an animation's
+   retained final value outranks normal declarations, so BOTH would freeze
+   transform:none onto cards and kill the hover lift / .dm-sel offset. */
+@keyframes dm-enter {
+  from { opacity: 0; transform: translateY(10px) scale(.94); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes dm-flip {
+  from { opacity: 0; transform: perspective(340px) rotateY(72deg); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes dm-pop {
+  0%   { transform: scale(1); }
+  45%  { transform: scale(1.32); }
+  100% { transform: scale(1); }
+}
+@keyframes dm-logline {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes dm-ring {
+  from { box-shadow: 0 0 0 0 rgba(232, 201, 106, .7); }
+  to   { box-shadow: 0 0 0 14px rgba(232, 201, 106, 0); }
+}
+
+/* cards arriving in a zone: drawn into hand, played, gained into an area */
+.dm-hand .dm-card,
+.dm-inplay .dm-card,
+.dm-opp-inplay .dm-card,
+.dm-prompt-cards .dm-card { animation: dm-enter .3s cubic-bezier(.2, .8, .3, 1) backwards; }
+/* the supply deals in with a short cascade the first time the board mounts */
+.dm-supply .dm-pile-slot { animation: dm-enter .34s ease-out backwards; }
+/* a pile's face changing (new discard top, deck emptying) flips over */
+.dm-zpile .dm-pilewrap { animation: dm-flip .38s ease-out backwards; }
+/* any counter that changed value this render (keyed remount) */
+.dm-count-pop { display: inline-block; animation: dm-pop .42s ease-out; }
+.dm-vp .dm-count-pop { animation: dm-pop .55s ease-out; }
+/* newest log entry slides in (LAST child — the log is chronological) */
+.dm-log-line:last-child { animation: dm-logline .3s ease-out; }
+.dm-modal.dm-prompt-modal { animation: dm-enter .22s ease-out backwards; }
+.dm-card-badge { animation: dm-pop .3s ease-out; }
+/* a bought/gained pile flashes a gold ring */
+.dm-pile-slot.dm-just-gained .dm-card { animation: dm-ring .6s ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .dm *, .dm *::before, .dm *::after { animation: none !important; }
+}

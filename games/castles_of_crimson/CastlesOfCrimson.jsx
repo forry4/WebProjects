@@ -1,9 +1,38 @@
-import { Fragment, useState, useEffect, useRef, useCallback, useId } from "react";
+import { Fragment, useState, useEffect, useLayoutEffect, useRef, useCallback, useId } from "react";
+import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
+  createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
+  RulesModal, rulesModalCss,
+  useProgressiveList, LobbyTabs, useLastDifficulty } from "../../shared/lobby.jsx";
+import CocRules from "./rules.jsx";
+import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
+// Offline vs-AI: the local game driver (wasm engine + IndexedDB saves) — see offline.js.
+import { applyOfflineCocMove, armCocUndoIfMyTurn, cocOfflineRoomData, runCocBotLoop,
+  loadOfflineCocGame } from "./offline.js";
+
+// CSS lives in the sibling .css file(s) imported below, NOT in a JS template
+// literal. `?inline` hands us the stylesheet as a STRING, so it is still injected
+// by this component's own <style> tag only while it is mounted — behaviour is
+// unchanged. What goes away is the footgun: a single stray backtick inside a css
+// template literal silently reparsed the rest of the file as a tagged template and
+// blanked the whole page. A .css file cannot do that, and editors lint it properly.
+import _cssText from "./CastlesOfCrimson.css?inline";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const COC_WS = WS_RAW.replace(/\/ws$/, "/coc/ws");
 const COC_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/coc");
+
+// Board layouts are fully static, so we cache them in localStorage (stale-while-
+// revalidate). The board is then available synchronously on CoC entry — it never
+// gates the game screen on a network fetch — and a background refresh self-heals if
+// the board set ever changes (e.g. a board added). Bump the key on a shape change.
+const COC_BOARDS_CACHE = "coc_boards_v1";
+const boardsWithById = (d) => {
+  if (!d) return null;
+  const byId = {};
+  (d.boards || []).forEach((b) => { byId[b.id] = b; });
+  return { ...d, byId };
+};
 
 const TILE_HEX = {
   burgundy: "#a3263a",   // castle  -> crimson (the "burgundy" key is the backend's castle color)
@@ -511,21 +540,21 @@ const MONASTERY_ICON = {
   7: () => (<>{mIcon("cow", 8.8, 13.2, 12)}<g transform="rotate(-35 15.8 11.5)">{mArrowR(15.8, 11.5, 0.7, M_INK)}</g>{mStar(18.2, 6.4, 3)}</>), // livestock scored -> +1 VP
   8: () => (<>{mDie(5.0, 13, 1.1, [[0, 0]])}{mShift(12, 13, 0.76)}{mDie(19.0, 13, 1.1, [[-0.62, -0.62], [0, 0], [0.62, 0.62]])}</>), // adjust die by 2 (1 <-> 3)
   // 9-11: die + a colored hex swatch of the tile type(s) the free shift applies to
-  // 9-11 (PLACING): striped tile (left) + a worker above a right-pointing arrow (~70% size)
-  9: () => (<><HexStriped cx={7.5} cy={13} k={1.2} colors={[TILE_HEX.beige]} />{mPawn(17.3, 7.4, 0.82)}{mArrowR(17.3, 13.2, 0.67, M_GREEN)}</>),
-  10: () => (<><HexStriped cx={7.5} cy={13} k={1.2} colors={[TILE_HEX.blue, TILE_HEX.green]} />{mPawn(17.3, 7.4, 0.82)}{mArrowR(17.3, 13.2, 0.67, M_GREEN)}</>),
-  11: () => (<><HexStriped cx={7.5} cy={13} k={1.2} colors={[TILE_HEX.burgundy, TILE_HEX.gray, TILE_HEX.yellow]} />{mPawn(17.3, 7.4, 0.82)}{mArrowR(17.3, 13.2, 0.67, M_GREEN)}</>),
-  // 12 (TAKING): striped tile (top, nudged down) + a worker LEFT of a down-pointing arrow (~70% size)
-  12: () => (<><HexStriped cx={12} cy={10.2} k={1.16} colors={[TILE_HEX.burgundy, TILE_HEX.blue, TILE_HEX.gray, TILE_HEX.green, TILE_HEX.beige, TILE_HEX.yellow]} />{mPawn(7.4, 17.3, 0.82)}{mArrowV(12, 17.3, 0.7, 1, M_GREEN)}</>),
+  // 9-11 (PLACING): striped tile (top) + a worker LEFT of a down-pointing arrow (~70% size)
+  9: () => (<><HexStriped cx={12} cy={10.2} k={1.2} colors={[TILE_HEX.beige]} />{mPawn(7.4, 17.3, 0.82)}{mArrowV(12, 17.3, 0.7, 1, M_GREEN)}</>),
+  10: () => (<><HexStriped cx={12} cy={10.2} k={1.2} colors={[TILE_HEX.blue, TILE_HEX.green]} />{mPawn(7.4, 17.3, 0.82)}{mArrowV(12, 17.3, 0.7, 1, M_GREEN)}</>),
+  11: () => (<><HexStriped cx={12} cy={10.2} k={1.2} colors={[TILE_HEX.burgundy, TILE_HEX.gray, TILE_HEX.yellow]} />{mPawn(7.4, 17.3, 0.82)}{mArrowV(12, 17.3, 0.7, 1, M_GREEN)}</>),
+  // 12 (TAKING): striped tile (left) + a worker above a right-pointing arrow (~70% size)
+  12: () => (<><HexStriped cx={7.5} cy={13} k={1.16} colors={[TILE_HEX.burgundy, TILE_HEX.blue, TILE_HEX.gray, TILE_HEX.green, TILE_HEX.beige, TILE_HEX.yellow]} />{mPawn(17.3, 7.4, 0.82)}{mArrowR(17.3, 13.2, 0.67, M_GREEN)}</>),
   13: () => (<>{mPawn(7.4, 13, 1.05)}{mPawn(10.9, 13, 1.05)}{mNum(14, 7.4, 4.2, "+")}{mCoin(17.2, 13, 1.08)}</>), // 2-workers action + 1 silver
   14: () => (<>{mPawn(5.6, 13, 0.92)}{mPawn(8.7, 13, 0.92)}{mNum(11.8, 7.4, 4.2, "+")}{mPawn(14.9, 13, 0.92)}{mPawn(18.0, 13, 0.92)}</>), // 2-workers action -> 4 (2 + 2)
   // ── end-game scoring ──
   15: () => (<>{mBarrel(7.2, 14, 0.82, GOODS_HEX.amber)}{mBarrel(12, 14, 0.82, GOODS_HEX.rose)}{mBarrel(16.8, 14, 0.82, GOODS_HEX.jade)}{mStar(18.4, 6.2, 2.7)}</>), // 2VP/goods type sold (goods #1/#2/#3 colors)
-  16: () => (<>{mIcon("warehouse", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
+  16: () => (<>{mIcon("market", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
   17: () => (<>{mIcon("watchtower", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
   18: () => (<>{mIcon("carpenter", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
   19: () => (<>{mIcon("church", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
-  20: () => (<>{mIcon("market", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
+  20: () => (<>{mIcon("warehouse", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
   21: () => (<>{mIcon("boarding", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
   22: () => (<>{mIcon("bank", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
   23: () => (<>{mIcon("townhall", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
@@ -628,12 +657,12 @@ function roomCode() { return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQR
 // board's LEFT edge (same gutter as the turn-order track) and 2/3 mirror on the
 // right (see coc-anchor-l/r). `left` here only steers each mini-die's inner edge.
 const DEPOT_POS = [
-  { left: 50, top: 13 },   // 1 top (nudged down to clear the turn-order track; the die sits below it, so don't push further or the black depot covers it)
-  { left: 83, top: 30 },   // 2 top-right
-  { left: 83, top: 70 },   // 3 bottom-right
-  { left: 50, top: 88 },   // 4 bottom
-  { left: 17, top: 70 },   // 5 bottom-left
-  { left: 17, top: 30 },   // 6 top-left
+  { left: 50, top: 12.1 },  // 1 top (raised ~5px so the black depot doesn't cover its die when goods pile up)
+  { left: 83, top: 49 },    // 2 top-right — BOTTOM edge pinned just above board-center; grows UP
+  { left: 83, top: 51 },    // 3 bottom-right — TOP edge pinned just below board-center; grows DOWN
+  { left: 50, top: 88 },    // 4 bottom
+  { left: 17, top: 51 },    // 5 bottom-left — TOP edge pinned just below board-center; grows DOWN
+  { left: 17, top: 49 },    // 6 top-left — BOTTOM edge pinned just above board-center; grows UP
 ];
 
 // ─── Minimal WebSocket hook ──────────────────────────────────────────────────
@@ -685,474 +714,10 @@ function Pips({ n }) {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────-
-const css = `
-/* Self-hosted fonts (CoC is mounted bare without baseCss, so it carries its own copy;
-   the browser dedupes identical @font-face by src url). Metric-matched fallbacks keep
-   the layout stable if the real font isn't loaded yet. */
-@font-face{font-family:'Cinzel';font-style:normal;font-weight:400 700;font-display:optional;src:url(/fonts/cinzel.latin.woff2) format('woff2')}
-@font-face{font-family:'Crimson Pro';font-style:normal;font-weight:300 400;font-display:optional;src:url(/fonts/crimsonpro.latin.woff2) format('woff2')}
-@font-face{font-family:'Crimson Pro';font-style:italic;font-weight:300 400;font-display:optional;src:url(/fonts/crimsonpro-italic.latin.woff2) format('woff2')}
-@font-face{font-family:'Cinzel Fallback';src:local('Georgia');size-adjust:111.8%}
-@font-face{font-family:'Crimson Fallback';src:local('Georgia');size-adjust:87.9%}
-/* CoC is mounted bare (the shell early-returns it without Spender's baseCss), so
-   reset the body here too — otherwise the browser-default body margin shows an
-   unstyled (white) frame around the dark .coc page. */
-html,body{margin:0;padding:0;background:#120c0d}
-.coc *,.coc *::before,.coc *::after{box-sizing:border-box;margin:0;padding:0}
-.coc{--bg:#120c0d;--surface:#1d1416;--surface2:#281a1d;--border:#3e2a2e;--crimson:#a3263a;--crimson-l:#c8455a;
-  --gold:#c9a84c;--gold-l:#e8c96a;--text:#ecdfd6;--text-dim:#9c8780;--radius:8px;--radius-lg:14px;
-  font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;color:var(--text);background:var(--bg);min-height:100vh}
-.coc-wrap{max-width:1100px;margin:0 auto;padding:calc(env(safe-area-inset-top,0px) + 18px) 16px 48px}
-.coc-top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:18px;padding-bottom:12px;border-bottom:1px solid var(--border)}
-.coc-top-left{display:flex;align-items:center;gap:12px;min-width:0}
-.coc-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.5rem;font-weight:700;color:var(--crimson-l);letter-spacing:.03em;white-space:nowrap}
-.coc-user{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.78rem;color:var(--text-dim);letter-spacing:.05em}
-/* Lobby banner: full-width (flush to screen edges — lives OUTSIDE the centered .coc-wrap),
-   back button far left, game name centered (left/right flex:1 so it's truly centered),
-   user far right. */
-.coc-top.coc-top-lobby{margin-bottom:0;padding:12px 20px;padding-top:calc(env(safe-area-inset-top,0px) + 12px);background:var(--surface);border-bottom:1px solid var(--border)}
-.coc-top-lobby .coc-top-left{flex:1 1 0;justify-content:flex-start}
-.coc-top-lobby .coc-title{flex:0 0 auto;text-align:center}
-.coc-top-lobby .coc-user{flex:1 1 0;text-align:right}
-.coc-top-lobby + .coc-wrap{padding-top:18px}
-/* Game-screen top bar: back button left, title truly centered, empty right spacer. */
-.coc-top-game{display:flex;align-items:center;gap:12px}
-.coc-top-game .coc-top-left{flex:1 1 0;justify-content:flex-start}
-.coc-top-game .coc-title{flex:0 0 auto;text-align:center}
-.coc-top-game .coc-top-right{flex:1 1 0}
-.coc-top-abandon{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}
-.coc-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:9px 16px;border-radius:var(--radius);border:none;cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;letter-spacing:.05em;font-weight:600;transition:all .15s;white-space:nowrap}
-.coc-btn:disabled{opacity:.35;cursor:not-allowed}
-.coc-btn.gold{background:var(--gold);color:#120c0d}.coc-btn.gold:hover:not(:disabled){background:var(--gold-l)}
-.coc-btn.crimson{background:var(--crimson);color:#fff}.coc-btn.crimson:hover:not(:disabled){background:var(--crimson-l)}
-.coc-btn.ghost{background:transparent;color:var(--text-dim);border:1px solid var(--border)}.coc-btn.ghost:hover:not(:disabled){color:var(--text);border-color:var(--text-dim)}
-.coc-btn.tool{background:var(--surface2);color:var(--gold-l);border:1px solid var(--gold)}.coc-btn.tool:hover:not(:disabled){background:#3a2a18;color:var(--gold-l)}
-.coc-btn.outline{background:transparent;color:var(--gold);border:1px solid var(--gold)}.coc-btn.outline:hover:not(:disabled){background:var(--gold);color:#120c0d}
-.coc-btn.sm{padding:6px 11px;font-size:.74rem}
-/* Lobby create row — a single "+ Create Game ▾" dropdown (vs Friend / vs Bot),
-   Join code, and refresh, centered (mirrors Spender's browser-create). */
-.coc-create{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:6px 0 26px}
-.coc-ai-picker-wrap{position:relative;display:inline-flex}
-.coc-ai-picker-wrap>.coc-btn.active{background:var(--gold-l)}
-.coc-ai-picker{position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);z-index:30;display:flex;flex-direction:column;gap:6px;align-items:stretch;min-width:180px;max-width:min(92vw,280px);padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:0 10px 28px rgba(0,0,0,.5)}
-.coc-ai-picker .coc-btn{white-space:nowrap}
-.coc-ai-picker-label{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase;text-align:center;margin-top:4px;padding-top:8px;border-top:1px solid var(--border)}
-/* Open Games | Active Games | History, side by side (mirrors Spender's lobby-grid). */
-.coc-lobby-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px 24px;align-items:start}
-.coc-lobby-col{min-width:0}
-@media (max-width:1040px){.coc-lobby-grid{grid-template-columns:1fr 1fr}}
-@media (max-width:760px){.coc-lobby-grid{grid-template-columns:1fr;gap:0}}
-.coc-won{color:#7ec87e;font-weight:700}
-.coc-lost{color:#d98a8a;font-weight:700}
-.coc-join{display:flex;gap:8px}
-.coc-input{padding:9px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Cinzel','Cinzel Fallback',serif;letter-spacing:.12em;outline:none;width:130px;text-transform:uppercase}
-.coc-input:focus{border-color:var(--gold)}
-.coc-section-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;letter-spacing:.18em;color:var(--gold);text-transform:uppercase;margin:18px 0 8px;border-bottom:1px solid var(--border);padding-bottom:6px}
-.coc-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 14px;display:flex;align-items:center;gap:12px;margin-bottom:8px}
-.coc-card-info{flex:1;min-width:0}
-.coc-card-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.85rem}
-.coc-card-meta{font-size:.78rem;color:var(--text-dim)}
-.coc-empty{text-align:center;padding:28px 16px;color:var(--text-dim);font-style:italic;font-size:.9rem;background:var(--surface2);border-radius:var(--radius);border:1px dashed var(--border)}
-.coc-section-hd{display:flex;justify-content:space-between;align-items:center;margin:18px 0 10px;padding-bottom:8px;border-bottom:1px solid var(--border)}
-.coc-section-hd .coc-section-title{margin:0;border:none;padding:0}
-.coc-muted{font-size:.74rem;color:var(--text-dim)}
-.coc-card-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
-.coc-turn-badge{background:var(--gold);color:#120c0d;padding:3px 10px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.12em;font-weight:700;text-transform:uppercase;white-space:nowrap}
-.coc-their-badge{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border);padding:3px 10px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;white-space:nowrap}
-.coc-spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:coc-spin .7s linear infinite;vertical-align:middle;margin-right:6px}
-@keyframes coc-spin{to{transform:rotate(360deg)}}
-.coc-waiting{max-width:420px;margin:60px auto;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px}
-.coc-code{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2rem;letter-spacing:.3em;color:var(--gold);background:var(--surface2);border:1px dashed var(--border);border-radius:var(--radius);padding:12px;margin:14px 0;cursor:pointer}
-/* game */
-.coc-statusbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:10px 14px}
-.coc-status-left{display:flex;align-items:center;gap:14px;flex-wrap:wrap;min-width:0}
-.coc-pill{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;letter-spacing:.06em;color:var(--text-dim)}
-.coc-goods-left{display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap}
-.coc-goods-left-lbl{text-transform:uppercase;opacity:.7}
-.coc-goods-mini{display:inline-flex;align-items:center;gap:3px}
-.coc-pill b{color:var(--text)}
-.coc-vp{display:flex;gap:14px;justify-self:center}
-.coc-vp .v{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.8rem}
-.coc-vp .v b{color:var(--gold);font-size:1.05rem}
-/* Abandon, at the right end of the status bar. */
-.coc-status-right{display:flex;align-items:center;gap:10px;justify-self:end;flex-wrap:wrap;justify-content:flex-end}
-/* Workers / silver resources — a bit larger than the plain pills. */
-.coc-res{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.92rem;letter-spacing:.04em;color:var(--text-dim);display:inline-flex;align-items:center;gap:5px}
-.coc-res b{color:var(--text)}
-.coc-res-ic{font-size:1.15rem;line-height:1}
-.coc-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px}
-.coc-panel h3{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;letter-spacing:.16em;color:var(--gold);text-transform:uppercase;margin-bottom:10px}
-.coc-depots{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
-.coc-depot{border:1px solid var(--border);border-radius:var(--radius);padding:6px;min-height:78px;background:var(--surface2)}
-.coc-depot.match{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset}
-/* A ship/monastery is asking which depot to drain — the eligible depots pulse and are clickable. */
-.coc-depot-pick,.coc-depot-pick *{cursor:pointer}
-.coc-depot-pick{animation:coc-pickpulse 1.1s ease-in-out infinite}
-@keyframes coc-pickpulse{0%,100%{box-shadow:0 0 0 2px var(--gold-l) inset,0 0 8px rgba(232,201,106,.35)}50%{box-shadow:0 0 0 2px var(--gold-l) inset,0 0 18px rgba(232,201,106,.75)}}
-/* A specific candidate tile in a depot (building-take): pulse its brightness so the
-   pickable tile is obvious. A ring/glow would be clipped by the hex clip-path, but a
-   brightness filter modifies the tile's own pixels, so it shows through the clip. */
-.coc-tile-pick{cursor:pointer;animation:coc-tilepick 1.1s ease-in-out infinite}
-@keyframes coc-tilepick{0%,100%{filter:brightness(1.05)}50%{filter:brightness(1.5)}}
-/* hexagon board layout */
-/* Top-align "The Board" (flex-start) so its gap below the panel edge matches the
-   duchy heads' in every state; the small white die floats at the right. min-height
-   matches the duchy heads so the row is the same height. The tight margin + track
-   (below) frees vertical space for the depot ring. */
-.coc-board-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;min-height:30px;margin-bottom:4px}
-.coc-board-head h3{margin-bottom:0}
-.coc-board-status{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
-.coc-board-hex{position:relative;width:100%;max-width:640px;margin:6px auto 0;aspect-ratio:1/0.9}
-.coc-board-hex .coc-depot{position:absolute;width:34%;min-height:96px;padding:6px;transform:translate(-50%,-50%);display:flex;flex-direction:column;justify-content:center}
-/* central black depot: a dark box holding the kite of tiles (positioned absolutely) */
-.coc-black-center{left:50%;top:50%;box-sizing:border-box;padding:0!important;border:1px solid var(--gold)!important;background:#0c0809!important;border-radius:8px;min-height:0!important;z-index:1}
-.coc-blacklbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.08em;color:var(--gold);text-transform:uppercase}
-.coc-board-panel{position:relative}
-/* turn-order track — a boxed block ABOVE the depot ring. It used to be absolutely
-   pinned into the panel's left gutter, but the board now shares the screen with both
-   duchies (no gutter), so it flows in the normal column like on mobile. */
-.coc-track-block{max-width:340px;background:var(--surface2);border:1px solid var(--gold);border-radius:8px;padding:5px 9px;margin:0 0 4px;box-shadow:0 2px 8px rgba(0,0,0,.45)}
-.coc-track{display:flex;flex-direction:column;align-items:flex-start;gap:3px;margin:0}
-.coc-track-lbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase;white-space:nowrap}
-.coc-track-spaces{display:flex;gap:3px;align-items:stretch}
-.coc-track-space{position:relative;width:38px;min-height:56px;border:1px solid var(--border);border-radius:5px;background:var(--surface);display:flex;flex-direction:column;justify-content:flex-end;gap:2px;padding:18px 3px 5px}
-.coc-track-snum{position:absolute;top:3px;left:0;right:0;text-align:center;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.64rem;color:var(--text-dim)}
-.coc-track-stack{display:flex;flex-direction:column;gap:6px}
-.coc-track-token{border-radius:3px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.56rem;font-weight:700;text-align:center;padding:2px 1px;line-height:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.coc-track-token.start{box-shadow:0 0 0 2px #fff}
-.coc-track-cap{display:block;margin:3px 0 0;font-size:.58rem;color:var(--text-dim);font-style:italic}
-
-/* duchy panel: controls stacked ABOVE the board (the panel lives in a grid column
-   now that both duchies share the screen — no room for the old side-by-side split) */
-/* Top-align the h3 (flex-start) so "Your Duchy — X VP" sits at the same small gap
-   below the panel edge whether or not the action buttons are present — otherwise the
-   h3 jumps up at game-over (buttons gone) and no longer matches "The Board". */
-.coc-duchy-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px;min-height:30px}
-.coc-duchy-head h3{margin-bottom:0}
-.coc-turnbadge{white-space:nowrap}
-.coc-duchy-layout{display:flex;flex-direction:column;gap:14px}
-.coc-duchy-controls{display:flex;flex-direction:column;gap:14px}
-.coc-duchy-board{width:100%;max-width:560px;align-self:center}
-.coc-duchy-board .coc-hexsvg{max-width:100%;margin:0}
-.coc-depot-n{display:flex;justify-content:center;margin-bottom:5px}
-.coc-minidie{position:absolute;transform:translate(-50%,-50%);z-index:3;pointer-events:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;background:#f3ead8;color:#15100a;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:.82rem;border-radius:5px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.3),0 1px 3px rgba(0,0,0,.55)}
-/* Phone: the hexagonal depot ring + absolutely-positioned turn-order track overflow
-   on narrow screens (fixed 70px hex tiles can't fit a 31%-wide depot box). Reflow the
-   shared board into a stack — turn order on top, the 6 numbered depots in a 2-col grid,
-   the black depot centered below. !important beats the inline left/top/transform. */
-@media (max-width:600px){
-  .coc-board-hex{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;justify-items:center;aspect-ratio:auto;max-width:none;margin-top:6px}
-  /* the track is a static block above the board at every width now; just tighten it */
-  .coc-track-block{max-width:none;padding:6px 7px}
-  /* shrink the 7 turn-order spaces so 0-6 fit on one row */
-  .coc-track-spaces{flex-wrap:wrap;gap:2px}
-  .coc-track-space{width:36px;min-height:50px;padding:16px 2px 4px}
-  /* zoom shrinks each depot card AND the black depot's inline-px diamond consistently,
-     and (unlike transform) reduces the layout footprint so the board is more compact */
-  .coc-board-hex .coc-depot{zoom:.9}
-  .coc-board-hex .coc-depot:not(.coc-black-center){position:relative;left:auto!important;top:auto!important;transform:none!important;width:auto!important;min-height:0}
-  .coc-board-hex .coc-minidie{position:static!important;left:auto!important;top:auto!important;transform:none!important;margin:0 auto 6px}
-  .coc-board-hex .coc-black-center{position:relative;grid-column:1/-1;justify-self:center;left:auto!important;top:auto!important;transform:none!important}
-  /* status bar: the 3-zone grid is too tight on phones — stack the left group on its
-     own row, then center the score + right group (Abandon) below */
-  .coc-statusbar{display:flex;flex-wrap:wrap;justify-content:center}
-  .coc-status-left{width:100%;justify-content:center}
-  .coc-status-right{justify-content:center}
-  /* lobby create row: let the dropdown + join controls wrap cleanly on phones */
-  .coc-create{gap:8px}
-  /* In-game "Your Duchy" controls sit in a narrow panel (viewport - wrap 32 - panel 28).
-     Only MODESTLY reduce the dice + worker/silver tokens (42/40, vs the 46/44 desktop size)
-     and tighten the row gaps, so the Dice row (dice + workers/silver) and the action buttons
-     (Take/Sell/End Turn) each stay on ONE row from ~375px up (iPhone SE + all regular
-     iPhones) without looking over-shrunk; the rare 360px mini gracefully wraps. NOTE: base
-     component rules live LATER in this sheet, so the .coc prefix raises specificity to win. */
-  .coc .coc-dicebar{gap:7px}
-  .coc .coc-die{width:42px;height:42px;font-size:1.2rem}
-  .coc .coc-resbar{gap:10px;margin-left:4px}
-  .coc .coc-token{width:40px;height:40px;font-size:1.15rem}
-  .coc .coc-token-chip{gap:5px}
-  /* fit the "Color bonus" label + all 6 color chips on one phone row (down to ~360px) */
-  .coc .coc-bonusbar{display:flex;flex-direction:column;align-items:center;gap:6px;padding:7px 6px}
-  .coc .coc-bonus-groups{justify-content:center;gap:4px}
-  .coc .coc-bonus-spacer{display:none}
-  .coc .coc-bonusbar-lbl{letter-spacing:.05em}
-  .coc .coc-bonuschip{gap:2px}
-  .coc .coc-bonuschip b{font-size:.8rem}
-  .coc .coc-bonus-sw{width:12px;height:12px}
-  /* force the color-bonus group onto its OWN fresh line (turn the 2nd divider into a
-     full-width zero-height break) so the 6 chips never split depending on how the region
-     labels above happen to wrap at a given width */
-  .coc .coc-bonus-div ~ .coc-bonus-div{flex-basis:100%;width:auto;height:0;margin:0;background:none}
-  /* lobby header: the big centered title overlapped the ← Back button on phones, making
-     it un-tappable. Shrink the title and trim the header padding so Back stays clickable
-     and the header isn't so tall. */
-  .coc-top.coc-top-lobby{padding:9px 12px;padding-top:calc(env(safe-area-inset-top,0px) + 9px);gap:8px}
-  .coc-top-lobby .coc-title{font-size:1.05rem}
-  .coc-top-lobby .coc-user{font-size:.64rem}
-  /* Same fix for the in-GAME header (Menu | title | Abandon): the full-size 1.5rem
-     Cinzel title is too wide for a phone, so it overlapped the Menu button and shoved
-     Abandon off-screen. The title is centered between two button zones, so it must scale
-     with the viewport (a fixed size still overlapped Menu at ~320px / under display-zoom).
-     clamp() shrinks it on narrow screens; trimming the header buttons frees more room. */
-  .coc-top.coc-top-game{gap:6px;margin-bottom:10px;padding-bottom:8px}
-  .coc-top-game .coc-title{font-size:clamp(.85rem, 3.6vw, 1.05rem)}
-  .coc-top-game .coc-top-left,.coc-top-game .coc-top-right{min-width:0}
-  .coc-top-game .coc-btn.sm{padding:5px 9px}
-}
-.coc-tilewrap{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
-.coc-animals{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:1px;line-height:0}
-.coc-glyph{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;color:#15100a;line-height:1}
-.coc-fo{width:100%;height:100%;display:flex;align-items:center;justify-content:center}
-.coc-tile{width:70px;height:81px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.05rem;font-family:'Cinzel','Cinzel Fallback',serif;color:#15100a;font-weight:700;transition:transform .1s;line-height:1;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%)}
-.coc-tile:hover{transform:scale(1.1)}
-.coc-tile.goods{width:34px;height:34px;border-radius:24%/20%;clip-path:none;color:#fff;font-size:.82rem;text-shadow:0 1px 2px rgba(0,0,0,.7);overflow:hidden}
-/* barrel hoops (two dark bands) painted UNDER the sell number, matching the monastery goods icons */
-.coc-tile.goods::before,.coc-flyer.goods::before{content:"";position:absolute;inset:0;pointer-events:none;border-radius:inherit;background:linear-gradient(to bottom,transparent 0 22%,rgba(0,0,0,.28) 22% 30%,transparent 30% 70%,rgba(0,0,0,.28) 70% 78%,transparent 78% 100%)}
-/* Ghost: a taken tile leaves a colored hex OUTLINE (its type color) so the fixed
-   per-phase depot layout stays memorable. The element is a full-color hex; the
-   ::after carves the center back to the depot surface, leaving a colored rim. */
-.coc-tile-ghost{cursor:default;position:relative;opacity:.7}
-.coc-tile-ghost:hover{transform:none}
-/* Uniform-thickness rim: a rectangular inset+same-hex leaves a THINNER rim on the
-   slanted edges than the vertical sides. Instead fill the whole tile with the color
-   and lay a hexagon shrunk by a true PERPENDICULAR ~3px (computed for the 70×81 tile)
-   on top — the gap between the two hexes is then a constant-width colored rim. */
-.coc-tile-ghost::after{content:"";position:absolute;inset:0;background:var(--surface2);clip-path:polygon(50% 4.3%,95.7% 27.1%,95.7% 72.9%,50% 95.7%,4.3% 72.9%,4.3% 27.1%)}
-.coc-whitedie{display:flex;align-items:center;gap:6px;margin-left:auto}
-.coc-whitedie .coc-die{width:30px;height:30px}
-.coc-dicebar{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
-.coc-die{width:46px;height:46px;border-radius:8px;background:#f3ead8;color:#1a1010;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:1.3rem;display:flex;align-items:center;justify-content:center;cursor:pointer;border:2px solid transparent;position:relative}
-.coc-die.sel{border-color:var(--gold);box-shadow:0 0 8px rgba(201,168,76,.6)}
-.coc-die.used{opacity:.35;cursor:not-allowed}
-.coc-die.white{background:#fff;cursor:default}
-.coc-die-adj{display:flex;flex-direction:column;gap:2px}
-.coc-die-adj button{width:20px;height:20px;font-size:.7rem;line-height:1;border:1px solid var(--border);background:var(--surface2);color:var(--text);border-radius:4px;cursor:pointer}
-.coc-die-adj button:disabled{opacity:.3;cursor:not-allowed}
-/* Die faces rendered as dots/pips (1-6) instead of a numeral; scales with the die. */
-.coc-pips{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);width:82%;height:82%}
-.coc-pip{place-self:center;width:62%;height:62%;border-radius:50%}
-.coc-pip.on{background:#15100a;box-shadow:inset 0 0 1px rgba(0,0,0,.35)}
-/* Bordered hexes (depots + storage) for a bit of depth: a crisp ~1px edge all around
-   the clip-path hex (separates adjacent tiles) + a soft drop shadow to lift them. */
-.coc-tile,.coc-stt{position:relative;filter:drop-shadow(0 1.5px 1px rgba(0,0,0,.55))}
-.coc-tile.goods{filter:none}     /* goods are small squares, not hexes */
-.coc-tile-ghost{filter:none}     /* ghost placeholders stay subtle */
-/* Glossy bevel along each hex's edges (light top-left -> dark bottom-right) so the
-   flat single-color tiles read as raised/3D rather than dull. Clipped to the hex,
-   inert to clicks; excludes goods squares, ghost placeholders, and empty slots. */
-.coc-tile:not(.goods):not(.coc-tile-ghost)::after,.coc-stt:not(.empty)::after{content:"";position:absolute;inset:0;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);background:linear-gradient(150deg,rgba(255,255,255,.62) 0%,rgba(255,255,255,.16) 16%,rgba(255,255,255,0) 34%,rgba(0,0,0,.06) 56%,rgba(0,0,0,.32) 84%,rgba(0,0,0,.6) 100%);pointer-events:none}
-.coc-storage{display:flex;gap:6px;flex-wrap:wrap}
-.coc-stt{width:70px;height:81px;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.05rem;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;color:#15100a;transition:transform .1s}
-.coc-stt:hover{transform:scale(1.08)}
-.coc-stt.empty{cursor:default}
-/* Selected storage tile (ready to place): scale the hex and wrap it in a NON-clipped
-   layer that carries the pulsing gold glow. The glow MUST live on the wrapper — a
-   drop-shadow (or border/box-shadow) on the hex itself is clipped away by the hex's
-   own clip-path. The wrapper has no clip-path, so its drop-shadow follows the child
-   hex's outline and radiates outward, unclipped. */
-.coc-stt-wrap{width:70px;height:81px;position:relative;display:flex}
-.coc-stt.sel{transform:scale(1.12);z-index:3}
-.coc-stt.sel:hover{transform:scale(1.15)}
-.coc-stt-wrap.sel{z-index:3;animation:coc-stt-sel 1.2s ease-in-out infinite}
-@keyframes coc-stt-sel{0%,100%{filter:drop-shadow(0 0 2px var(--gold))}50%{filter:drop-shadow(0 0 8px var(--gold-l)) drop-shadow(0 0 4px var(--gold-l))}}
-/* Tile-move animation overlay (depot->storage, storage->duchy) */
-.coc-fly-layer{position:fixed;inset:0;pointer-events:none;z-index:140}
-.coc-flyer{position:fixed;display:flex;align-items:center;justify-content:center;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);filter:drop-shadow(0 2px 4px rgba(0,0,0,.6));will-change:transform;animation:coc-fly .35s cubic-bezier(.4,.05,.25,1) forwards}
-.coc-flyer::after{content:"";position:absolute;inset:0;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);background:linear-gradient(150deg,rgba(255,255,255,.62) 0%,rgba(255,255,255,.16) 16%,rgba(255,255,255,0) 34%,rgba(0,0,0,.06) 56%,rgba(0,0,0,.32) 84%,rgba(0,0,0,.6) 100%);pointer-events:none}
-.coc-flyer.goods{clip-path:none;border-radius:24%/20%;color:#fff;font-weight:700;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;text-shadow:0 1px 2px rgba(0,0,0,.7);overflow:hidden}
-.coc-flyer.goods::after{display:none}
-@keyframes coc-fly{from{transform:translate(0,0) scale(var(--s0,1))}to{transform:translate(var(--dx),var(--dy)) scale(var(--s1,1))}}
-/* Worker / silver token flyers: pop OUT of the counter when spent, IN when gained. */
-.coc-token-flyer{position:fixed;display:flex;align-items:center;justify-content:center;border-radius:50%;font-size:1rem;line-height:1;z-index:141;pointer-events:none;will-change:transform,opacity}
-.coc-token-flyer.worker{background:radial-gradient(circle at 34% 28%,#c79a5c,#6f4a22);color:#f3ead8;box-shadow:0 1px 3px rgba(0,0,0,.6),inset 0 0 0 1px rgba(255,255,255,.18)}
-.coc-token-flyer.silver{background:radial-gradient(circle at 34% 28%,#eef0f4,#9aa0ad);color:#2a2a2a;box-shadow:0 1px 3px rgba(0,0,0,.6),inset 0 0 0 1px rgba(255,255,255,.35)}
-.coc-token-flyer.spent{animation:coc-tok-out .42s ease-in forwards}
-.coc-token-flyer.gain{animation:coc-tok-in .42s ease-out forwards}
-@keyframes coc-tok-out{from{transform:translate(0,0) scale(1);opacity:1}to{transform:translate(var(--dx),var(--dy)) scale(.55);opacity:0}}
-@keyframes coc-tok-in{from{transform:translate(0,0) scale(.55);opacity:0}to{transform:translate(var(--dx),var(--dy)) scale(1);opacity:1}}
-/* Resource token chips (workers / silver) in the dice bar + opponent modal. The
-   .coc-resbar keeps workers+silver together as ONE wrap unit (so they never split);
-   on mobile it takes its own full row below the dice. */
-.coc-resbar{display:inline-flex;align-items:center;gap:14px;margin-left:8px}
-.coc-token-chip{display:inline-flex;align-items:center;gap:7px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.05rem;color:var(--text)}
-.coc-token-chip b{color:var(--text);font-size:1.35rem}
-.coc-token{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:50%;font-size:1.3rem;line-height:1;box-shadow:0 1px 3px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.15)}
-.coc-token.worker{background:radial-gradient(circle at 34% 28%,#c79a5c,#6f4a22);color:#f3ead8}
-.coc-token.silver{background:radial-gradient(circle at 34% 28%,#eef0f4,#9aa0ad);color:#2a2a2a}
-/* A resource token that triggers an action (workers→Monastery #6, silver→black-depot buy):
-   a gold rim invites the click; armed = pulse. */
-.coc-token.coc-arm{cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.15),0 0 0 2px var(--gold-l)}
-.coc-token.coc-on{cursor:pointer;animation:coc-goodspick 1.1s ease-in-out infinite}
-/* Goods are shown in their own bordered box (empty box when you hold none — no "none" text). */
-.coc-goods-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;min-height:44px;padding:7px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius)}
-.coc-goods-chip{display:flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text-dim);cursor:pointer}
-/* A goods chip you can click to sell during a Warehouse pending — pulses like the pick depots. */
-.coc-goods-pick{color:var(--text);border-radius:6px;padding:1px 5px;margin:-1px -1px;animation:coc-goodspick 1.1s ease-in-out infinite}
-@keyframes coc-goodspick{0%,100%{box-shadow:0 0 0 2px var(--gold-l),0 0 8px rgba(232,201,106,.4)}50%{box-shadow:0 0 0 2px var(--gold-l),0 0 16px rgba(232,201,106,.75)}}
-.coc-setup-banner{background:rgba(212,160,74,.14);border:1px solid var(--gold);border-radius:8px;padding:9px 12px;margin-bottom:12px;font-size:.85rem;line-height:1.35}
-.coc-hexsvg{width:100%;max-width:520px;display:block;margin:0 auto}
-.coc-hex{cursor:default;transition:opacity .12s}
-.coc-hex.legal{cursor:pointer}
-.coc-hex.legal:hover{opacity:.8}
-.coc-modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}
-.coc-modal{background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius-lg);padding:20px;max-width:440px;width:100%}
-.coc-modal h3{font-family:'Cinzel','Cinzel Fallback',serif;color:var(--gold);font-size:1rem;margin-bottom:6px}
-.coc-modal p{color:var(--text-dim);font-size:.88rem;margin-bottom:14px}
-.coc-modal-row{display:flex;flex-wrap:wrap;gap:8px}
-/* How-to-play (Rules) modal */
-.coc-rules{max-width:540px;display:flex;flex-direction:column;max-height:86vh}
-.coc-rules-body{overflow-y:auto;scrollbar-gutter:stable;padding-right:6px}
-.coc-rules-body p{margin-bottom:10px;line-height:1.5}
-.coc-rules-lead{color:var(--text)}
-.coc-rules-note{color:var(--text-dim);font-size:.8rem;font-style:italic;margin-bottom:0}
-.coc-rules-body h4{font-family:'Cinzel','Cinzel Fallback',serif;color:var(--gold);font-size:.9rem;margin:14px 0 6px}
-.coc-rules-body ul{margin:0 0 10px;padding-left:20px}
-.coc-rules-body li{color:var(--text-dim);font-size:.86rem;line-height:1.5;margin-bottom:4px}
-.coc-rules-body b{color:var(--text)}
-/* non-blocking variant: clicks fall through to the board; panel pinned to the bottom */
-.coc-modal-float{background:transparent;pointer-events:none;align-items:flex-end;padding-bottom:16px}
-.coc-modal-float .coc-modal{pointer-events:auto;max-width:560px;box-shadow:0 8px 30px rgba(0,0,0,.7)}
-.coc-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--crimson);color:#fff;padding:10px 18px;border-radius:var(--radius);font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;z-index:60;box-shadow:0 6px 20px rgba(0,0,0,.5);max-width:min(92vw,460px);text-align:center;line-height:1.35}
-.coc-reconnbar{position:fixed;top:0;left:0;right:0;display:flex;align-items:center;justify-content:center;gap:2px;background:var(--surface2);color:var(--gold-l);border-bottom:1px solid var(--gold);padding:7px 12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.74rem;letter-spacing:.08em;z-index:130;box-shadow:0 2px 10px rgba(0,0,0,.5)}
-/* Between-phase overlay: announces the new phase + the mine income you just collected.
-   Sits below the flyer layer (z 140) so the silver tokens fly IN over it; pointer-events
-   off so the board stays interactive underneath. Fades itself out (JS also dismisses). */
-.coc-phase-pop{position:fixed;inset:0;z-index:120;display:flex;align-items:center;justify-content:center;pointer-events:none;padding:16px;animation:coc-phasepop-fade 3.3s ease-in-out forwards}
-@keyframes coc-phasepop-fade{0%{opacity:0}7%{opacity:1}82%{opacity:1}100%{opacity:0}}
-.coc-phase-pop-card{background:linear-gradient(160deg,rgba(34,20,22,.97),rgba(16,11,12,.97));border:1px solid var(--gold);border-radius:16px;padding:22px 44px;text-align:center;box-shadow:0 16px 54px rgba(0,0,0,.72);animation:coc-phasepop-scale .42s cubic-bezier(.2,.85,.3,1.25)}
-@keyframes coc-phasepop-scale{from{transform:scale(.82)}to{transform:scale(1)}}
-.coc-phase-pop-sub{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.66rem;letter-spacing:.2em;text-transform:uppercase;color:var(--text-dim)}
-.coc-phase-pop-big{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:2.5rem;color:var(--gold-l);letter-spacing:.05em;margin:2px 0 6px}
-.coc-phase-pop-inc{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:6px 12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.1rem;color:var(--text)}
-.coc-phase-pop-gain{display:inline-flex;align-items:center;gap:6px}
-.coc-phase-pop-gain .coc-token{width:26px;height:26px;font-size:.9rem}
-.coc-phase-pop-src{width:100%;font-size:.6rem;letter-spacing:.16em;text-transform:uppercase;color:var(--text-dim)}
-.coc-winner{max-width:460px;margin:50px auto;text-align:center;background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius-lg);padding:30px}
-.coc-winner h2{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2rem;color:var(--gold)}
-/* End-of-game VP review: itemized breakdown per player (turn-stamped + end-of-game). */
-.coc-review{max-width:820px;margin:34px auto;text-align:center;background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius-lg);padding:24px}
-.coc-review h2{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.9rem;color:var(--gold);margin-bottom:2px}
-.coc-review-hint{color:var(--text-dim);font-size:.78rem;margin:0 0 14px}
-.coc-review-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;text-align:left}
-.coc-review-col{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px}
-.coc-review-col.win{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset}
-.coc-review-hd{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:1rem;color:var(--text);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)}
-.coc-review-hd b{color:var(--gold);font-size:1.1rem}
-.coc-review-list{font-size:.82rem}
-.coc-review-sub{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.58rem;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);opacity:.8;margin:8px 0 3px}
-.coc-review-phase{text-align:center;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.58rem;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);opacity:.6;padding:5px 0 2px}
-.coc-review-row{display:flex;align-items:baseline;gap:8px;padding:2px 0;color:var(--text-dim)}
-.coc-review-t{flex:0 0 34px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;font-weight:700;color:var(--gold);opacity:.75}
-.coc-review-lbl{flex:1;color:var(--text)}
-.coc-review-vp{flex:0 0 auto;color:var(--text);font-weight:700}
-.coc-review-total{margin-top:6px;padding-top:6px;border-top:1px solid var(--border);color:var(--text)}
-.coc-review-total .coc-review-lbl,.coc-review-total .coc-review-vp{font-family:'Cinzel','Cinzel Fallback',serif;color:var(--gold)}
-.coc-review-empty{color:var(--text-dim);font-size:.78rem;padding:6px 0}
-.coc-review-row.proj,.coc-review-sub.proj,.coc-review-total.proj,.coc-review-phase.proj{opacity:.4}
-.coc-review-modal{max-width:760px;width:100%;max-height:88vh;overflow-y:auto}
-/* Clickable score in the status bar -> opens the mid-game VP breakdown. */
-.coc-vp-click{cursor:pointer;border-radius:var(--radius);transition:background .12s}
-.coc-vp-click:hover{background:var(--surface2)}
-.coc-vp-info{font-size:.7rem;color:var(--gold);opacity:.8;align-self:flex-start}
-.coc-log{max-height:220px;overflow-y:auto;scrollbar-gutter:stable;font-size:.78rem;color:var(--text-dim)}
-.coc-log div{padding:2px 0;border-bottom:1px solid rgba(62,42,46,.4)}
-.coc-log-t{display:inline-block;min-width:26px;margin-right:6px;color:var(--gold);opacity:.75;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;font-weight:700}
-.coc-log-phase{text-align:center;color:var(--gold);opacity:.85;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;padding:4px 0!important}
-/* Bonuses row: phase/size/color bonuses (left group) + centered score. */
-.coc-bonusbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;margin:0 0 10px;padding:7px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)}
-.coc-bonus-groups{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
-.coc-bonus-sec{display:inline-flex;align-items:center;gap:6px}
-.coc-bonuses-lead{color:var(--gold);margin-right:2px}
-.coc-bonus-spacer{min-width:0;display:flex;align-items:center;justify-content:flex-start;padding-left:14px}
-.coc-bonusbar-lbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;color:var(--gold)}
-.coc-regbonus-lbl{display:inline-flex;align-items:center;gap:6px;color:var(--text-dim)}
-.coc-regbonus{font-size:.98rem;color:var(--gold-l);letter-spacing:.02em}
-.coc-regsize{font-size:.74rem;color:var(--text-dim);letter-spacing:.01em}
-.coc-bonus-div{width:1px;align-self:stretch;background:var(--border);margin:-2px 2px}
-.coc-bonuschip{display:inline-flex;align-items:center;gap:4px;font-size:.82rem;color:var(--text)}
-.coc-bonuschip.gone{opacity:.38}
-.coc-bonus-sw{width:15px;height:15px;border-radius:3px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.4)}
-.coc-bonuschip b{color:var(--text);font-size:.86rem}
-.coc-bonuschip i{font-style:normal;font-size:.58rem;letter-spacing:.04em;color:var(--text-dim);text-transform:uppercase}
-.coc-turnbadge{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.74rem;padding:4px 10px;border-radius:12px;letter-spacing:.05em}
-.coc-turnbadge.you{background:var(--gold);color:#120c0d}
-.coc-turnbadge.them{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border)}
-.coc-board-pick{margin:4px 0 8px}
-.coc-board-pick .coc-section-title{display:flex;align-items:center;gap:8px}
-.coc-board-grid{display:flex;gap:8px;overflow-x:auto;padding:6px 2px 8px}
-.coc-bthumb{flex:0 0 auto;width:86px;background:var(--surface2);border:2px solid var(--border);border-radius:10px;padding:5px 5px 4px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;transition:border-color .15s,transform .1s}
-.coc-bthumb:hover{transform:translateY(-2px)}
-.coc-bthumb.sel{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold)}
-.coc-bthumb-svg{width:72px;height:66px;display:block}
-.coc-bthumb-name{font-size:.6rem;color:var(--text-dim);text-align:center;line-height:1.05;font-family:'Cinzel','Cinzel Fallback',serif}
-.coc-bthumb.sel .coc-bthumb-name{color:var(--gold)}
-/* ── Game layout: the shared board + BOTH duchies visible together ────────────
-   One grid holds the three panels: stacked on phones; 2 columns >=880px (the board
-   spans the top row, the two duchies sit side by side under it); 3 columns >=1280px
-   (board | your duchy | opponent duchy — everything on screen at once, like the
-   physical table). NOTE: this section is LAST in the sheet so its rules win
-   equal-specificity ties against the base rules above. */
-.coc-wrap-game{max-width:1800px}
-/* grid items STRETCH (no align-items:start) so all three panels share the row's
-   height — the board panel then flex-fills its spare height with the depot ring.
-   The bottom margin is the buffer between the board/duchies and the move log. */
-/* minmax(0,1fr), NOT 1fr: the board column min-content is set by the FIXED 70px depot
-   tiles, and a plain 1fr (= minmax(auto,1fr)) cannot shrink below that, so the whole
-   cols-grid was forced wider than the viewport and overflowed right — while the header +
-   bonusbar (siblings, not inside this grid) stayed at container width. minmax(0,...) lets
-   the track shrink so the board reflows instead of spilling (the documented grid
-   min-content footgun). NOTE: no backticks in this comment — it lives in the css string. */
-.coc-game-cols{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;margin-bottom:16px}
-/* opponent panel: dice + resources row, then storage/goods, then their board */
-.coc-oppbar{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-bottom:12px}
-.coc-opp-sections{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;margin-bottom:12px}
-/* Ring-SIDE depots (2/3/5/6): a narrow fixed-width box — the two tiles stack
-   VERTICALLY and any goods sit in small rows BELOW the tiles (no horizontal
-   growth, nothing overflows). 5/6 hug the board's LEFT edge (the same gutter the
-   turn-order track sits in) and 2/3 mirror on the right. Top/bottom depots (1/4)
-   keep the horizontal row (their goods flow inline via display:contents).
-   Phones reflow the depots to a grid instead, so this is desktop/tablet only. */
-.coc-depot-goods{display:contents}
-@media (min-width:601px){
-  .coc-board-hex .coc-depot.coc-depot-side{width:88px}
-  .coc-depot-side .coc-tilewrap{flex-direction:column;flex-wrap:nowrap;align-items:center}
-  .coc-depot-side .coc-depot-goods{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;width:100%}
-  .coc-board-hex .coc-depot.coc-anchor-l{transform:translate(0,-50%)}
-  .coc-board-hex .coc-depot.coc-anchor-r{transform:translate(-100%,-50%)}
-}
-/* Fixed-size goods box — sized for exactly 3 goods types (the storage cap) + the
-   face-down pile of goods you've already sold, pinned to its right edge. It sits
-   BESIDE the storage row and must not grow/shrink with the goods you hold. */
-.coc-goods-row{width:260px;max-width:100%;gap:6px;padding:7px 8px}
-.coc-goods-sold{display:inline-flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text-dim);margin-left:auto;padding-left:4px;cursor:pointer}
-.coc-goods-sold.none{opacity:.45}
-.coc-goods-back{width:30px;height:30px;border-radius:4px;background:linear-gradient(140deg,#5a4046 0%,#3a292e 55%,#2a1d21 100%);box-shadow:-2px 2px 0 -1px #241a1d,-4px 4px 0 -2px #191114,inset 0 0 0 1px rgba(255,255,255,.14)}
-/* your storage + goods, side by side (wraps only when the column is truly narrow) */
-.coc-stor-goods{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start}
-@media (min-width:880px){
-  .coc-game-cols{grid-template-columns:1fr 1fr}
-  .coc-col-board{grid-column:1/-1}
-}
-@media (min-width:1280px){
-  .coc-game-cols{grid-template-columns:minmax(360px,9fr) minmax(0,11.5fr) minmax(0,11.5fr)}
-  .coc-col-board{grid-column:auto;display:flex;flex-direction:column}
-  /* The ring FILLS the board panel's remaining height (the panel is stretched to the
-     duchies' height by the grid), instead of a fixed aspect — so the board is always
-     exactly as tall as the duchy panels. Zoom scales the fixed-px tiles/kite/mini-dice;
-     NO width compensation: percentages inside a zoomed element already resolve in
-     zoomed units (100% of the column = column/zoom inner units), so width:100% fills
-     the column exactly — a calc(100%/zoom) here DOUBLE-compensates and spills past
-     the panel (a prior bug). Bigger zoom = bigger tiles; the wider the viewport, the
-     more room the ring has, so the zoom steps up at 1600px. */
-  .coc-col-board .coc-board-hex{zoom:.85;width:100%;max-width:none;aspect-ratio:auto;flex:1 1 auto;min-height:380px}
-  /* the zoomed column has fewer inner units, so the top/bottom depots need a bigger
-     share to keep their two tiles side by side (34% stacks them -> too tall) */
-  .coc-col-board .coc-depot-tb{width:46%}
-}
-@media (min-width:1600px){
-  .coc-col-board .coc-board-hex{zoom:1}
-}
-`;
+// lobbyCss is appended AFTER CoC's own styles (see the close of this template) so the
+// shared .lby-* rules win the specificity TIE against CoC's `.coc *{margin:0;padding:0}`
+// reset (both are one class) — otherwise the reset strips the kit's padding/margins.
+const css = _cssText + lobbyCss + gameMenuCss + createModalCss + lobbyCreateRowCss + rulesModalCss;
 
 // ─── Hex geometry ─────────────────────────────────────────────────────────────
 const HEX_S = 26;
@@ -1196,18 +761,9 @@ function svgPips(cx, cy, n, key) {
 // KEEP IN SYNC with `.coc-tile` / `.coc-stt` width/height in the stylesheet.
 const HEX_W = 70;
 const HEX_H = 81;   // ≈ 70 * 2/√3
-// Central black depot: its (up to 4) tiles sit in a kite — 1 top, 2 middle,
-// 1 bottom. Horizontal offsets use HEX_W, vertical offsets use HEX_H so the
-// hexes nest into a diamond. BLACK_GAP nudges them apart a touch so the four
-// tiles read as separate hexes (edge-to-edge they looked like they overlapped).
+// Central black depot: a 2-column grid, rows = player count (4/6/8 tiles at 2/3/4p).
+// BLACK_GAP separates the tiles; BLACK_PAD is the breathing room to the box border.
 const BLACK_GAP = 6;
-const BLACK_KITE = [
-  { left: 0.5 * HEX_W + 0.5 * BLACK_GAP, top: 0 },                         // top
-  { left: 0,                             top: 0.75 * HEX_H + BLACK_GAP },  // middle-left
-  { left: HEX_W + BLACK_GAP,             top: 0.75 * HEX_H + BLACK_GAP },  // middle-right
-  { left: 0.5 * HEX_W + 0.5 * BLACK_GAP, top: 1.5 * HEX_H + 2 * BLACK_GAP }, // bottom
-];
-// Breathing room (px) between the kite and the black box border around it.
 const BLACK_PAD = 9;
 
 // A small selectable thumbnail of one board's hex layout (lobby board picker).
@@ -1240,23 +796,55 @@ function BoardThumb({ spaces, name, selected, onClick }) {
   );
 }
 
-export default function CastlesOfCrimson({ myId, authUser, onExit }) {
-  const [board, setBoard] = useState(null);            // {spaces, colors, castle, ...}
+// The tiers the create modal OFFERS. `main.AI_DIFFICULTIES` also carries
+// "normal", which the picker has never shown — so this list, not that tuple, is
+// what a remembered last-played tier is validated against.
+const AI_TIER_OPTIONS = [
+  { value: "easy", label: "Easy", title: "A capable search opponent — a solid game without neural-net strength" },
+  { value: "hard", label: "Hard", title: "The first-generation neural net, searched in your browser — a real challenge" },
+  { value: "expert", label: "Expert", title: "The strongest neural net, searched in your browser" },
+];
+const AI_TIER_IDS = AI_TIER_OPTIONS.map((t) => t.value);
+
+export default function CastlesOfCrimson({ myId, authUser, onExit, offline = null }) {
+  const [board, setBoard] = useState(() => {           // {spaces, colors, castle, ...} — hydrated from cache
+    try { const c = localStorage.getItem(COC_BOARDS_CACHE); if (c) return boardsWithById(JSON.parse(c)); } catch {}
+    return null;
+  });
   const [screen, setScreen] = useState("lobby");        // lobby | waiting | game
+  // Instant feedback while the WS connects + the first room state arrives (~1 RTT +
+  // a DB load): the screen otherwise stays frozen on the lobby, so clicking Resume/
+  // Join/Create feels like a dead half-second. Set true on click, cleared the moment
+  // authoritative state (or an error) lands; a timeout drops it so it can't hang.
+  const [connecting, setConnecting] = useState(false);
+  const connectTimer = useRef(null);
   const [roomId, setRoomId] = useState("");
   const [roomData, setRoomData] = useState(null);
   const optimisticRef = useRef(false);          // a move preview is showing (awaiting the server's truth)
   const preOptimisticRoomRef = useRef(null);    // last authoritative room, to revert to if the previewed move errors
-  const [openGames, setOpenGames] = useState([]);
-  const [activeGames, setActiveGames] = useState([]);   // ALL in-progress games (yours + others')
-  const [history, setHistory] = useState([]);           // your finished games (lobby History column)
+  const [openGames, setOpenGames] = useState(() => readLobbyCache("coc", myId, "open", []));
+  const [activeGames, setActiveGames] = useState(() => readLobbyCache("coc", myId, "active", []));   // ALL in-progress games (yours + others')
+  const [history, setHistory] = useState(() => readLobbyCache("coc", myId, "history", []));           // your finished games (lobby History column)
+  // ...revealed 10 at a time as the reader reaches the end, up to the 50 the
+  // backend sends — see useProgressiveList.
+  const [historyShown, historyMore] = useProgressiveList(history);
+  // CoC was the only three-column lobby with no phone tab bar — the sections
+  // just stacked. Now the shared one, same as the other three.
+  const [lobbyTab, setLobbyTab] = useState("open");
   const [reviewOnly, setReviewOnly] = useState(false);  // HTTP-loaded finished-game review (no WS)
   const [loadingGames, setLoadingGames] = useState(false);
-  const [joinCode, setJoinCode] = useState("");
   const [toast, setToast] = useState("");
   const [reviewing, setReviewing] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);   // socket dropped mid-game, retrying
-  const [showCreateMenu, setShowCreateMenu] = useState(false);  // + Create Game dropdown (vs Friend / vs Bot)
+  const [showCreateModal, setShowCreateModal] = useState(false);  // the New Game options modal
+  const [createOpp, setCreateOpp] = useState("ai");               // "friend" | "ai"
+  // AI difficulty (easy|hard|expert) — the tier this player last actually
+  // played, Expert until they have one.
+  const [createDiff, setCreateDiff, rememberDiff] =
+    useLastDifficulty("coc", myId, AI_TIER_IDS, "expert");
+  const [createSeats, setCreateSeats] = useState(2);              // VS-Friend seat cap (2-4)
+  const [createSameBoard, setCreateSameBoard] = useState(false);  // VS-Friend: force everyone onto the host's board
+  const [joinBoardFor, setJoinBoardFor] = useState(null);         // room id pending a board pick before join
   const [showRules, setShowRules] = useState(false);            // lobby "How to Play" modal
 
   // interaction state
@@ -1266,6 +854,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [actedThisTurn, setActedThisTurn] = useState(false);  // did I take any action this turn? (gates Undo)
   const [extraValue, setExtraValue] = useState(null);
   const [showScores, setShowScores] = useState(false);   // mid-game VP breakdown popup
+  const [viewOppId, setViewOppId] = useState(null);      // which opponent's board is shown (3-4p peek tabs)
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   const [myBoard, setMyBoard] = useState("1");          // board the local player picked
   const [oppBoard, setOppBoard] = useState("1");        // board chosen for the bot (vs-AI)
@@ -1279,8 +868,65 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const prevAiSimRef = useRef(false);                    // edge-detect the bot turn for the per-turn sim log
   const prevPhaseRef = useRef(null);                    // last phase_letter seen (detect a phase advance)
   const phasePopTimer = useRef(null);                   // auto-dismiss timer for the phase overlay
+  const boardHexRef = useRef(null);                     // the depot ring — sized to fit its tiles (3-4p need more height)
+
+  // ── URL routing (segment 2 = room id; the shell owns segment 1 = "/coc") ──
+  const screenRef = useRef(screen);
+  screenRef.current = screen;
+  const roomIdRef = useRef(roomId);
+  roomIdRef.current = roomId;
+  const urlAttemptRef = useRef(null);   // {rid, retried} — a URL-driven room attempt in flight
+  const didInitRef = useRef(false);     // StrictMode double-mount guard for the deep-entry effect
+  const popHandlerRef = useRef(() => {}); // fresh-closure mirror for the mount-once popstate effect
 
   const playerName = authUser?.name || "Player";
+
+  // ── Offline vs-AI mode ──────────────────────────────────────────────────
+  // Mounted by the shell with `offline` = the saved-game record: no socket at all,
+  // moves apply through the local wasm engine (offline.js), and the EXISTING search
+  // loop below plays the bot from a driver-synthesized ai_search. The shell owns the
+  // URL (/offline/<id>), so the /coc deep-entry + popstate effects are gated off.
+  const offlineRef = useRef(offline);
+  offlineRef.current = offline;
+  const offlineRecRef = useRef(null);              // the LIVE record (mutated by the driver)
+  const offlineTokenRef = useRef(0);               // bumps on unmount/exit → cancels stale bot loops
+  const publishOffline = useCallback(async (rec, aiSearch) => {
+    offlineRecRef.current = rec;
+    const rd = await cocOfflineRoomData(rec, myId, authUser?.name);
+    if (aiSearch) rd.ai_search = aiSearch;
+    setRoomData(rd);
+    return rd;
+  }, [myId, authUser?.name]);
+  const kickOfflineBot = useCallback(() => {
+    const token = offlineTokenRef.current;
+    const rec = offlineRecRef.current;
+    if (!rec) return;
+    runCocBotLoop(rec, myId, publishOffline, () => offlineTokenRef.current === token)
+      .catch((e) => console.debug("[coc offline-AI] bot loop:", e));
+  }, [myId, publishOffline]);
+  useEffect(() => {
+    if (!offline) return;
+    let live = true;
+    (async () => {
+      try {
+        // The prop may be a record or a saved id (shell resume passes the record).
+        const rec = typeof offline === "string" ? await loadOfflineCocGame(offline) : offline;
+        if (!rec || !live) return;
+        await armCocUndoIfMyTurn(rec);
+        setRoomId(rec.id);
+        // roomData BEFORE the screen flip: the game-screen render assumes `game`
+        // exists (the online flow sets both from one message; a "game" screen with
+        // null roomData crashes on the first unguarded game.* read).
+        await publishOffline(rec, null);
+        if (!live) return;
+        setScreen("game");
+        kickOfflineBot();
+      } catch (e) {
+        setToast(String(e?.message || "Couldn't open the offline game"));
+      }
+    })();
+    return () => { live = false; offlineTokenRef.current += 1; };
+  }, [offline]); // eslint-disable-line react-hooks/exhaustive-deps
   // The die value needed to sell a goods color (its index in the goods order + 1).
   const goodsSellNum = (color) => (board ? board.goods_colors.indexOf(color) + 1 : 0);
   // Description shown when the face-down "sold goods" pile is clicked/hovered.
@@ -1289,7 +935,101 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // ── derived ──
   const game = roomData?.game;
   const players = roomData?.players || {};
-  const oppId = Object.keys(players).find((p) => p !== myId);
+
+  // The depot ring is absolutely-positioned (each depot pinned by % of the board-hex height),
+  // so the board-hex height doesn't grow with its content. With 3-4 players the side depots
+  // hold 3-4 stacked tiles (vs 2) and overflow the board — spilling into the turn-order track
+  // above and off the bottom. Measure each depot and set a min-height (--coc-board-minh) that
+  // guarantees every depot fits within [0, H] given its center-fraction + pin type, so the
+  // board always extends to hold everything. Content-sized depot heights are independent of H,
+  // so one pass converges (no loop). 3-col desktop only (below 1280 the depots reflow in-flow).
+  useLayoutEffect(() => {
+    const compute = () => {
+      const bh = boardHexRef.current;
+      if (!bh) return;
+      const col0 = bh.closest(".coc-col-board");
+      const area0 = document.querySelector(".coc-duchy-area");
+      if (window.innerWidth < 1280) {
+        bh.style.removeProperty("--coc-board-minh");
+        if (col0) col0.style.height = "";   // clear the desktop height-sync below 1280
+        if (area0) area0.style.height = "";
+        document.querySelectorAll(".coc-storage").forEach((s) => { s.style.zoom = ""; });
+        return;
+      }
+      const zoom = parseFloat(getComputedStyle(bh).zoom) || 1;
+      // The central black depot is centered (f=0.5) and grows with player count (2/3/4 rows).
+      // At 4p it's tall enough to collide with the top/bottom depots' mini-dice (which point
+      // inward toward the center), so it becomes a real height constraint — measure it.
+      const blackEl = bh.querySelector("[data-blackdepot]");
+      const blackH = blackEl ? blackEl.getBoundingClientRect().height : 0;
+      let needScreen = 0;
+      bh.querySelectorAll("[data-depot]").forEach((el) => {
+        const idx = ["1", "2", "3", "4", "5", "6"].indexOf(el.getAttribute("data-depot"));
+        if (idx < 0) return;
+        const f = DEPOT_POS[idx].top / 100;          // center-fraction of the board height
+        const r = el.getBoundingClientRect();
+        const h = r.height;                           // rendered (screen) px, content-driven
+        const isSide = idx !== 0 && idx !== 3;
+        // tb depots (1/4) are centered on the point (translate -50% -> half-height each side);
+        // side depots pin their inner edge at the point and grow OUTWARD by their full height
+        // (topside -100%, bottomside 0). Exact-fit: the near edge just reaches [0, H]. Any
+        // per-edge margin is amplified 1/f (~8x near the bottom depot at f=.88), so we keep it
+        // exact + a small final buffer; goods growth is caught by re-measuring on every change.
+        const reach = isSide ? h : h / 2;            // distance the depot extends past its point
+        const outward = f < 0.5 ? f : (1 - f);       // fraction of H between the point and the near edge
+        needScreen = Math.max(needScreen, reach / outward);
+        // tb-depot die (points inward) must clear the black depot: the die's inner edge sits a
+        // FIXED px offset k from the depot center (f·H), so H(|0.5-f|) >= blackH/2 + k + margin.
+        if (!isSide && blackH) {
+          const die = el.querySelector(".coc-minidie");
+          if (die) {
+            const dr = die.getBoundingClientRect();
+            const center = (r.top + r.bottom) / 2;
+            const k = idx === 0 ? (dr.bottom - center) : (center - dr.top);
+            needScreen = Math.max(needScreen, (blackH / 2 + k + 8) / Math.abs(0.5 - f));
+          }
+        }
+      });
+      // needScreen is post-zoom; min-height is set in the element's own (pre-zoom) px.
+      bh.style.setProperty("--coc-board-minh", needScreen ? `${Math.ceil(needScreen / zoom) + 10}px` : "0px");
+
+      // Pin the duchy-area to the board column's natural (depot-driven) height so the LOG
+      // fills beneath the duchies and SCROLLS — the board never stretches to the log's
+      // length. Reset both to natural, measure the board (flex-start ⇒ the log can't inflate
+      // it) and the duchy row (log excluded), then set both to the same target.
+      const row = document.querySelector(".coc-duchy-row");
+      if (col0 && area0 && row) {
+        col0.style.height = ""; area0.style.height = "";
+        const boardNat = col0.getBoundingClientRect().height;
+        const rowH = row.getBoundingClientRect().height;
+        const target = Math.max(Math.round(boardNat), Math.ceil(rowH) + 130 + 16);
+        col0.style.height = `${target}px`;
+        area0.style.height = `${target}px`;
+      }
+
+      // Storage tiles are a fixed 70px (icons sized in fixed px), so at narrower 3-col widths
+      // the 3 storage tiles + the fixed-width goods box don't both fit the duchy row and the
+      // goods box wraps below. Zoom the storage down to fill the space left beside the goods
+      // box so they stay on one row (caps at 1 — full size once there's room, e.g. ~1920+).
+      document.querySelectorAll(".coc-stor-goods").forEach((sg) => {
+        const storage = sg.querySelector(".coc-storage");
+        const goods = sg.querySelector(".coc-goods-row");
+        if (!storage || !goods) return;
+        storage.style.zoom = "";                                   // reset to measure natural width
+        const natW = storage.getBoundingClientRect().width;
+        const avail = sg.getBoundingClientRect().width - goods.getBoundingClientRect().width - 14 - 4;
+        if (natW > avail && avail > 0) storage.style.zoom = String(Math.max(0.4, avail / natW));
+      });
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    return () => window.removeEventListener("resize", compute);
+  }, [game]);
+  // All opponents in seat order (2-4 players). `oppId` is the ONE currently shown in the
+  // opponent column — the peek-tab selection (or, by default, whoever is acting), so the
+  // rest of the render (renderDuchy, dice, flyers) stays single-opponent.
+  const opponentIds = (game?.order || Object.keys(players)).filter((p) => p !== myId);
+  const oppId = opponentIds.includes(viewOppId) ? viewOppId : opponentIds[0];
   const me = game?.players?.[myId];
   const opp = oppId ? game?.players?.[oppId] : null;
   const over = game?.phase === "over";
@@ -1324,10 +1064,31 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
       // Revert an optimistic preview the server rejected, so a bad guess doesn't linger.
       if (optimisticRef.current && preOptimisticRoomRef.current) setRoomData(preOptimisticRoomRef.current);
       optimisticRef.current = false;
+      setConnecting(false);                                 // a connect that errored drops back to the lobby
+      // A URL-driven room attempt (deep link / popstate) failed. A stale token gets ONE
+      // retry as a plain join (invite-link case); anything else falls back to the lobby
+      // and the dead room URL is replaced with /coc so a reload doesn't re-attempt it.
+      const ua = urlAttemptRef.current;
+      if (ua) {
+        if (msg.message === "invalid token" && !ua.retried) {
+          ua.retried = true;
+          try { localStorage.removeItem(`coc_token_${ua.rid}_${myId}`); } catch {}
+          resume(ua.rid);   // token now gone → plain join
+          return;
+        }
+        urlAttemptRef.current = null;
+        try {
+          if (localStorage.getItem("coc_roomId") === ua.rid) localStorage.removeItem("coc_roomId");
+          localStorage.removeItem(`coc_token_${ua.rid}_${myId}`);
+        } catch {}
+        setRoomId(""); setRoomData(null); setScreen("lobby");
+        replacePath(buildPath("coc"));
+      }
       setToast(msg.message || "error"); return;
     }
     const room = msg.room;
     if (!room) return;
+    setConnecting(false);                                   // authoritative state arrived — hide the connect loader
     optimisticRef.current = false;                        // authoritative state arrived — reconcile below
     const tok = room.reconnect_tokens?.[myId];
     const rid = room.room_id || roomId;
@@ -1335,23 +1096,40 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     setRoomData(room);
     const inGame = room.status === "playing" || room.status === "over";
     if (msg.type === "created" || msg.type === "joined" || msg.type === "reconnected") {
+      // Entering the room gives it its URL (waiting + game share it; dedup makes
+      // deep-link/repeat messages no-ops). Server-confirmed, never at click time.
+      if (rid) pushPath(buildPath("coc", rid));
+      urlAttemptRef.current = null;
       setScreen(inGame ? "game" : "waiting");
     } else if (msg.type === "room_update") {
       if (inGame && screen !== "game") setScreen("game");
     }
-  }, [myId, roomId, screen]);
+  }, [myId, roomId, screen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { connected, connect, send, disconnect, socketReady } = useSocket(handleMessage);
 
-  // fetch every selectable board layout once (shared meta + per-board spaces)
+  // fetch every selectable board layout once (shared meta + per-board spaces). The state
+  // is pre-hydrated from cache above, so this is a background refresh — it won't block
+  // the lobby/game render on a cold cache-miss either (LobbyLoading covers that).
   useEffect(() => {
     fetch(`${COC_HTTP}/boards`).then((r) => r.json()).then((d) => {
       if (!d.ok) return;
-      const byId = {};
-      (d.boards || []).forEach((b) => { byId[b.id] = b; });
-      setBoard({ ...d, byId });
+      setBoard(boardsWithById(d));
+      try { localStorage.setItem(COC_BOARDS_CACHE, JSON.stringify(d)); } catch {}
     }).catch(() => {});
   }, []);
+
+  // Safety: never leave the connect loader spinning forever — if the first room state
+  // hasn't arrived within the window (dead socket / cold-start that never wakes), drop
+  // back to the lobby with a hint. handleMessage clears `connecting` on success/error.
+  useEffect(() => {
+    if (!connecting) { if (connectTimer.current) { clearTimeout(connectTimer.current); connectTimer.current = null; } return; }
+    connectTimer.current = setTimeout(() => {
+      setConnecting(false);
+      setToast("Still connecting… the server may be waking up. Try again in a moment.");
+    }, 15000);
+    return () => { if (connectTimer.current) { clearTimeout(connectTimer.current); connectTimer.current = null; } };
+  }, [connecting]);
 
   // Resolve the hex layout for a given board id (falls back to the default board).
   const boardSpaces = useCallback((boardId) => {
@@ -1361,19 +1139,19 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
 
   const fetchGames = useCallback(() => {
     setLoadingGames(true);
-    fetch(`${COC_HTTP}/games`).then((r) => r.json()).then((d) => setOpenGames(d.games || []))
+    fetch(`${COC_HTTP}/games`).then((r) => r.json()).then((d) => { const g = d.games || []; setOpenGames(g); writeLobbyCache("coc", myId, "open", g); })
       .catch(() => {}).finally(() => setLoadingGames(false));
     // Active Games is PUBLIC: all in-progress games (yours + others', vs-bot or not).
     // The frontend pins yours to the top via myId. No auth needed.
-    fetch(`${COC_HTTP}/games/active`).then((r) => r.json()).then((d) => setActiveGames(d.games || [])).catch(() => {});
+    fetch(`${COC_HTTP}/games/active`).then((r) => r.json()).then((d) => { const g = d.games || []; setActiveGames(g); writeLobbyCache("coc", myId, "active", g); }).catch(() => {});
     // History = your finished games (session-gated). Guests have none.
     if (authUser?.session_token) {
       fetch(`${COC_HTTP}/games/history`, { headers: { Authorization: `Bearer ${authUser.session_token}` } })
-        .then((r) => r.json()).then((d) => setHistory(d.games || [])).catch(() => {});
+        .then((r) => r.json()).then((d) => { const g = d.games || []; setHistory(g); writeLobbyCache("coc", myId, "history", g); }).catch(() => {});
     } else {
-      setHistory([]);
+      setHistory([]); writeLobbyCache("coc", myId, "history", []);
     }
-  }, [authUser]);
+  }, [authUser, myId]);
 
   // Load + show a finished game's board + results, read-only over HTTP (no WebSocket).
   const enterCocReview = (id) => {
@@ -1394,18 +1172,51 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
 
   useEffect(() => { if (screen === "lobby") fetchGames(); }, [screen, fetchGames]);
 
-  // auto-resume a saved room on mount
+  // Mount: do NOT auto-resume a saved game — it snapped you from the lobby into the game
+  // on load (jarring). Resume is EXPLICIT via the lobby's Resume button. Keep only the
+  // disconnect cleanup so an explicit connection tears down on unmount. (A room id IN THE
+  // URL is different — that's an explicit destination; see the deep-entry effect below.)
   useEffect(() => {
-    try {
-      const rid = localStorage.getItem("coc_roomId");
-      const tok = rid ? localStorage.getItem(`coc_token_${rid}_${myId}`) : null;
-      if (rid && tok) {
-        setRoomId(rid);
-        connect(`${COC_WS}/${rid}/${myId}`, { action: "reconnect", token: tok });
-      }
-    } catch {}
     return () => disconnect();
   }, []); // eslint-disable-line
+
+  // ── URL deep entry + popstate (this component owns "/coc/<ROOMID>") ──
+  // Mount with a room in the URL → the EXISTING resume semantics (saved token →
+  // reconnect, else join — exactly the invite-link behavior). A plain /coc mounts at
+  // the lobby exactly as before.
+  // URL-driven room entry: clear any read-only review state first (a popstate Forward can
+  // fire while reviewOnly is set — resume() alone would leave it stale and the reconnect
+  // loop gated off), then run the existing resume semantics.
+  const urlResume = (rid) => {
+    setReviewOnly(false); setReviewing(false);
+    urlAttemptRef.current = { rid, retried: false };
+    resume(rid);
+  };
+  useEffect(() => {
+    if (didInitRef.current) return;
+    didInitRef.current = true;
+    if (offlineRef.current) return;   // offline: the shell owns the URL (/offline/<id>)
+    const r = parsePath();
+    if (r.game === "coc" && r.room) urlResume(r.room);
+  }, []); // eslint-disable-line
+  // Back/Forward while mounted: only our own segment 2 — mode changes unmount us via the
+  // shell (whose unmount cleanup disconnects). Routed through a ref so the mount-once
+  // subscription never runs a stale closure.
+  popHandlerRef.current = (r) => {
+    if (offlineRef.current) return;   // offline popstate is the shell's (mode "offline")
+    if (r.game !== "coc") return;
+    if (r.room && r.room !== roomIdRef.current) {
+      urlResume(r.room);
+    } else if (!r.room && (roomIdRef.current || urlAttemptRef.current)) {
+      // Back out of the room — INCLUDING out of a still-connecting attempt (popping
+      // during the join's round trip would otherwise let the late "reconnected"
+      // message push the room URL right back). leaveToLobby's disconnect kills the
+      // in-flight socket; its pushPath dedups (URL is already /coc after the pop).
+      urlAttemptRef.current = null;
+      leaveToLobby();
+    }
+  };
+  useEffect(() => subscribe((r) => popHandlerRef.current(r)), []); // eslint-disable-line
 
   // Auto-reconnect: if the socket drops while in a LIVE game (Render cold start, a
   // network blip, or iOS killing a backgrounded WS), keep retrying with backoff —
@@ -1414,7 +1225,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // (`_handle_reconnect` re-triggers the server scheduler), so WITHOUT this the bot's
   // turn freezes until a manual refresh (the "hung for minutes" bug). Reconnect uses
   // the `reconnect` action (NOT `join`) so the backend actually resumes the bot.
-  const inLiveGame = !!roomId && !reviewOnly
+  const inLiveGame = !offline && !!roomId && !reviewOnly
     && (screen === "game" || screen === "waiting") && roomData?.status !== "over";
   // One reconnect attempt that reschedules itself — shared by the backoff loop AND the
   // tab-focus nudge, so neither can leave the loop dead by clearing the other's timer.
@@ -1467,6 +1278,14 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // "acted this turn" resets only when the turn itself changes (NOT on pending
   // open/close, since opening a pending means you already acted).
   useEffect(() => { setActedThisTurn(false); }, [game?.turn, game?.round, game?.phase_letter]);
+  // Peek tabs (3-4p): auto-follow whichever opponent is currently acting, so you watch
+  // the live player's board. On YOUR turn it keeps the last-viewed opponent. Manual tab
+  // clicks still work; they just get re-followed when the next opponent starts a turn.
+  useEffect(() => {
+    const actor = game?.pending_pid || game?.turn;
+    if (game && !over && actor && actor !== myId
+        && (game.order || Object.keys(players)).includes(actor)) setViewOppId(actor);
+  }, [game?.turn, game?.pending_pid]);  // eslint-disable-line react-hooks/exhaustive-deps
   // NOTE: the old View-Opponent modal (auto-open on the bot's turn + the setup-castle
   // reveal choreography) is GONE — the opponent's duchy is now permanently on screen
   // beside yours, so the generic flyer diff below animates their moves (including the
@@ -1489,7 +1308,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     // The opponent's board is permanently rendered beside yours, so their moves
     // animate directly on it (depot -> their storage slot / duchy hex, goods into
     // their goods row) — same diff as for your own board.
-    const oId = game.players ? Object.keys(game.players).find((p) => p !== myId) : null;
+    const oId = oppId;                                   // the opponent currently shown (peek-tab selection)
     const oPlayer = oId ? game.players[oId] : null;
     const oppLoc = {};   // opponent tile id -> where it sits on THEIR board
     (oPlayer?.storage || []).forEach((t, i) => { if (t) oppLoc[t.id] = { kind: "oppslot", i }; });
@@ -1499,8 +1318,12 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     const oppGoods = { ...(oPlayer?.goods || {}) };
     const prev = animSnap.current;
     animSnap.current = { loc, storageIds, duchyIds, depotGoods, myGoods, oppLoc, oppStorageIds, oppDuchyIds, oppGoods,
-      workers: me.workers, silver: me.silver, oppWorkers: oPlayer?.workers, oppSilver: oPlayer?.silver };
+      workers: me.workers, silver: me.silver, oppWorkers: oPlayer?.workers, oppSilver: oPlayer?.silver, oppId: oId };
     if (!prev) return;                                  // first paint: nothing to animate
+    // When the peek tab switches opponents, the snapshot's opp portion is a different
+    // player — skip opponent flyers this frame (else all the new opponent's tiles animate
+    // in as if just placed). Your own board still animates normally.
+    const oppChanged = prev.oppId !== oId;
     const rectOf = (spec) => {
       if (!spec) return null;
       const sel = spec.kind === "depot" ? `[data-depot="${spec.d}"]`
@@ -1509,6 +1332,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         : spec.kind === "slot" ? `[data-storage-slot="${spec.i}"]`
         : spec.kind === "hex" ? `[data-sid="${spec.sid}"]`
         : spec.kind === "mygoods" ? "[data-mygoods]"
+        : spec.kind === "goodsleft" ? "[data-goodsleft]"
+        : spec.kind === "depotgood" ? `[data-depotgood="${spec.id}"]`
         : spec.kind === "goodchip" ? `[data-goodchip="${spec.c}"]`
         : spec.kind === "oppgoodchip" ? `[data-oppgoodchip="${spec.c}"]`
         : spec.kind === "oppslot" ? `[data-oppstorage-slot="${spec.i}"]`
@@ -1573,6 +1398,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     // Opponent's moves, animated on their always-visible board: depot -> their
     // storage slot, their storage/depot -> their duchy hex (popIn covers sourceless
     // placements like the starting castle), plus goods they drain into their goods row.
+    if (!oppChanged) {
     (oPlayer?.storage || []).forEach((t, i) => {
       if (!t || prev.oppStorageIds.has(t.id)) return;          // newly in their storage
       const f = mk(t, prev.loc[t.id] || prev.oppLoc[t.id], { kind: "oppslot", i });
@@ -1599,6 +1425,29 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         const dcx = oChip ? oChip.left + oChip.width / 2 : oGoodsDest.left + 14;
         const dcy = oChip ? oChip.top + oChip.height / 2 : oGoodsDest.top + oGoodsDest.height / 2;
         add.push({ id: `f${flyerSeq.current++}`, goods: true, color: g.color, left: scx - 13, top: scy - 13, w: 26, h: 26, dx: dcx - scx, dy: dcy - scy, s1: 1 });
+      }
+    }
+    }  // end opponent flyers (skipped on a peek-tab switch, when the snapshot's opp is stale)
+    // Round start: a good is handed out onto the white-die depot. Goods only ever appear
+    // on a depot via the per-round deal, so a good that's newly present on a depot (not in
+    // last update's depotGoods) is that deal — fly it from the goods-left row (the queue it
+    // left) to the chosen depot, growing as it lands.
+    {
+      const prevGoodIds = new Set((prev.depotGoods || []).map((g) => g.id));
+      const src = rectOf({ kind: "goodsleft" });
+      if (src) for (const g of depotGoods) {
+        if (prevGoodIds.has(g.id)) continue;
+        // Land on the exact goods element that just rendered in the depot (already in the DOM
+        // when this post-render effect runs), sized to its real rect — so it doesn't snap from
+        // the depot center to the goods sub-row at the end. getBoundingClientRect is post-zoom,
+        // so the size/position are correct under the board's zoom.
+        const d = rectOf({ kind: "depotgood", id: g.id });
+        if (!d) continue;
+        const W = d.width, H = d.height;
+        const scx = src.left + src.width / 2, scy = src.top + src.height / 2;
+        const dcx = d.left + d.width / 2, dcy = d.top + d.height / 2;
+        add.push({ id: `f${flyerSeq.current++}`, goods: true, color: g.color,
+          left: scx - W / 2, top: scy - H / 2, w: W, h: H, dx: dcx - scx, dy: dcy - scy, s0: 0.55, s1: 1 });
       }
     }
     // Skip a flood of TILE changes (reconnect / initial catch-up) so we animate only
@@ -1629,8 +1478,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     };
     resFly("workers", "worker", me.workers, prev.workers);
     resFly("silver", "silver", me.silver, prev.silver);
-    resFly("opp-workers", "worker", oPlayer?.workers, prev.oppWorkers);   // opponent's spends,
-    resFly("opp-silver", "silver", oPlayer?.silver, prev.oppSilver);      // on their visible panel
+    if (!oppChanged) {
+      resFly("opp-workers", "worker", oPlayer?.workers, prev.oppWorkers);   // opponent's spends,
+      resFly("opp-silver", "silver", oPlayer?.silver, prev.oppSilver);      // on their visible panel
+    }
     if (!add.length) return;
     setFlyers((fs) => [...fs, ...add]);
     const ids = new Set(add.map((f) => f.id));
@@ -1693,11 +1544,14 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         || wasmPoolRef.current || typeof Worker === "undefined") return;
     const model = roomData.ai_difficulty === "hard" ? "coc_pv_model_hard.bin" : "coc_pv_model.bin";
     const url = `${import.meta.env.BASE_URL}wasm/coc-worker.js?model=${model}`;
-    // Worker count: small devices keep the old min(cores,4); bigger machines get
-    // up to 8 workers, always leaving 2 cores for the main thread + OS (CoC trees
-    // are small — ~30MB at the sims cap — so RAM is not the constraint here).
+    // Worker count: bigger machines get up to 8 workers, always leaving 2 cores for
+    // the main thread + OS (CoC trees are small — ~30MB at the sims cap — so RAM is
+    // not the constraint here). Small devices leave ONE core for the same reason:
+    // the <=4-core branch used to take every core, and a pool that pegs them all
+    // starves the browser's compositor/raster threads, so animations stutter while
+    // the AI thinks. Spender documents this rule; CoC and Duel never had it.
     const hc = navigator.hardwareConcurrency || 4;
-    const cores = hc <= 4 ? Math.max(1, hc) : Math.min(hc - 2, 8);
+    const cores = hc <= 4 ? Math.max(1, hc - 1) : Math.min(hc - 2, 8);
     const makeWorker = () => {
       let w;
       try { w = new Worker(url, { type: "module" }); } catch { return null; }
@@ -1767,7 +1621,19 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             const conv = await pool[0].request({ kind: "chainMove", state: stateStr, prefix: JSON.stringify(prefix) });
             const mv = conv?.move;
             if (!cancelled && mv && !mv.includes('"error"')) {
-              send({ action: "ai_move", decision: as.decision, move: JSON.parse(mv) });
+              // Offline: the browser is the server — apply the compact move through
+              // the driver (validated there) and continue the bot loop. A stale or
+              // illegal submission is dropped silently, same policy as the server.
+              if (offlineRef.current) {
+                const rec = offlineRecRef.current;
+                if (rec && rec.decisionSeq === as.decision) {
+                  const res = await applyOfflineCocMove(rec, JSON.parse(mv), myId, { isAi: true });
+                  if (res.ok) { await publishOffline(res.rec, null); kickOfflineBot(); }
+                  else console.debug("[coc offline-AI] dropped:", res.err);
+                }
+              } else {
+                send({ action: "ai_move", decision: as.decision, move: JSON.parse(mv) });
+              }
             }
             return;
           }
@@ -1844,34 +1710,46 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
 
   // ── actions ──
   const startCreate = (vsAi, difficulty = "hard") => {
+    if (vsAi) rememberDiff(difficulty);   // this game's tier is the next modal's default
     const rid = roomCode();
     setRoomId(rid);
+    setConnecting(true);
     try { localStorage.setItem("coc_roomId", rid); } catch {}
     connect(`${COC_WS}/${rid}/${myId}`, {
       action: "create", name: playerName, vs_ai: vsAi,
       board_id: myBoard, opp_board_id: oppBoard,
       ai_difficulty: difficulty,
+      max_players: vsAi ? 2 : createSeats,
+      same_board: vsAi ? false : createSameBoard,
     });
   };
   const startJoin = (rid) => {
     rid = (rid || "").toUpperCase();
     if (!rid) return;
     setRoomId(rid);
+    setConnecting(true);
     try { localStorage.setItem("coc_roomId", rid); } catch {}
-    connect(`${COC_WS}/${rid}/${myId}`, { action: "join", name: playerName, board_id: myBoard });
+    connect(`${COC_WS}/${rid}/${myId}`, { action: "join", name: playerName, board_id: myBoard, session_token: authUser?.session_token });
   };
   const resume = (rid) => {
     const tok = localStorage.getItem(`coc_token_${rid}_${myId}`);
     setRoomId(rid);
+    setConnecting(true);
     try { localStorage.setItem("coc_roomId", rid); } catch {}
-    connect(`${COC_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName });
+    connect(`${COC_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName, session_token: authUser?.session_token });
   };
   const leaveToLobby = () => {
+    // Offline: there is no CoC lobby — every exit path (Leave / Back to lobby /
+    // Return to menu) hands back to the shell, which shows the Local-vs-AI hub.
+    // The save persists; the boot effect's cleanup token cancels any bot loop.
+    if (offlineRef.current) { onExit?.(); return; }
+    setConnecting(false);
     disconnect();
     // A read-only HTTP review has no WS and must NOT clear the resume pointer of a
     // real in-progress game the player also has.
     if (!reviewOnly) { try { localStorage.removeItem("coc_roomId"); } catch {} }
     setReviewOnly(false);
+    pushPath(buildPath("coc"));   // leave the room URL (dedup no-op when popstate-driven)
     setRoomData(null); setRoomId(""); setReviewing(false); setScreen("lobby"); fetchGames();
   };
   // Cancel an open game you created (host_id === myId). Mirrors Spender: authorize
@@ -1897,6 +1775,20 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const mv = (move) => {
     // Any action other than the undo itself means there's now something to undo.
     if (move?.type && move.type !== "undo_turn") setActedThisTurn(true);
+    // Offline: apply through the local engine — the driver's publish IS the
+    // authoritative update (lands in ~ms; no optimistic preview needed), then the
+    // bot loop takes over if the turn passed.
+    if (offlineRef.current) {
+      const rec = offlineRecRef.current;
+      if (!rec) return;
+      (async () => {
+        const res = await applyOfflineCocMove(rec, move, myId, { isAi: false });
+        if (!res.ok) { setToast(res.err); return; }
+        await publishOffline(res.rec, null);
+        kickOfflineBot();
+      })().catch((e) => setToast(String(e?.message || "Move failed")));
+      return;
+    }
     // Optimistic preview: show this move's certain visible effect instantly, then let
     // the server's authoritative room_update reconcile (see handleMessage). Safe by
     // construction — the server never sees the preview; it's overwritten on the next
@@ -2076,258 +1968,262 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     return dirs.some(([dq, dr]) => me.duchy[`${q + dq},${r + dr}`]);
   };
 
-  if (!board) {
-    return (<div className="coc"><style>{css}</style><div className="coc-wrap"><p className="coc-empty">Loading…</p></div></div>);
-  }
+  // Rules modal — defined once and rendered in BOTH the lobby and the in-game options
+  // menu, so "How to Play" is reachable during a game too.
+  const cocRulesModal = showRules && (
+    <RulesModal title="How to play — Castles of Crimson" onClose={() => setShowRules(false)}>
+      <CocRules />
+    </RulesModal>
+  );
 
   // ─── Lobby ───────────────────────────────────────────────────────────────
+  // The lobby renders IMMEDIATELY (like the other games) rather than blocking the whole
+  // screen on the board-layout fetch — only the board-picker below shows a spinner until
+  // the layouts arrive. The game/waiting screens still need `board` (guarded after this).
+  // Instant feedback the moment a game is clicked, while the WS + first state land.
+  if (connecting && screen === "lobby") {
+    return (<div className="coc coc-neutral" style={{ "--lby-accent": "#d6454b" }}><style>{css}</style><LobbyLoading /></div>);
+  }
   if (screen === "lobby") {
+    // Board pickers live in the create/join modals (not the lobby), so the lobby
+    // paints instantly and the layouts fetch resolves in the background.
+    const boardStrip = (sel, onPick) => board ? (
+      <div className="coc-board-grid">
+        {(board.boards || []).map((b) => (
+          <BoardThumb key={b.id} spaces={b.spaces} name={b.name}
+            selected={sel === b.id} onClick={() => onPick(b.id)} />
+        ))}
+      </div>
+    ) : (
+      <div className="lby-empty"><span className="lby-spinner lby-spinner-sm" /> Loading boards…</div>
+    );
+    const boardName = (id) => board?.byId?.[id]?.name || `Board ${id}`;
+    const diffLabel = (d) => d.charAt(0).toUpperCase() + d.slice(1);
     return (
-      <div className="coc"><style>{css}</style>
-        <div className="coc-top coc-top-lobby">
-          <div className="coc-top-left">
-            <button className="coc-btn ghost sm" onClick={onExit}>← Back</button>
-            <button className="coc-btn ghost sm" onClick={() => setShowRules(true)}>📖 Rules</button>
-          </div>
-          <span className="coc-title">Castles of Crimson</span>
-          <span className="coc-user">{playerName}</span>
-        </div>
+      <div className="coc coc-neutral" style={{ "--lby-accent": "#d6454b" }}><style>{css}</style>
+        <LobbyHeader
+          onBack={onExit}
+          title="Castles of Crimson"
+          user={<span className="lby-head-name">{playerName}</span>}
+        />
         <div className="coc-wrap">
-          <div className="coc-board-pick">
-            <div className="coc-section-title">Your Board <span className="coc-card-meta">— {board.byId?.[myBoard]?.name}</span></div>
-            <div className="coc-board-grid">
-              {(board.boards || []).map((b) => (
-                <BoardThumb key={b.id} spaces={b.spaces} name={b.name}
-                  selected={myBoard === b.id} onClick={() => setMyBoard(b.id)} />
-              ))}
-            </div>
-            <div className="coc-section-title">Bot's Board <span className="coc-card-meta">— {board.byId?.[oppBoard]?.name} (Play vs Bot only)</span></div>
-            <div className="coc-board-grid">
-              {(board.boards || []).map((b) => (
-                <BoardThumb key={b.id} spaces={b.spaces} name={b.name}
-                  selected={oppBoard === b.id} onClick={() => setOppBoard(b.id)} />
-              ))}
-            </div>
-          </div>
+          <LobbyCreateRow
+            onCreate={() => setShowCreateModal(true)}
+            onJoin={(code) => setJoinBoardFor(code)}
+            onRefresh={fetchGames}
+            onRules={() => setShowRules(true)} />
 
-          <div className="coc-create">
-            <div className="coc-ai-picker-wrap">
-              <button className={`coc-btn gold${showCreateMenu ? " active" : ""}`}
-                title="Create a game — play a friend or the bot"
-                onClick={() => setShowCreateMenu((v) => !v)}>
-                + Create Game {showCreateMenu ? "▴" : "▾"}
-              </button>
-              {showCreateMenu && (
-                <div className="coc-ai-picker">
-                  <button className="coc-btn gold sm"
-                    title="Create a game a friend can join from Open Games (or your room code)"
-                    onClick={() => { setShowCreateMenu(false); startCreate(false); }}>
-                    vs Friend
-                  </button>
-                  <span className="coc-ai-picker-label">vs Bot</span>
-                  <button className="coc-btn outline sm" title="A capable search opponent — a solid game without neural-net strength"
-                    onClick={() => { setShowCreateMenu(false); startCreate(true, "easy"); }}>
-                    Easy
-                  </button>
-                  <button className="coc-btn outline sm" title="The first-generation neural net, searched in your browser — a real challenge"
-                    onClick={() => { setShowCreateMenu(false); startCreate(true, "hard"); }}>
-                    Hard
-                  </button>
-                  <button className="coc-btn outline sm" title="The strongest neural net, searched in your browser"
-                    onClick={() => { setShowCreateMenu(false); startCreate(true, "expert"); }}>
-                    Expert
+          {showCreateModal && (
+            <CreateModal title="New Game" onClose={() => setShowCreateModal(false)}>
+              <CmRow label="Opponent">
+                <CmSeg value={createOpp} onChange={setCreateOpp} options={[
+                  { value: "friend", label: "VS Friend", title: "Create a game a friend can join from Open Games (or your room code)" },
+                  { value: "ai", label: "VS AI", title: "Starts instantly against the bot" },
+                ]} />
+              </CmRow>
+              {createOpp === "ai" ? (
+                <CmRow label="AI Difficulty">
+                  <CmSeg value={createDiff} onChange={setCreateDiff} options={AI_TIER_OPTIONS} />
+                </CmRow>
+              ) : (
+                <CmRow label="Players">
+                  <CmSeg value={createSeats} onChange={setCreateSeats}
+                    options={[2, 3, 4].map((n) => ({ value: n, label: String(n) }))} />
+                  <span className="cm-hint">Friends join from Open Games — or send your room code.</span>
+                </CmRow>
+              )}
+              <CmRow label={createOpp === "friend" && createSameBoard ? "Shared Board" : "Your Board"}>{boardStrip(myBoard, setMyBoard)}</CmRow>
+              {createOpp === "ai" ? (
+                <CmRow label="Bot's Board">{boardStrip(oppBoard, setOppBoard)}</CmRow>
+              ) : (
+                <>
+                  <CmRow label="Boards">
+                    <CmSeg value={createSameBoard} onChange={setCreateSameBoard} options={[
+                      { value: false, label: "Each picks", title: "Every player chooses their own board when they join" },
+                      { value: true, label: "Same board", title: "Everyone plays on the board you picked above" },
+                    ]} />
+                  </CmRow>
+                  <span className="cm-hint">{createSameBoard ? "Everyone plays on your board." : "Your friends pick their own boards when they join."}</span>
+                </>
+              )}
+              <div className="cm-footer">
+                <span className="cm-summary">
+                  Creating: <b>{createOpp === "ai" ? `${diffLabel(createDiff)} bot` : `vs Friend · up to ${createSeats} players`}</b> · <b>{boardName(myBoard)}</b>
+                  {createOpp === "ai" && <> · bot on <b>{boardName(oppBoard)}</b></>}
+                  {createOpp === "friend" && createSameBoard && <> · <b>same board</b></>}
+                </span>
+                <button type="button" className="cm-create"
+                  onClick={() => { setShowCreateModal(false); startCreate(createOpp === "ai", createDiff); }}>
+                  Create Game
+                </button>
+              </div>
+            </CreateModal>
+          )}
+
+          {joinBoardFor && (() => {
+            // joinBoardFor is either a bare room-code string (join-by-code) or, from an
+            // Open Games card, {id, sameBoard, hostBoard}. When the host locked a shared
+            // board, the joiner has no board pick — the start assigns the host's board.
+            const jb = typeof joinBoardFor === "string" ? { id: joinBoardFor } : joinBoardFor;
+            const rid = jb.id;
+            return (
+              <CreateModal title="Join Game" onClose={() => setJoinBoardFor(null)}>
+                {jb.sameBoard
+                  ? <CmRow label="Board"><span className="cm-hint">Everyone plays on the host's board — <b>{boardName(jb.hostBoard)}</b>.</span></CmRow>
+                  : <CmRow label="Your Board">{boardStrip(myBoard, setMyBoard)}</CmRow>}
+                <div className="cm-footer">
+                  <span className="cm-summary">Joining <b>{rid.toUpperCase()}</b> on <b>{jb.sameBoard ? boardName(jb.hostBoard) : boardName(myBoard)}</b></span>
+                  <button type="button" className="cm-create"
+                    onClick={() => { setJoinBoardFor(null); startJoin(rid); }}>
+                    Join Game
                   </button>
                 </div>
-              )}
-            </div>
-            <div className="coc-join">
-              <input className="coc-input" placeholder="CODE" value={joinCode} maxLength={6}
-                onChange={(e) => setJoinCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && startJoin(joinCode)} />
-              <button className="coc-btn outline" onClick={() => startJoin(joinCode)}>Join</button>
-            </div>
-            <button className="coc-btn ghost sm" onClick={fetchGames}>↻</button>
-          </div>
+              </CreateModal>
+            );
+          })()}
 
-          <div className="coc-lobby-grid">
-            <div className="coc-lobby-col">
-              <div className="coc-section-hd">
-                <div className="coc-section-title">Open Games</div>
-                <span className="coc-muted">waiting for a second player</span>
-              </div>
+          <LobbyTabs value={lobbyTab} onChange={setLobbyTab} tabs={[
+            { key: "open", label: "Open", count: openGames.length || null },
+            { key: "active", label: "Active", count: activeGames.length || null },
+            { key: "history", label: "History", count: history.length || null },
+          ]} />
+          <div className={`coc-lobby-grid lby-cols tab-${lobbyTab}`}>
+            <div className="coc-lobby-col lby-col-open">
+              <LobbySectionHd title="Open Games" note="waiting for a second player" />
               {loadingGames && openGames.length === 0 ? (
-                <div className="coc-empty"><span className="coc-spinner" />Loading…</div>
+                <div className="lby-empty"><span className="lby-spinner lby-spinner-sm" />Loading…</div>
               ) : openGames.length === 0 ? (
-                <div className="coc-empty">No open games. Create one!</div>
+                <div className="lby-empty">No open games. Create one!</div>
               ) : (
-                openGames.map((g) => (
-                  <div className="coc-card" key={g.id}>
-                    <div className="coc-card-info">
-                      <div className="coc-card-title">{g.host_id === myId ? "Your game" : `${g.host_name}'s game`}</div>
-                      <div className="coc-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
+                <div className="lby-list">
+                {openGames.map((g) => (
+                  <div className="lby-card" key={g.id}>
+                    <div className="lby-card-info">
+                      <div className="lby-card-title">{g.host_id === myId ? "Your game" : `${g.host_name}'s game`}</div>
+                      <div className="lby-card-meta">{g.id} · {g.player_count || 1}/{g.max_players || 4} players · {timeAgo(g.created_at)}</div>
                     </div>
-                    <div className="coc-card-actions">
+                    <div className="lby-card-actions">
                       {g.host_id === myId
                         ? <>
                             <button className="coc-btn outline sm" onClick={() => resume(g.id)}>Return</button>
                             <button className="coc-btn ghost sm" onClick={() => handleCancel(g.id)}>Cancel</button>
                           </>
-                        : <button className="coc-btn gold sm" onClick={() => startJoin(g.id)}>Join</button>}
+                        : ((g.player_count || 1) >= (g.max_players || 4)
+                            ? <TurnBadge>Full</TurnBadge>
+                            : <button className="coc-btn gold sm" onClick={() => setJoinBoardFor({ id: g.id, sameBoard: !!g.same_board, hostBoard: g.host_board })}>Join</button>)}
                     </div>
                   </div>
-                ))
+                ))}
+                </div>
               )}
             </div>
 
-            <div className="coc-lobby-col">
-              <div className="coc-section-hd">
-                <div className="coc-section-title">Active Games</div>
-                <span className="coc-muted">{activeGames.length} in progress</span>
-              </div>
+            <div className="coc-lobby-col lby-col-active">
+              <LobbySectionHd title="Active Games" note={`${activeGames.length} in progress`} />
               {activeGames.length === 0 ? (
-                <div className="coc-empty">No games in progress.</div>
+                <div className="lby-empty">No games in progress.</div>
               ) : (() => {
                 // All in-progress games (yours + others'). Yours pinned to the top;
                 // each sub-list is already updated_at-desc from the backend.
-                const mine = activeGames.filter((g) => g.player1_id === myId || g.player2_id === myId);
-                const others = activeGames.filter((g) => g.player1_id !== myId && g.player2_id !== myId);
+                // Prefer the N-player `players` array; fall back to legacy p1/p2 fields.
+                const plOf = (g) => (g.players && g.players.length ? g.players : [
+                  ...(g.player1_id ? [{ id: g.player1_id, name: g.player1_name }] : []),
+                  ...(g.player2_id ? [{ id: g.player2_id, name: g.player2_name }] : []),
+                ]);
+                const isMineG = (g) => plOf(g).some((p) => p.id === myId);
+                const mine = activeGames.filter(isMineG);
+                const others = activeGames.filter((g) => !isMineG(g));
                 const ordered = [...mine, ...others];
-                return ordered.map((g) => {
-                  const isMine = g.player1_id === myId || g.player2_id === myId;
-                  const youP1 = g.player1_id === myId;
-                  const turnName = g.turn === g.player1_id ? g.player1_name
-                    : (g.turn === g.player2_id ? g.player2_name : null);
+                return <div className="lby-list">{ordered.map((g) => {
+                  const pl = plOf(g);
+                  const isMine = pl.some((p) => p.id === myId);
+                  const turnName = (pl.find((p) => p.id === g.turn) || {}).name;
+                  const matchup = pl.length
+                    ? pl.map((p) => (p.id === myId ? `${p.name} (you)` : p.name)).join(" vs ")
+                    : "waiting…";
                   return (
-                    <div className="coc-card" key={g.id}>
-                      <div className="coc-card-info">
-                        <div className="coc-card-title">
-                          {isMine
-                            ? <>{youP1 ? `${g.player1_name} (you)` : g.player1_name}{" vs "}{g.player2_name ? (youP1 ? g.player2_name : `${g.player2_name} (you)`) : "waiting…"}</>
-                            : <>{g.player1_name} vs {g.player2_name || "waiting…"}</>}
-                        </div>
-                        <div className="coc-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
+                    <div className="lby-card" key={g.id}>
+                      <div className="lby-card-info">
+                        <div className="lby-card-title">{matchup}</div>
+                        <div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
                       </div>
-                      <div className="coc-card-actions">
+                      <div className="lby-card-actions">
                         {isMine ? (
                           <>
                             {g.turn === myId
-                              ? <span className="coc-turn-badge">Your Turn</span>
-                              : <span className="coc-their-badge">Their Turn</span>}
+                              ? <TurnBadge mine>Your Turn</TurnBadge>
+                              : <TurnBadge>Their Turn</TurnBadge>}
                             <button className="coc-btn outline sm" onClick={() => resume(g.id)}>Resume</button>
                           </>
                         ) : (
-                          <span className="coc-their-badge">{turnName ? `${turnName}'s turn` : "In progress"}</span>
+                          <TurnBadge>{turnName ? `${turnName}'s turn` : "In progress"}</TurnBadge>
                         )}
                       </div>
                     </div>
                   );
-                });
+                })}</div>;
               })()}
             </div>
 
-            <div className="coc-lobby-col">
-              <div className="coc-section-hd">
-                <div className="coc-section-title">History</div>
-                <span className="coc-muted">{history.length ? `${history.length} finished` : ""}</span>
-              </div>
+            <div className="coc-lobby-col lby-col-history">
+              <LobbySectionHd title="History" note={history.length ? `${history.length} finished` : null} />
               {!authUser ? (
-                <div className="coc-empty">Log in to see your finished games.</div>
+                <div className="lby-empty">Log in to see your finished games.</div>
               ) : history.length === 0 ? (
-                <div className="coc-empty">No finished games yet.</div>
+                <div className="lby-empty">No finished games yet.</div>
               ) : (
-                history.map((g) => (
-                  <div className="coc-card" key={g.id}>
-                    <div className="coc-card-info">
-                      <div className="coc-card-title">
-                        <span className={g.tie ? "" : (g.you_won ? "coc-won" : "coc-lost")}>{g.tie ? "Tie" : (g.you_won ? "Won" : "Lost")}</span>
-                        {" vs "}{g.opp_name}
+                <div className="lby-list">
+                {historyShown.map((g) => (
+                  <div className="lby-card lby-card-hist" key={g.id}>
+                    <div className="lby-card-info">
+                      <div className="lby-card-title">
+                        <span className={`hist-result ${g.tie ? "tie" : (g.you_won ? "won" : "lost")}`}>{g.tie ? "Tie" : (g.you_won ? "Won" : "Lost")}</span>
+                        <span className="hist-scores"> vs {g.opp_name}{g.your_score != null && g.opp_score != null ? <> <span className="hist-score-num">{g.your_score}-{g.opp_score}</span></> : null}</span>
                       </div>
-                      <div className="coc-card-meta">
-                        {g.your_score != null && g.opp_score != null ? `${g.your_score}–${g.opp_score} · ` : ""}{timeAgo(g.updated_at)}
-                      </div>
+                      <div className="lby-card-meta">{timeAgo(g.updated_at)}</div>
                     </div>
-                    <div className="coc-card-actions">
+                    <div className="lby-card-actions">
                       <button className="coc-btn outline sm" onClick={() => enterCocReview(g.id)}>Review</button>
                     </div>
                   </div>
-                ))
+                ))}
+                {historyMore}
+                </div>
               )}
             </div>
           </div>
         </div>
-        {showRules && (
-          <div className="coc-modal-bg" onClick={() => setShowRules(false)}>
-            <div className="coc-modal coc-rules" onClick={(e) => e.stopPropagation()}>
-              <h3>📖 How to Play — Castles of Crimson</h3>
-              <div className="coc-rules-body">
-                <p className="coc-rules-lead">Fill your duchy — a board of colored hex regions — with tiles that score points and power your economy. The game runs <b>5 phases of 5 rounds</b>; the player with the most <b>victory points (VP)</b> at the end wins.</p>
-
-                <h4>Your duchy</h4>
-                <ul>
-                  <li>Every empty space shows a <b>number (1–6)</b> and belongs to a <b>colored region</b>. To fill a space you need a die matching its number.</li>
-                  <li>Tiles must be placed <b>next to tiles you already own</b> — your duchy grows outward from your two starting castles (which don't score).</li>
-                </ul>
-
-                <h4>Your turn — roll two dice</h4>
-                <p>Each die lets you take <b>one</b> action, so you act twice per turn. Before acting you may <b>spend a worker to change a die by 1</b> (nudging it back toward its roll refunds the worker).</p>
-                <ul>
-                  <li><b>Take a hex tile</b> from the depot whose number matches the die, into your <b>storage</b> — it holds 3, so discard to make room when it's full.</li>
-                  <li><b>Place a tile</b> from storage onto an empty space showing that die's number, adjacent to your duchy.</li>
-                  <li><b>Sell goods</b> whose number matches the die.</li>
-                  <li><b>Buy a black tile</b> from the central depot — pay 2 silver, any die.</li>
-                  <li><b>Take 2 workers</b> — any die.</li>
-                </ul>
-
-                <h4>What each tile does when placed</h4>
-                <ul>
-                  <li><b>Castle</b> — immediately take one <b>extra action</b>.</li>
-                  <li><b>Mine</b> — pays you <b>silver</b> every phase for the rest of the game.</li>
-                  <li><b>Ship</b> — brings <b>goods</b> and improves your <b>turn order</b>.</li>
-                  <li><b>Livestock</b> — animal tiles that score VP as you place them, worth more for grouping the same animal together.</li>
-                  <li><b>Building</b> — an instant effect. The eight are market, carpenter &amp; church (take a tile into storage), warehouse (sell goods), boarding house (+4 workers), bank (+2 silver), town hall (place another tile), and watchtower (+4 VP). Only one building of each type per region.</li>
-                  <li><b>Monastery</b> — one of 26 unique tiles (shown by its number) granting a special ongoing power and/or an end-game bonus.</li>
-                </ul>
-
-                <h4>Selling goods</h4>
-                <ul>
-                  <li>Match a die to a goods number to sell that batch for <b>silver plus VP</b> (the bigger the batch, the more VP). Ships are how you gather goods to sell.</li>
-                </ul>
-
-                <h4>Scoring regions &amp; colors</h4>
-                <ul>
-                  <li><b>Completely filling a same-color region</b> scores by its size — <b>1 / 3 / 6 / 10 / 15 / 21 / 28 / 36</b> VP for 1–8 tiles — <b>plus a time bonus</b> that shrinks every phase (10 → 8 → 6 → 4 → 2), so finishing regions early is worth far more.</li>
-                  <li>The first player to cover an <b>entire color</b> earns a large bonus; the second earns a smaller one.</li>
-                </ul>
-
-                <h4>Between phases &amp; end of game</h4>
-                <ul>
-                  <li>Each new phase, the numbered depots refill with the same tile <b>types</b> (the faint ghost outlines show what returns) and your mines pay out silver.</li>
-                  <li>At game end, leftover <b>goods, silver, and workers</b> are worth a little VP, and any <b>monastery end-game bonuses</b> are tallied.</li>
-                </ul>
-
-                <p className="coc-rules-note">2 players — challenge a friend or the bot (Easy / Hard / Expert).</p>
-              </div>
-              <div className="coc-modal-row" style={{ justifyContent: "flex-end", marginTop: 8 }}>
-                <button className="coc-btn gold" onClick={() => setShowRules(false)}>Got it</button>
-              </div>
-            </div>
-          </div>
-        )}
+        {cocRulesModal}
         {toast && <div className="coc-toast">{toast}</div>}
       </div>
     );
   }
 
+  // The waiting/game screens render the board, so they still wait for the layout fetch.
+  if (!board) {
+    return (<div className="coc coc-neutral" style={{ "--lby-accent": "#d6454b" }}><style>{css}</style><LobbyLoading /></div>);
+  }
+
   // ─── Waiting ─────────────────────────────────────────────────────────────
   if (screen === "waiting") {
     const isHost = roomData?.host === myId;
-    const count = Object.keys(players).length;
+    const names = Object.entries(players);           // [pid, name] — up to 4 seats
+    const count = names.length;
+    const cap = roomData?.max_players || 4;          // host-chosen seat cap
     return (
       <div className="coc"><style>{css}</style>
         <div className="coc-wrap">
           <div className="coc-waiting">
             <div className="coc-section-title" style={{ border: "none" }}>Room Code</div>
             <div className="coc-code" onClick={() => { navigator.clipboard?.writeText(roomId); setToast("Copied!"); }}>{roomId}</div>
-            <p className="coc-card-meta">{count}/2 players joined</p>
+            <p className="coc-card-meta">{count}/{cap} players joined{count < 2 ? " (need at least 2)" : ""}</p>
+            <div className="coc-waiting-players">
+              {names.map(([pid, nm]) => (
+                <span key={pid} className="coc-waiting-player">
+                  {pid === myId ? `${nm} (you)` : nm}{pid === roomData?.host ? " · host" : ""}
+                </span>
+              ))}
+            </div>
             <div style={{ marginTop: 18, display: "flex", gap: 10, justifyContent: "center" }}>
               {isHost
                 ? <button className="coc-btn gold" disabled={count < 2} onClick={() => send({ action: "start" })}>Start Game</button>
@@ -2361,8 +2257,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             <VpReview order={order} players={players} myId={myId} scores={scores}
               breakdowns={breakdowns} winnerPid={w} projected={false} />
             <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 18 }}>
-              <button className="coc-btn outline" onClick={() => setReviewing(true)}>Review Board</button>
-              <button className="coc-btn gold" onClick={leaveToLobby}>Back to Lobby</button>
+              <button className="coc-btn outline" onClick={() => setReviewing(true)}>Review game</button>
+              <button className="coc-btn gold" onClick={leaveToLobby}>Back to lobby</button>
             </div>
           </div>
         </div>
@@ -2392,8 +2288,16 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
       minX = Math.min(minX, c.x); maxX = Math.max(maxX, c.x);
       minY = Math.min(minY, c.y); maxY = Math.max(maxY, c.y);
     }
-    const pad = HEX_S + 4;
-    const vb = `${(minX - pad).toFixed(0)} ${(minY - pad).toFixed(0)} ${(maxX - minX + pad * 2).toFixed(0)} ${(maxY - minY + pad * 2).toFixed(0)}`;
+    // Pointy-top hexes reach (HEX_S-1.5)·√3/2 sideways (the DRAWN flat half-width — the
+    // polygons use radius HEX_S-1.5) but HEX_S up/down (points). Pad X to exactly that
+    // drawn flat half so the leftmost/rightmost hex fills flush to the viewBox edge — same
+    // 0 side-buffer as the storage slots above it (the +0.5 is a hair of rim-stroke room).
+    // Any bigger padX leaves a visible gap the storage row doesn't have.
+    const padX = (HEX_S - 1.5) * Math.sqrt(3) / 2 + 0.5;
+    // Match the top/bottom buffer to the sides: the pointy hex reaches HEX_S-1.5 up/down,
+    // so pad to that + the same 0.5 rim — the board is flush all around (no extra bottom gap).
+    const padY = (HEX_S - 1.5) + 0.5;
+    const vb = `${(minX - padX).toFixed(1)} ${(minY - padY).toFixed(1)} ${(maxX - minX + padX * 2).toFixed(1)} ${(maxY - minY + padY * 2).toFixed(1)}`;
     return (
       <svg className="coc-hexsvg" viewBox={vb}>
         <defs>
@@ -2467,21 +2371,30 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     : (aiThinking ? "Bot is playing…" : `${players[game.turn] || "Opponent"}'s turn`);
 
   return (
-    <div className="coc"><style>{css}</style>
+    <div className="coc" style={{ "--lby-accent": "#d6454b" }}><style>{css}</style>
       <div className="coc-wrap coc-wrap-game">
         <div className="coc-top coc-top-game">
           <div className="coc-top-left">
-            <button className="coc-btn ghost sm" onClick={over ? () => setReviewing(false) : leaveToLobby}>← {over ? "Results" : "Menu"}</button>
+            {over
+              ? <button className="coc-btn ghost sm" onClick={() => setReviewing(false)}>← Results</button>
+              : <GameMenu items={[
+                  { label: "Return to menu", icon: "←", onClick: leaveToLobby },
+                  { label: "View rules", icon: "📖", onClick: () => setShowRules(true) },
+                  { label: "Abandon game", icon: "⚑", danger: true, onClick: () => setConfirmAbandon(true) },
+                ]} />}
           </div>
           <span className="coc-title">Castles of Crimson</span>
           <div className="coc-top-right coc-top-abandon">
-            {!over && (confirmAbandon
-              ? <>
-                  <span className="coc-card-meta">Abandon game?</span>
-                  <button className="coc-btn crimson sm" onClick={() => { send({ action: "abandon" }); setConfirmAbandon(false); }}>Yes, resign</button>
-                  <button className="coc-btn ghost sm" onClick={() => setConfirmAbandon(false)}>No</button>
-                </>
-              : <button className="coc-btn ghost sm" onClick={() => setConfirmAbandon(true)}>Abandon</button>)}
+            {!over && confirmAbandon && (
+              <>
+                <span className="coc-card-meta">{offline ? "Leave this game? The save stays on this device." : "Abandon game?"}</span>
+                <button className="coc-btn crimson sm" onClick={() => {
+                  if (offline) { setConfirmAbandon(false); onExit?.(); return; }
+                  send({ action: "abandon" }); setConfirmAbandon(false);
+                }}>{offline ? "Yes, leave" : "Yes, resign"}</button>
+                <button className="coc-btn ghost sm" onClick={() => setConfirmAbandon(false)}>No</button>
+              </>
+            )}
           </div>
         </div>
 
@@ -2541,22 +2454,26 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         <div className="coc-panel coc-board-panel coc-col-board">
           <div className="coc-board-head">
             <div className="coc-board-status">
-              <span className="coc-pill">Phase <b>{game.phase_letter}</b></span>
-              <span className="coc-pill">Round <b>{game.round}/5</b></span>
+              <span className="coc-pill coc-pill-phase">Phase <b>{game.phase_letter}</b></span>
               {(() => {
-                // Goods still to be handed out THIS PHASE: the queued goods not yet placed
-                // on a depot, shown in deal order (leftmost = next). One is dealt at the
-                // start of each round, so this counts down 5 -> 0 across the phase.
+                // This phase's 5 goods, one handed out at the start of each round. The queue
+                // holds the not-yet-dealt goods (deal order, leftmost = next); the already-dealt
+                // ones show as faded slots so the round-by-round progression is visible
+                // (round 1 uses slot 1, round 2 slot 2, ...). No "Goods left" label — the row
+                // speaks for itself.
                 const q = game.goods_queue || [];
+                const TOTAL = 5;                             // GOODS_PER_PHASE
+                const used = Math.max(0, TOTAL - q.length);  // dealt so far this phase
                 return (
-                  <span className="coc-pill coc-goods-left" title="Goods still to be handed out this phase (next first)">
-                    <span className="coc-goods-left-lbl">Goods left</span>
-                    {q.length === 0
-                      ? <span style={{ opacity: .6 }}>none</span>
-                      : q.map((g, i) => (
-                          <span key={g.id || i} className="coc-tile goods" title={tileDesc({ kind: "goods", color: g.color }, board)}
-                            style={{ width: 15, height: 15, fontSize: ".52rem", background: GOODS_HEX[g.color] }}>{goodsSellNum(g.color)}</span>
-                        ))}
+                  <span className="coc-pill coc-goods-left" data-goodsleft="1" title="This phase's goods — one is handed out each round; faded = already used">
+                    {Array.from({ length: used }).map((_, i) => (
+                      <span key={"u" + i} className="coc-tile goods coc-goods-used"
+                        title={"Round " + (i + 1) + " goods — already handed out"} aria-hidden="true"></span>
+                    ))}
+                    {q.map((g, i) => (
+                      <span key={g.id || i} className="coc-tile goods" title={tileDesc({ kind: "goods", color: g.color }, board)}
+                        style={{ background: GOODS_HEX[g.color] }}>{goodsSellNum(g.color)}</span>
+                    ))}
                   </span>
                 );
               })()}
@@ -2590,7 +2507,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             </div>
           </div>
 
-          <div className="coc-board-hex">
+          <div className="coc-board-hex" ref={boardHexRef}>
             {[1, 2, 3, 4, 5, 6].map((d, idx) => {
               const depot = game.depots[String(d)];
               // Highlight a depot only while a matching die is SELECTED (not just
@@ -2602,20 +2519,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 : (hasM12 ? [selDieVal, selDieVal === 6 ? 1 : selDieVal + 1, selDieVal === 1 ? 6 : selDieVal - 1] : [selDieVal]);
               const match = !pendingMine && matchVals.includes(d);
               const pos = DEPOT_POS[idx];
-              // Put the number JUST OUTSIDE the box edge that faces the central
-              // black depot. Pick the dominant axis of the vector toward center,
-              // then sit the square a few px beyond that edge.
-              const vx = 50 - pos.left, vy = 50 - pos.top, G = 6;
-              let numStyle;
-              if (Math.abs(vx) >= Math.abs(vy)) {
-                numStyle = vx < 0
-                  ? { left: 0, top: "50%", transform: `translate(calc(-100% - ${G}px), -50%)` }
-                  : { left: "100%", top: "50%", transform: `translate(${G}px, -50%)` };
-              } else {
-                numStyle = vy < 0
-                  ? { left: "50%", top: 0, transform: `translate(-50%, calc(-100% - ${G}px))` }
-                  : { left: "50%", top: "100%", transform: `translate(-50%, ${G}px)` };
-              }
               const bCands = buildingPickMine ? buildingDepotCands(d) : [];
               const pickable = shipPickMine ? shipCands.includes(d)
                 : buildingPickMine ? bCands.length > 0
@@ -2624,17 +2527,38 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
               const depotPick = shipPickMine ? () => shipPick(d)
                 : (buildingPickMine && bCands.length === 1 ? () => buildingPick(bCands[0]) : undefined);
               const isSide = d !== 1 && d !== 4;           // ring-side depots stack tiles vertically
+              // Top-half side depots (2/6) render goods ABOVE the tiles so the pile grows UP
+              // into empty board space; bottom side depots (3/5) keep goods below (grow down).
+              const topSide = isSide && pos.top < 50;
               // Side depots anchor to the board's edges (left for 5/6 — the same gutter
               // as the turn-order track — right for 2/3) instead of centering on left%;
               // top/bottom depots (coc-depot-tb) keep the horizontal tile row.
               const anchor = isSide ? (pos.left < 50 ? " coc-anchor-l" : " coc-anchor-r") : "";
+              // The depot-number die sits OUTSIDE the box on the edge facing the central black
+              // depot (as before). For side depots it's pinned to the BETWEEN-TILES level — a
+              // FIXED offset from the pinned inner tile (HEX_H+9 = the gap center, −12 to center
+              // the 24px die on it) — so it never moves as goods grow (0 change at 0 goods, when
+              // that level IS the box center). Top/bottom depots keep it just beyond the near edge.
+              const vx = 50 - pos.left, vy = 50 - pos.top, G = 6;
+              let numStyle;
+              if (isSide) {
+                const edge = vx < 0
+                  ? { left: 0, transform: `translateX(calc(-100% - ${G}px))` }
+                  : { left: "100%", transform: `translateX(${G}px)` };
+                numStyle = topSide ? { ...edge, bottom: `${HEX_H - 3}px` } : { ...edge, top: `${HEX_H - 3}px` };
+              } else {
+                numStyle = vy < 0
+                  ? { left: "50%", top: 0, transform: `translate(-50%, calc(-100% - ${G}px))` }
+                  : { left: "50%", top: "100%", transform: `translate(-50%, ${G}px)` };
+              }
               return (
-                <div key={d} data-depot={d} className={`coc-depot${isSide ? " coc-depot-side" : " coc-depot-tb"}${anchor}${match ? " match" : ""}${pickable ? " coc-depot-pick" : ""}`}
+                <div key={d} data-depot={d} className={`coc-depot${isSide ? " coc-depot-side" : " coc-depot-tb"}${topSide ? " coc-depot-topside" : ""}${anchor}${match ? " match" : ""}${pickable ? " coc-depot-pick" : ""}`}
                   style={{ left: isSide ? (pos.left < 50 ? 0 : "100%") : `${pos.left}%`, top: `${pos.top}%` }}
                   onClick={depotPick}
                   title={pickable ? (shipPickMine ? `Take all goods from depot ${d}` : buildingPickMine ? `Take the highlighted tile from depot ${d}` : `Click a goods token to take that type`) : undefined}>
                   <span className="coc-minidie" style={numStyle} title={`Depot ${d} — take a tile here with a die showing ${d}`}><Pips n={d} /></span>
                   <div className="coc-tilewrap">
+                    <div className={`coc-tiles-inner${(game.num_players || 2) === 3 ? " coc-tiles-tri" : ""}`}>
                     {depotSlots(d, depot.hexes).map((slot, i) => slot.tile ? (
                       <div key={slot.tile.id} className={`coc-tile${buildingPickMine && buildingCands.includes(slot.tile.id) ? " coc-tile-pick" : ""}`} style={{ background: TILE_HEX[slot.tile.color] }}
                         title={tileDesc(slot.tile, board)} onClick={(e) => clickDepotTile(d, slot.tile, e)}>
@@ -2646,11 +2570,12 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                         title={`${COLOR_TYPE_LABEL[slot.ghost] || "Tile"} taken — this depot refills a ${COLOR_TYPE_LABEL[slot.ghost]?.toLowerCase() || ""} tile here each phase`}>
                       </div>
                     ))}
+                    </div>
                     <div className="coc-depot-goods">
                       {depot.goods.map((gt) => {
                         const canPickGood = goodsPickMine && d === goodsPickDepot && goodsPickColors.includes(gt.color);
                         return (
-                          <div key={gt.id} className={`coc-tile goods${canPickGood ? " coc-tile-pick" : ""}`} style={{ background: GOODS_HEX[gt.color] }}
+                          <div key={gt.id} data-depotgood={gt.id} className={`coc-tile goods${canPickGood ? " coc-tile-pick" : ""}`} style={{ background: GOODS_HEX[gt.color] }}
                             title={canPickGood ? `Take all #${goodsSellNum(gt.color)} goods` : tileDesc(gt, board)}
                             onClick={(e) => { if (canPickGood) { e.stopPropagation(); goodsPick(gt.color); } else if (!shipPickMine) setToast(tileDesc(gt, board)); }}>{goodsSellNum(gt.color)}</div>
                         );
@@ -2660,21 +2585,27 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 </div>
               );
             })}
-            <div data-blackdepot="1" className="coc-depot coc-black-center" style={{ width: 2 * HEX_W + BLACK_GAP + 2 * BLACK_PAD, height: 2.5 * HEX_H + 2 * BLACK_GAP + 2 * BLACK_PAD }}
+            {/* Central black depot: 2 columns × (player-count) rows — a FIXED size that never
+                shrinks as tiles are bought (explicit rows leave empty cells for taken tiles). */}
+            <div data-blackdepot="1" className="coc-depot coc-black-center"
+              style={{ display: "grid", gridTemplateColumns: `repeat(2, ${HEX_W}px)`, gridTemplateRows: `repeat(${game.num_players || 2}, ${HEX_H}px)`, gap: `${BLACK_GAP}px`, justifyContent: "center", alignContent: "start", width: 2 * HEX_W + BLACK_GAP + 2 * BLACK_PAD }}
               title="Central black depot — buy one tile per turn for 2 silver">
-              {game.black_depot.map((t, i) => {
-                const k = BLACK_KITE[i];
-                if (!k) return null;   // the black depot holds at most 4 tiles
-                return (
-                  <div key={t.id} className={`coc-tile${silverArmed ? " coc-tile-pick" : ""}`} style={{ position: "absolute", left: `${k.left + BLACK_PAD}px`, top: `${k.top + BLACK_PAD}px`, background: TILE_HEX[t.color], opacity: .9 }}
-                    title={silverArmed ? `Buy ${tileName(t)} for 2 silver` : `${tileDesc(t, board)}  (Black depot: buy for 2 silver.)`} onClick={() => clickBlackTile(t)}>
-                    <TileArt tile={t} px={HEX_W} />
-                  </div>
-                );
-              })}
+              {game.black_depot.map((t) => (
+                <div key={t.id} className={`coc-tile${silverArmed ? " coc-tile-pick" : ""}`} style={{ background: TILE_HEX[t.color], opacity: .9 }}
+                  title={silverArmed ? `Buy ${tileName(t)} for 2 silver` : `${tileDesc(t, board)}  (Black depot: buy for 2 silver.)`} onClick={() => clickBlackTile(t)}>
+                  <TileArt tile={t} px={HEX_W} />
+                </div>
+              ))}
             </div>
           </div>
         </div>
+
+        {/* 3-col: the two duchies sit in a row and the LOG fills beneath them inside this
+            area, which stretches to the (taller) board column's height — so the log scrolls
+            instead of stretching the board. Both wrappers are display:contents below 1280,
+            so the narrower layouts keep treating the duchies + log as direct grid children. */}
+        <div className="coc-duchy-area">
+        <div className="coc-duchy-row">
 
         {/* Your area: dice/storage/goods controls, your duchy board below */}
         <div className="coc-panel">
@@ -2692,7 +2623,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   onClick={() => { mv({ type: "discard_storage", tile_id: selStorage }); setSelStorage(null); }}>Discard</button>
                 <button className="coc-btn ghost sm" disabled={!myTurnRaw || !hasActed}
                   title={hasActed ? "Undo everything you've done this turn" : "Nothing to undo yet"}
-                  onClick={() => { setSelDie(null); setSelStorage(null); setExtraValue(null); setActedThisTurn(false); mv({ type: "undo_turn" }); }}>↩ Undo Turn</button>
+                  onClick={() => { setSelDie(null); setSelStorage(null); setExtraValue(null); setActedThisTurn(false); mv({ type: "undo_turn" }); }}>↩ Undo</button>
                 <button className="coc-btn crimson sm" disabled={!myTurnRaw || !bothDiceUsed || pendingMine}
                   title={pendingMine ? "Resolve the pending decision first" : bothDiceUsed ? "End your turn" : "Use both dice before ending your turn"}
                   onClick={() => mv({ type: "end_turn" })}>End Turn</button>
@@ -2701,17 +2632,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           </div>
           <div className="coc-duchy-layout">
             <div className="coc-duchy-controls">
-              {setupPhase && (
-                <div className="coc-setup-banner">
-                  <b>Starting castle.</b>{" "}
-                  {setupMine
-                    ? "Click a glowing crimson space to place it — your duchy grows outward from here."
-                    : `Waiting for ${players[game.turn] || "your opponent"} to choose…`}
-                </div>
-              )}
               {/* dice + resources */}
               <div className="coc-dicebar">
-                <span className="coc-pill">Dice</span>
                 {dice && [0, 1].map((i) => (
                   <div key={i} style={{ display: "flex", gap: 4, alignItems: "center" }}>
                     <div className={`coc-die${selDie === i ? " sel" : ""}${dice.used[i] ? " used" : ""}`}
@@ -2748,7 +2670,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
               {/* storage + goods, side by side */}
               <div className="coc-stor-goods">
                 <div>
-                  <div className="coc-pill" style={{ marginBottom: 4 }}>Storage</div>
                   <div className="coc-storage" data-storage="1">
                     {[0, 1, 2].map((i) => {
                       const t = me?.storage?.[i];
@@ -2776,7 +2697,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   </div>
                 </div>
                 <div>
-                  <div className="coc-pill" style={{ marginBottom: 4 }}>Goods</div>
                   <div className="coc-goods-row" data-mygoods="1">
                     {me && Object.entries(me.goods).map(([c, n]) => {
                       const sellable = canSellGood(c);
@@ -2794,6 +2714,16 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                       <span className="coc-goods-back" />×{me?.sold_goods?.length || 0}
                     </span>
                   </div>
+                  {me?.claimed_bonus?.length > 0 && (
+                    <div className="coc-claimed-row" data-myclaimed="1" title="Color-bonus tiles you've claimed">
+                      {me.claimed_bonus.map((bt, i) => (
+                        <span key={i} className={`coc-claimed-badge${bt.vp > (game.num_players || 2) ? " large" : " small"}`}
+                          title={`${colorLabel(bt.color)} color bonus — ${bt.vp} VP (${bt.vp > (game.num_players || 2) ? "large / first" : "small / second"})`}>
+                          <BonusTileBadge color={TILE_HEX[bt.color]} />
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -2813,10 +2743,25 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           <div className="coc-panel">
             <div className="coc-duchy-head">
               <h3>{players[oppId] || "Opponent"} — {over && fscore?.[oppId] != null ? fscore[oppId] : (opp.vp ?? 0)} VP</h3>
+              {opponentIds.length > 1 && (
+                <div className="coc-opp-tabs" role="tablist">
+                  {opponentIds.map((pid) => {
+                    const isTurn = !over && (game.pending_pid || game.turn) === pid;
+                    return (
+                      <button key={pid} type="button"
+                        className={`coc-opp-tab${pid === oppId ? " on" : ""}${isTurn ? " turn" : ""}`}
+                        onClick={() => setViewOppId(pid)}
+                        title={`View ${players[pid] || "player"}'s duchy${isTurn ? " (their turn)" : ""}`}>
+                        {players[pid] || "Player"}
+                        {over && fscore?.[pid] != null ? <b> {fscore[pid]}</b> : (game.players?.[pid]?.vp != null ? <b> {game.players[pid].vp}</b> : null)}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
             <div className="coc-oppbar coc-dicebar">
               {oppDice && (<>
-                <span className="coc-pill">Dice</span>
                 {[0, 1].map((i) => (
                   <div key={i} className={`coc-die${oppDice.used?.[i] ? " used" : ""}`}
                     style={{ cursor: "default" }}><Pips n={oppDice.values[i]} /></div>
@@ -2833,7 +2778,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             </div>
             <div className="coc-opp-sections">
               <div>
-                <div className="coc-pill" style={{ marginBottom: 4 }}>Storage</div>
                 <div className="coc-storage">
                   {[0, 1, 2].map((i) => {
                     const t = opp.storage?.[i];
@@ -2844,7 +2788,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 </div>
               </div>
               <div>
-                <div className="coc-pill" style={{ marginBottom: 4 }}>Goods</div>
                 <div className="coc-goods-row" data-oppgoods="1">
                   {Object.entries(opp.goods || {}).map(([c, n]) => (
                     <span key={c} data-oppgoodchip={c} className="coc-goods-chip" title={tileDesc({ kind: "goods", color: c }, board)}
@@ -2858,6 +2801,16 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                     <span className="coc-goods-back" />×{opp.sold_goods?.length || 0}
                   </span>
                 </div>
+                {opp?.claimed_bonus?.length > 0 && (
+                  <div className="coc-claimed-row" data-oppclaimed="1" title="Color-bonus tiles they've claimed">
+                    {opp.claimed_bonus.map((bt, i) => (
+                      <span key={i} className={`coc-claimed-badge${bt.vp > (game.num_players || 2) ? " large" : " small"}`}
+                        title={`${colorLabel(bt.color)} color bonus — ${bt.vp} VP (${bt.vp > (game.num_players || 2) ? "large / first" : "small / second"})`}>
+                        <BonusTileBadge color={TILE_HEX[bt.color]} />
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
             <div className="coc-duchy-board">
@@ -2867,8 +2820,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         )}
         </div>
 
-        {/* move log */}
-        <div className="coc-panel">
+        {/* Move log — fills the area beneath the duchy row (3-col), scrolling internally
+            so it never stretches the board. Full width below everything at narrower widths. */}
+        <div className="coc-panel coc-log-panel">
           <h3>Log</h3>
           <div className="coc-log">
             {(game.moves || []).map((m, i) => (
@@ -2883,6 +2837,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   </div>
             ))}
           </div>
+        </div>
+        </div>
         </div>
       </div>
 
@@ -2918,7 +2874,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             ) : f.goods ? (
               <div key={f.id} className="coc-flyer goods"
                 style={{ left: f.left, top: f.top, width: f.w, height: f.h, background: GOODS_HEX[f.color] || "#555",
-                  "--dx": `${f.dx}px`, "--dy": `${f.dy}px`, "--s0": 1, "--s1": f.s1 }}>
+                  "--dx": `${f.dx}px`, "--dy": `${f.dy}px`, "--s0": f.s0 ?? 1, "--s1": f.s1 }}>
                 {goodsSellNum(f.color)}
               </div>
             ) : (
@@ -2953,8 +2909,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
       )}
 
       {reconnecting && !connected && inLiveGame && (
-        <div className="coc-reconnbar"><span className="coc-spinner" /> Reconnecting…</div>
+        <div className="coc-reconnbar"><span className="lby-spinner lby-spinner-sm" /> Reconnecting…</div>
       )}
+      {cocRulesModal}
       {toast && <div className="coc-toast">{toast}</div>}
     </div>
   );

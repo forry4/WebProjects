@@ -8,10 +8,10 @@ import random
 import numpy as np
 import pytest
 
-from games.spender.ai.az import actions as A
-from games.spender.ai.az import engine as E
-from games.spender.ai.az import features as F
-from games.spender.ai.az import mcts as M
+from games.spender.ai.serving import actions as A
+from games.spender.ai.serving import engine as E
+from games.spender.ai.serving import features as F
+from games.spender.ai.serving import mcts as M
 
 
 def _fresh(seed=3):
@@ -60,24 +60,28 @@ def test_az_choose_move_returns_legal_dict_move(monkeypatch):
     must return a move the incumbent engine accepts, and variant gating must
     open/close with the evaluator."""
     from games.spender import main as inc
+    # Z's net + chooser live in ai/serving/legacy_variants.py (retired variants are
+    # kept SERVING because `ai_variant` is persisted and old games resume into them).
+    # main re-exports the chooser, but the evaluator has to be patched at its home.
+    from games.spender.ai.serving import legacy_variants as legacy
 
     s = E.new_game(random.Random(23))
     game = E.to_game_dict(s, ("human", "ai"))
 
-    monkeypatch.setattr(inc, "AZ_EVALUATE", _uniform_eval)
+    monkeypatch.setattr(legacy, "AZ_EVALUATE", _uniform_eval)
     assert inc._ai_variant_valid("Z")
     mv = inc._az_choose_move(game, "ai", time_limit=0.2)
     a = A.move_to_action(s, mv)  # raises if not mappable
     assert a in E.legal_actions(s)
 
-    monkeypatch.setattr(inc, "AZ_EVALUATE", None)
+    monkeypatch.setattr(legacy, "AZ_EVALUATE", None)
     assert not inc._ai_variant_valid("Z")
     assert inc._ai_variant_valid("A")
 
 
 def test_arena_bridge_plays_full_game():
     from games.spender import main as inc
-    from games.spender.ai.az import arena
+    from games.spender.ai.offline import arena
 
     rng = random.Random(17)
     score = arena.play_game(_uniform_eval, 0, dict(inc.DEFAULT_WEIGHTS),
@@ -211,7 +215,7 @@ def test_mcts_finds_forced_winning_buy():
 
 def test_net_forward_and_evaluator():
     torch = pytest.importorskip("torch")
-    from games.spender.ai.az import net as N
+    from games.spender.ai.offline import net as N
 
     net = N.SpenderNet()
     s = _fresh()

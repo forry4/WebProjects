@@ -29,7 +29,7 @@ from types import SimpleNamespace
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.abspath(os.path.join(_HERE, "..", "..", "..", "..")))  # repo root
-from games.spender.ai.az import engine as E, actions as A   # noqa: E402
+from games.spender.ai.serving import engine as E, actions as A   # noqa: E402
 from games.spender.puzzle import schema                       # noqa: E402
 
 LEDGER = os.path.join(_HERE, "candidate_ledger.jsonl.gz")

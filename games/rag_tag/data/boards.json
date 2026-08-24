@@ -1,0 +1,311 @@
+{
+  "_comment": [
+    "Mechanical transcription of the 12 base-box Tag Team fighter boards.",
+    "Source: the PUBLIC BoardGameArena asset bundle (see sources.json) — no login needed.",
+    "Numbers and track layouts only. No card text, no art. tools/import_bga.py reads this.",
+    "",
+    "hp_track is ordered BOTTOM (worst) to TOP (best), i.e. index 0 is the space a marker",
+    "can never be pushed below. Each entry is one space:",
+    "  kind : 'hp' | 'ko' | 'revive' | 'spirit'",
+    "  hp   : the printed number, when kind == 'hp' (absent when an icon replaces the number)",
+    "  start: true on the space a marker is placed on at setup",
+    "  icons: ops fired when the marker LANDS ON or PASSES THROUGH the space, except 'stop',",
+    "         which halts movement immediately instead.",
+    "Op shape matches effects.py: {op, n, target}. target defaults to 'self'."
+  ],
+
+  "schema": 1,
+
+  "fighters": {
+    "joan": {
+      "bga_id": "JoanOfArc", "name": "Joan", "base_power": 1,
+      "complexity": 1, "tags": ["Support", "Versatile"],
+      "hp_track": [
+        {"kind": "ko"},
+        {"kind": "hp", "hp": 1}, {"kind": "hp", "hp": 2}, {"kind": "hp", "hp": 3},
+        {"kind": "hp", "hp": 4}, {"kind": "hp", "hp": 5}, {"kind": "hp", "hp": 6},
+        {"kind": "hp", "hp": 7}, {"kind": "hp", "hp": 8}, {"kind": "hp", "hp": 9},
+        {"kind": "hp", "hp": 10}, {"kind": "hp", "hp": 11}, {"kind": "hp", "hp": 12},
+        {"kind": "hp", "hp": 13}, {"kind": "hp", "hp": 14}, {"kind": "hp", "hp": 15},
+        {"kind": "hp", "hp": 16}, {"kind": "hp", "hp": 17},
+        {"kind": "hp", "hp": 18, "start": true}
+      ],
+      "special_track": {
+        "id": "divine_voice",
+        "shape": "circular",
+        "start": "halo_centre",
+        "_comment": "A dial: the marker starts on the central Halo and steps CLOCKWISE around four outer spaces. Ops fire on landing.",
+        "spaces": [
+          {"name": "top_right", "icons": [{"op": "power", "n": 1, "target": "self"}]},
+          {"name": "bottom_right", "icons": []},
+          {"name": "bottom_left", "icons": [{"op": "power", "n": 1, "target": "partner"}]},
+          {"name": "top_left", "icons": []}
+        ]
+      },
+      "tokens": {}
+    },
+
+    "ching_shih": {
+      "bga_id": "ChingShih", "name": "Ching Shih", "base_power": 2,
+      "complexity": 3, "tags": ["Escalation", "Versatile"],
+      "hp_track": [
+        {"kind": "ko"},
+        {"kind": "hp", "hp": 1}, {"kind": "hp", "hp": 2}, {"kind": "hp", "hp": 3},
+        {"kind": "hp", "hp": 4}, {"kind": "hp", "hp": 5}, {"kind": "hp", "hp": 6},
+        {"kind": "hp", "hp": 7}, {"kind": "hp", "hp": 8}, {"kind": "hp", "hp": 9},
+        {"kind": "hp", "hp": 10}, {"kind": "hp", "hp": 11}, {"kind": "hp", "hp": 12},
+        {"kind": "hp", "hp": 13},
+        {"kind": "hp", "hp": 14, "start": true}
+      ],
+      "special_track": {
+        "id": "navigation",
+        "shape": "linear",
+        "min": 0, "max": 20, "start": 0,
+        "_comment": "Ships. Gains past 20 are ignored. No spaces carry ops; card text reads the value. The board rings 7, 10, 15 and 20 as thresholds cards refer to.",
+        "spaces": []
+      },
+      "tokens": {}
+    },
+
+    "bodvar": {
+      "bga_id": "BodvarBjarki", "name": "Bödvar", "base_power": 3,
+      "complexity": 2, "tags": ["High Damage", "Transformation"],
+      "faces": ["bodvar", "berserker_bear"],
+      "hp_track": [
+        {"kind": "ko"},
+        {"kind": "hp", "hp": 1}, {"kind": "hp", "hp": 2}, {"kind": "hp", "hp": 3},
+        {"kind": "hp", "hp": 4}, {"kind": "hp", "hp": 5},
+        {"kind": "hp", "hp": 6, "icons": [{"op": "power", "n": 1, "target": "self"}]},
+        {"kind": "hp", "hp": 7}, {"kind": "hp", "hp": 8}, {"kind": "hp", "hp": 9},
+        {"kind": "hp", "hp": 10},
+        {"kind": "hp", "hp": 11, "start": true}
+      ],
+      "special_track": {
+        "id": "rage",
+        "shape": "linear",
+        "start": 0,
+        "_comment": "Bottom space is the start. Each Rage gain steps up one. Reaching the top applies +3 Power and THEN flips the board to Berserker Bear.",
+        "spaces": [
+          {"name": "0", "icons": []},
+          {"name": "1", "icons": []},
+          {"name": "2", "icons": []},
+          {"name": "3", "icons": []},
+          {"name": "4", "icons": []},
+          {"name": "5", "icons": []},
+          {"name": "6", "icons": []},
+          {"name": "transform", "icons": [{"op": "power", "n": 3, "target": "self"}, {"op": "fx", "name": "bodvar_transform"}]}
+        ]
+      },
+      "tokens": {},
+      "back": {
+        "name": "Berserker Bear",
+        "_comment": "Initial HP = Bödvar's Power cubes at the moment of transformation, capped at 15; that is not a ceiling afterwards, the Bear may Heal to 15. Tokens carry over. He is immune to all HP change on the turn he transforms.",
+        "hp_track": [
+          {"kind": "ko"},
+          {"kind": "hp", "hp": 1}, {"kind": "hp", "hp": 2}, {"kind": "hp", "hp": 3},
+          {"kind": "hp", "hp": 4}, {"kind": "hp", "hp": 5}, {"kind": "hp", "hp": 6},
+          {"kind": "hp", "hp": 7}, {"kind": "hp", "hp": 8}, {"kind": "hp", "hp": 9},
+          {"kind": "hp", "hp": 10}, {"kind": "hp", "hp": 11}, {"kind": "hp", "hp": 12},
+          {"kind": "hp", "hp": 13}, {"kind": "hp", "hp": 14}, {"kind": "hp", "hp": 15}
+        ]
+      }
+    },
+
+    "wong_fei_hung": {
+      "bga_id": "WongFeiHung", "name": "Wong Fei-Hung", "base_power": 2,
+      "complexity": 4, "tags": ["Power Manipulation", "Control"],
+      "hp_track": [
+        {"kind": "ko"},
+        {"kind": "hp", "hp": 1}, {"kind": "hp", "hp": 2}, {"kind": "hp", "hp": 3},
+        {"kind": "hp", "hp": 4}, {"kind": "hp", "hp": 5}, {"kind": "hp", "hp": 6},
+        {"kind": "hp", "hp": 7}, {"kind": "hp", "hp": 8}, {"kind": "hp", "hp": 9},
+        {"kind": "hp", "hp": 10}, {"kind": "hp", "hp": 11}, {"kind": "hp", "hp": 12},
+        {"kind": "hp", "hp": 13}, {"kind": "hp", "hp": 14}, {"kind": "hp", "hp": 15},
+        {"kind": "hp", "hp": 16},
+        {"kind": "hp", "hp": 17, "start": true}
+      ],
+      "special_track": null,
+      "tokens": {"concentration": 2}
+    },
+
+    "the_wild_bunch": {
+      "bga_id": "TheWildBunch", "name": "The Wild Bunch", "base_power": 1,
+      "complexity": 5, "tags": ["Precise Timing", "Resilient"],
+      "setup_icons": [{"op": "power", "n": 1, "target": "partner"}],
+      "_comment": "Every HP space is worth one and the marker moves at most one space per turn, up or down, regardless of the total. That is encoded as a stop on every space below the top; the top is bounded by Max HP anyway.",
+      "hp_track": [
+        {"kind": "ko"},
+        {"kind": "hp", "hp": 1, "icons": ["stop"]},
+        {"kind": "hp", "hp": 2, "icons": ["stop"]},
+        {"kind": "hp", "hp": 3, "icons": ["stop"]},
+        {"kind": "hp", "hp": 4, "icons": ["stop"]},
+        {"kind": "hp", "hp": 5, "start": true}
+      ],
+      "special_track": null,
+      "tokens": {"sheriff": 1}
+    },
+
+    "shango": {
+      "bga_id": "Shango", "name": "Shango", "base_power": 0,
+      "complexity": 5, "tags": ["Aggressive", "Escalation"],
+      "hp_track": [
+        {"kind": "ko"},
+        {"kind": "hp", "hp": 1}, {"kind": "hp", "hp": 2}, {"kind": "hp", "hp": 3},
+        {"kind": "hp", "hp": 4}, {"kind": "hp", "hp": 5}, {"kind": "hp", "hp": 6},
+        {"kind": "hp", "hp": 7}, {"kind": "hp", "hp": 8}, {"kind": "hp", "hp": 9},
+        {"kind": "hp", "hp": 10}, {"kind": "hp", "hp": 11}, {"kind": "hp", "hp": 12},
+        {"kind": "hp", "hp": 13}, {"kind": "hp", "hp": 14},
+        {"kind": "hp", "hp": 15, "start": true}
+      ],
+      "special_track": null,
+      "tokens": {"aflame": 5}
+    },
+
+    "maman_brijit": {
+      "bga_id": "MamaBrijit", "name": "Maman Brijit", "base_power": 2,
+      "complexity": 4, "tags": ["Control", "Immortal"],
+      "_comment": "Two KO spaces, and a revive space BELOW them. Pushed past both KOs onto the revive space she gains 1 Power and her marker returns to 4 at end of turn. The revive space is the bottom of the track, so further losses there are ignored.",
+      "hp_track": [
+        {"kind": "revive", "icons": [{"op": "power", "n": 1, "target": "self"}, {"op": "fx", "name": "brijit_revive"}]},
+        {"kind": "ko"},
+        {"kind": "ko"},
+        {"kind": "hp", "hp": 1}, {"kind": "hp", "hp": 2}, {"kind": "hp", "hp": 3},
+        {"kind": "hp", "hp": 4}, {"kind": "hp", "hp": 5}, {"kind": "hp", "hp": 6},
+        {"kind": "hp", "hp": 7}, {"kind": "hp", "hp": 8}, {"kind": "hp", "hp": 9},
+        {"kind": "hp", "hp": 10}, {"kind": "hp", "hp": 11}, {"kind": "hp", "hp": 12},
+        {"kind": "hp", "hp": 13}, {"kind": "hp", "hp": 14}, {"kind": "hp", "hp": 15},
+        {"kind": "hp", "hp": 16, "start": true}
+      ],
+      "revive_to_hp": 4,
+      "special_track": null,
+      "tokens": {}
+    },
+
+    "mephisto": {
+      "bga_id": "Mephistopheles", "name": "Mephisto", "base_power": 1,
+      "complexity": 3, "tags": ["Aggressive", "Self-Sufficient"],
+      "hp_track": [
+        {"kind": "ko"},
+        {"kind": "hp", "hp": 1}, {"kind": "hp", "hp": 2}, {"kind": "hp", "hp": 3},
+        {"kind": "hp", "hp": 4}, {"kind": "hp", "hp": 5}, {"kind": "hp", "hp": 6},
+        {"kind": "hp", "hp": 7},
+        {"kind": "hp", "hp": 8, "icons": [{"op": "fx", "name": "mephisto_flip_serpent"}]},
+        {"kind": "hp", "hp": 9}, {"kind": "hp", "hp": 10}, {"kind": "hp", "hp": 11},
+        {"kind": "hp", "hp": 12},
+        {"kind": "hp", "hp": 13, "start": true}
+      ],
+      "special_track": null,
+      "tokens": {"serpent": 1},
+      "_comment": "The Serpent token is double-sided and its setup face is random. The HP-track icon FLIPS it without applying the new face's effect."
+    },
+
+    "mordred": {
+      "bga_id": "Mordred", "name": "Mordred", "base_power": 0,
+      "complexity": 2, "tags": ["Power Build", "Riposte"],
+      "hp_track": [
+        {"kind": "ko"},
+        {"kind": "hp", "hp": 1}, {"kind": "hp", "hp": 2}, {"kind": "hp", "hp": 3},
+        {"kind": "hp", "hp": 4}, {"kind": "hp", "hp": 5}, {"kind": "hp", "hp": 6},
+        {"kind": "hp", "hp": 7}, {"kind": "hp", "hp": 8}, {"kind": "hp", "hp": 9},
+        {"kind": "hp", "hp": 10}, {"kind": "hp", "hp": 11}, {"kind": "hp", "hp": 12},
+        {"kind": "hp", "hp": 13}, {"kind": "hp", "hp": 14}, {"kind": "hp", "hp": 15},
+        {"kind": "hp", "hp": 16}, {"kind": "hp", "hp": 17}, {"kind": "hp", "hp": 18},
+        {"kind": "hp", "hp": 19, "start": true}
+      ],
+      "special_track": null,
+      "tokens": {}
+    },
+
+    "milady": {
+      "bga_id": "MiladyDeWinter", "name": "Milady", "base_power": 1,
+      "complexity": 2, "tags": ["Unpredictable", "Riposte"],
+      "hp_track": [
+        {"kind": "ko"},
+        {"kind": "hp", "hp": 1, "icons": ["stop"]},
+        {"kind": "hp", "hp": 2, "icons": [{"op": "fx", "name": "milady_unleash_scheme"}]},
+        {"kind": "hp", "hp": 3}, {"kind": "hp", "hp": 4}, {"kind": "hp", "hp": 5},
+        {"kind": "hp", "hp": 6}, {"kind": "hp", "hp": 7},
+        {"kind": "hp", "hp": 8, "icons": [{"op": "fx", "name": "milady_unleash_scheme"}]},
+        {"kind": "hp", "hp": 9}, {"kind": "hp", "hp": 10}, {"kind": "hp", "hp": 11},
+        {"kind": "hp", "hp": 12, "icons": [{"op": "fx", "name": "milady_unleash_scheme"}]},
+        {"kind": "hp", "hp": 13}, {"kind": "hp", "hp": 14}, {"kind": "hp", "hp": 15},
+        {"kind": "hp", "hp": 16, "start": true}
+      ],
+      "special_track": null,
+      "tokens": {"scheme": 11},
+      "_comment": "Schemes unleashed from the HP TRACK resolve after all card actions, which is why they can move markers that are sitting on a stop. Schemes unleashed by a CARD resolve with that card."
+    },
+
+    "golem": {
+      "bga_id": "GolemOfPrague", "name": "The Golem", "base_power": 1,
+      "complexity": 1, "tags": ["Protector", "Tank"],
+      "hp_track": [
+        {"kind": "ko"},
+        {"kind": "hp", "hp": 1}, {"kind": "hp", "hp": 2}, {"kind": "hp", "hp": 3},
+        {"kind": "hp", "hp": 4}, {"kind": "hp", "hp": 5}, {"kind": "hp", "hp": 6},
+        {"kind": "hp", "hp": 7}, {"kind": "hp", "hp": 8}, {"kind": "hp", "hp": 9},
+        {"kind": "hp", "hp": 10, "icons": [{"op": "power", "n": 1, "target": "self"}]},
+        {"kind": "hp", "hp": 11}, {"kind": "hp", "hp": 12}, {"kind": "hp", "hp": 13},
+        {"kind": "hp", "hp": 14},
+        {"kind": "hp", "hp": 15, "icons": [{"op": "power", "n": 1, "target": "self"}]},
+        {"kind": "hp", "hp": 16}, {"kind": "hp", "hp": 17}, {"kind": "hp", "hp": 18},
+        {"kind": "hp", "hp": 19},
+        {"kind": "hp", "hp": 20, "icons": [{"op": "power", "n": 1, "target": "self"}]},
+        {"kind": "hp", "hp": 21}, {"kind": "hp", "hp": 22}, {"kind": "hp", "hp": 23},
+        {"kind": "hp", "hp": 24},
+        {"kind": "hp", "hp": 25, "start": true}
+      ],
+      "special_track": null,
+      "tokens": {"presence": 1}
+    },
+
+    "the_fey_folk": {
+      "bga_id": "TheFeyFolk", "name": "The Fey Folk", "base_power": 0,
+      "complexity": 4, "tags": ["Support", "Elusive"],
+      "_comment": [
+        "Three Characters share one fighter slot. Only the ACTIVE character has a marker on a",
+        "track and can lose or recover HP. A character's tracks have no KO: losing the last HP",
+        "moves the marker to the Spirit space instead. At the END of that turn, before the next",
+        "card, the Spirits track advances one and the player picks the next active character,",
+        "placing its marker on the TOP space of its track and applying that space's icons.",
+        "They start the game with 1 Spirit already counted. They are KO only if all three are",
+        "Spirits at the START of the turn 'Toutes les legendes ont une fin' is revealed."
+      ],
+      "hp_track": null,
+      "characters": [
+        {
+          "id": "fairy", "name": "Fairy",
+          "hp_track": [
+            {"kind": "spirit", "icons": [{"op": "spirit", "n": 1}]},
+            {"kind": "hp", "hp": 1}, {"kind": "hp", "hp": 2},
+            {"kind": "hp", "hp": 3, "start": true, "icons": [{"op": "power", "n": 1, "target": "partner"}]}
+          ]
+        },
+        {
+          "id": "gnome", "name": "Gnome",
+          "hp_track": [
+            {"kind": "spirit", "icons": [{"op": "spirit", "n": 1}]},
+            {"kind": "hp", "hp": 1}, {"kind": "hp", "hp": 2}, {"kind": "hp", "hp": 3},
+            {"kind": "hp", "hp": 4, "start": true, "icons": [{"op": "power", "n": 1, "target": "partner"}]}
+          ]
+        },
+        {
+          "id": "elf", "name": "Elf",
+          "hp_track": [
+            {"kind": "spirit", "icons": [{"op": "spirit", "n": 1}]},
+            {"kind": "hp", "hp": 1}, {"kind": "hp", "hp": 2}, {"kind": "hp", "hp": 3},
+            {"kind": "hp", "hp": 4},
+            {"kind": "hp", "hp": 5, "start": true, "icons": [{"op": "power", "n": 1, "target": "self"}]}
+          ]
+        }
+      ],
+      "special_track": {
+        "id": "spirits",
+        "shape": "linear",
+        "min": 1, "max": 4, "start": 1,
+        "spaces": []
+      },
+      "tokens": {}
+    }
+  }
+}

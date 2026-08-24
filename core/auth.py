@@ -135,8 +135,7 @@ def authenticate_user(name: str, password: str) -> dict | None:
     conn.commit()
     # Bootstrap the admin role: the SITE_OWNER username is auto-granted admin on
     # login (durable thereafter via the admins table).
-    owner = site_owner_name()
-    if owner and row["name"] == owner:
+    if _name_is_owner(row["name"]):
         grant_admin(conn, row["id"])
     admin = is_admin_id(conn, row["id"])
     conn.close()
@@ -161,8 +160,7 @@ def get_user_by_session(token: str) -> dict | None:
     # is_admin_id — NOT a correlated subquery, which read NULL on the prod libsql driver and so
     # reported any admin as non-admin on every session refresh) OR a live SITE_OWNER username
     # match (so the owner is recognized even if the login-time grant never ran). Mirrors is_site_owner.
-    owner = site_owner_name()
-    is_admin = is_admin_id(conn, row[0]) or (owner is not None and row[1] == owner)
+    is_admin = is_admin_id(conn, row[0]) or _name_is_owner(row[1])
     conn.close()
     return {"id": row[0], "name": row[1], "is_admin": is_admin}
 
@@ -176,6 +174,14 @@ def get_user_by_session(token: str) -> dict | None:
 def site_owner_name() -> str | None:
     v = os.environ.get("SITE_OWNER")
     return v.strip() if v and v.strip() else None
+
+
+def _name_is_owner(name: str | None) -> bool:
+    """SITE_OWNER match, CASE-INSENSITIVELY — usernames are unique NOCASE and login is NOCASE, so
+    the owner bootstrap must compare the same way. A case-sensitive `==` meant `SITE_OWNER=forrestm`
+    never matched a stored `Forrestm`, so the owner silently lost admin on every path."""
+    owner = site_owner_name()
+    return bool(owner and name and name.casefold() == owner.casefold())
 
 
 def grant_admin(conn, user_id: str) -> None:
@@ -195,8 +201,7 @@ def is_site_owner(user: dict | None) -> bool:
         return False
     if user.get("is_admin"):
         return True
-    owner = site_owner_name()
-    return bool(owner and user.get("name") == owner)
+    return _name_is_owner(user.get("name"))
 
 
 # Reconnect tokens are short-lived (120s) and single-use, so used/expired rows are

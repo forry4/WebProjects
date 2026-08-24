@@ -25,6 +25,17 @@
     <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" />
     <link rel="icon" type="image/png" sizes="32x32" href="%BASE_URL%favicon-32.png" />
     <link rel="apple-touch-icon" href="%BASE_URL%apple-touch-icon.png" />
+    <!-- PWA: installable to a phone home screen. The manifest + a service worker
+         (registered in shared/pwa.js, prod hosts only) make the site "Add to Home
+         Screen"-able; the iOS meta tags give it a standalone, fullscreen launch
+         (Safari ignores the manifest's display mode). theme-color matches the
+         inline dark bg below so the status bar / task-switcher chrome blends in. -->
+    <link rel="manifest" href="%BASE_URL%manifest.webmanifest" />
+    <meta name="theme-color" content="#0f0e0c" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Forrest Games" />
     <!-- Preload the self-hosted fonts (same-origin, in webapp/public/fonts/) so they're
          ready at first paint and the app's font-load gate resolves instantly — no external
          Google Fonts round-trip. @font-face lives in baseCss (display:optional); metric-
@@ -33,6 +44,15 @@
          dark bg avoids a white flash before the JS CSS loads. -->
     <link rel="preload" as="font" type="font/woff2" href="%BASE_URL%fonts/cinzel.latin.woff2" crossorigin />
     <link rel="preload" as="font" type="font/woff2" href="%BASE_URL%fonts/crimsonpro.latin.woff2" crossorigin />
+    <!-- ALL THREE faces must be here. display:optional means a face that isn't ready
+         within its ~100ms block period is dropped for the WHOLE page load — no swap
+         when it lands. The italic was the one face left un-preloaded, so it started
+         at first paint and finished after it (measured on prod: 6-264ms late on
+         every profile, cached and cold), and every italic on the site — hints,
+         empty states, log lines — rendered in Georgia italic, which is markedly
+         heavier than Crimson Pro's 300-400. It corrected itself on reload, once
+         the font was cached: exactly the "thicker font until I reload" report. -->
+    <link rel="preload" as="font" type="font/woff2" href="%BASE_URL%fonts/crimsonpro-italic.latin.woff2" crossorigin />
     <style>html,body{margin:0;background:#0f0e0c}</style>
     <title>Forrest Games</title>
   </head>

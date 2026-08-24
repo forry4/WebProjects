@@ -1,0 +1,7 @@
+/target
+/target-perf
+/target-stage
+/pkg
+Cargo.lock
+tests/fixtures*/
+tests/gamedict_fixtures.jsonl

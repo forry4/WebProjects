@@ -112,3 +112,39 @@ try:
     LOG.info("mounted Where Wolf? at /werewolf")
 except Exception as _ww_err:  # pragma: no cover - optional package
     LOG.warning("Where Wolf? not mounted: %s", _ww_err)
+
+# Spender Duel — its self-contained sub-app mounted under /duel. Same defensive
+# guard: an import error here must not take down the rest of the backend.
+try:
+    from games.spender_duel.main import duel_app
+    app.mount("/duel", duel_app)
+    LOG.info("mounted Spender Duel at /duel")
+except Exception as _duel_err:  # pragma: no cover - optional package
+    LOG.warning("Spender Duel not mounted: %s", _duel_err)
+
+# Dontminion — its self-contained sub-app mounted under /dontminion. Same
+# defensive guard: an import error here must not take down the rest of the backend.
+try:
+    from games.dontminion.main import dontminion_app
+    app.mount("/dontminion", dontminion_app)
+    LOG.info("mounted Dontminion at /dontminion")
+except Exception as _dm_err:  # pragma: no cover - optional package
+    LOG.warning("Dontminion not mounted: %s", _dm_err)
+
+# Dissonance — its self-contained sub-app mounted under /dissonance. Same defensive
+# guard: an import error here must not take down the rest of the backend.
+try:
+    from games.dissonance.main import dissonance_app
+    app.mount("/dissonance", dissonance_app)
+    LOG.info("mounted Dissonance at /dissonance")
+except Exception as _ot_err:  # pragma: no cover - optional package
+    LOG.warning("Dissonance not mounted: %s", _ot_err)
+
+# Rag Tag — its self-contained sub-app mounted under /ragtag. Same defensive
+# guard: an import error here must not take down the rest of the backend.
+try:
+    from games.rag_tag.main import ragtag_app
+    app.mount("/ragtag", ragtag_app)
+    LOG.info("mounted Rag Tag at /ragtag")
+except Exception as _rt_err:  # pragma: no cover - optional package
+    LOG.warning("Rag Tag not mounted: %s", _rt_err)

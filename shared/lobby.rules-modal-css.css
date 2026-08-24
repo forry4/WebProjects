@@ -1,0 +1,65 @@
+/* Shared "How to play" modal — ONE chrome for every game's rules, so a long
+   ruleset behaves the same everywhere: the panel is capped to the viewport and
+   the BODY is the only scroller (a game's rules can be as long as it needs).
+   Before this, five games each had their own .X-rules-body copy and two of them
+   (Dontminion, Dissonance) reused the narrow create-modal panel, which is 372px
+   wide and grows the page instead of scrolling.
+
+   Token-driven with hard fallbacks — CoC mounts bare (no baseCss). */
+.rl-backdrop{position:fixed;inset:0;background:rgba(6,5,4,.74);display:flex;align-items:center;justify-content:center;z-index:420;padding:14px}
+.rl-panel{background:var(--surface,#1b1712);border:1px solid var(--border,#3a3226);border-radius:var(--radius-lg,14px);box-shadow:0 18px 48px rgba(0,0,0,.6);width:min(96vw,640px);max-height:min(90vh,900px);display:flex;flex-direction:column;overflow:hidden;text-align:left}
+.rl-head{flex:none;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 18px 12px;border-bottom:1px solid var(--border,#3a3226)}
+.rl-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1rem;font-weight:700;letter-spacing:.05em;color:var(--text,#e8dfce);line-height:1.25}
+.rl-x{background:none;border:none;color:var(--text-muted,#6a604e);font-size:1.05rem;line-height:1;padding:3px 6px;border-radius:6px;cursor:pointer}
+.rl-x:hover{color:var(--text,#e8dfce)}
+
+/* The scroller. min-height:0 is load-bearing — a flex ITEM defaults to
+   min-height:auto, which refuses to shrink below its content, so without it the
+   panel grows past max-height and nothing scrolls. */
+.rl-body{flex:1 1 auto;min-height:0;overflow-y:auto;padding:14px 18px 6px;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:var(--border,#3a3226) transparent;overscroll-behavior:contain}
+.rl-body::-webkit-scrollbar{width:7px}
+.rl-body::-webkit-scrollbar-thumb{background:var(--border,#3a3226);border-radius:4px}
+.rl-body::-webkit-scrollbar-track{background:transparent}
+
+.rl-body p{margin:0 0 11px;font-size:.9rem;line-height:1.55;color:var(--text-dim,#b8ab90)}
+.rl-body b,.rl-body strong{color:var(--text,#e8dfce);font-weight:600}
+.rl-body i,.rl-body em{color:var(--text-dim,#b8ab90)}
+.rl-body ul,.rl-body ol{margin:0 0 12px;padding-left:19px}
+.rl-body li{margin-bottom:5px;font-size:.88rem;line-height:1.5;color:var(--text-dim,#b8ab90)}
+.rl-body li::marker{color:var(--lby-accent,var(--gold,#c9a84c))}
+.rl-body code{background:rgba(255,255,255,.08);border-radius:4px;padding:0 .28em;font-size:.86em;color:var(--text,#e8dfce)}
+.rl-body hr{border:none;border-top:1px solid var(--border,#3a3226);margin:14px 0}
+
+/* The opening paragraph — brighter, so the "what is this game" line reads first. */
+.rl-lead{color:var(--text,#e8dfce)!important;font-size:.95rem!important;line-height:1.55}
+/* A closing aside (player counts, bot tiers, table etiquette). */
+.rl-note{color:var(--text-muted,#6a604e)!important;font-size:.82rem!important;font-style:italic;margin:2px 0 10px!important}
+
+/* Section = an accent heading + its body. */
+.rl-sec{margin:0 0 4px}
+.rl-sec>h4{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.9rem;font-weight:700;letter-spacing:.04em;color:var(--lby-accent,var(--gold,#c9a84c));margin:16px 0 7px}
+.rl-sec:first-child>h4{margin-top:2px}
+
+/* Term/definition grid — roles, tile types, card abilities, phases. Collapses to
+   a stacked list on a narrow phone where two columns would shred the terms. */
+.rl-dl{margin:0 0 12px;display:grid;grid-template-columns:max-content 1fr;gap:6px 12px;align-items:baseline}
+.rl-dl dt{margin:0;font-size:.87rem;font-weight:600;color:var(--text,#e8dfce)}
+.rl-dl dd{margin:0;font-size:.87rem;line-height:1.45;color:var(--text-dim,#b8ab90)}
+@media(max-width:560px){
+	.rl-dl{grid-template-columns:1fr;gap:1px}
+	.rl-dl dd{margin:0 0 9px}
+}
+
+/* "At a glance" strip: players / length / how you win. */
+.rl-facts{display:flex;flex-wrap:wrap;gap:7px;margin:0 0 14px}
+.rl-fact{flex:1 1 auto;min-width:118px;border:1px solid var(--border,#3a3226);border-radius:9px;background:var(--surface2,#241d16);padding:7px 10px}
+.rl-fact-k{display:block;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.6rem;letter-spacing:.13em;text-transform:uppercase;color:var(--text-muted,#6a604e);margin-bottom:2px}
+.rl-fact-v{display:block;font-size:.84rem;line-height:1.3;color:var(--text,#e8dfce)}
+
+/* A highlighted aside inside a section (the "the thing to notice" boxes). */
+.rl-tip{border:1px solid var(--border,#3a3226);border-left:3px solid var(--lby-accent,var(--gold,#c9a84c));border-radius:8px;background:var(--surface2,#241d16);padding:9px 12px;margin:0 0 12px}
+.rl-tip p:last-child{margin-bottom:0}
+
+.rl-foot{flex:none;padding:11px 18px 14px;border-top:1px solid var(--border,#3a3226)}
+.rl-done{width:100%;padding:10px 20px;border:none;border-radius:var(--radius,8px);background:var(--lby-accent,var(--gold,#c9a84c));color:#171310;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.85rem;letter-spacing:.06em;font-weight:700;cursor:pointer;transition:filter .15s}
+.rl-done:hover{filter:brightness(1.12)}

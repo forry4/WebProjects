@@ -1,5 +1,18 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { baseCss } from "../../shared/theme.js";
+import { lobbyCss, LobbyHeader, LobbySectionHd, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
+  createModalCss, CreateModal, LobbyCreateRow, lobbyCreateRowCss,
+  RulesModal, rulesModalCss } from "../../shared/lobby.jsx";
+import WhereWolfRules from "./rules.jsx";
+import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
+
+// CSS lives in the sibling .css file(s) imported below, NOT in a JS template
+// literal. `?inline` hands us the stylesheet as a STRING, so it is still injected
+// by this component's own <style> tag only while it is mounted — behaviour is
+// unchanged. What goes away is the footgun: a single stray backtick inside a css
+// template literal silently reparsed the rest of the file as a tagged template and
+// blanked the whole page. A .css file cannot do that, and editors lint it properly.
+import _cssText from "./WhereWolf.css?inline";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -197,156 +210,21 @@ function useIsMobile() {
 }
 
 // ─── Styles (baseCss first; NEVER put a backtick inside this template) ───────
-const css = baseCss + `
-.ww{min-height:100vh;background:radial-gradient(120% 90% at 50% -10%,#241a2e 0%,#0d0b12 60%);color:var(--text)}
-.ww *,.ww *::before,.ww *::after{box-sizing:border-box}
-.ww-wrap{max-width:1000px;margin:0 auto;padding:14px 14px 40px;display:flex;flex-direction:column;gap:14px}
-.ww-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
-.ww-top-left{display:flex;align-items:center;gap:10px;min-width:0}
-.ww-title{font-family:Cinzel,serif;font-weight:700;color:var(--gold-light);letter-spacing:.5px}
-.ww-user{color:var(--text-dim);font-size:13px}
-.ww-btn{font-family:Cinzel,serif;font-size:14px;border:1px solid var(--border);background:var(--surface2);color:var(--text);
-  padding:9px 16px;border-radius:var(--radius);cursor:pointer;transition:all .15s}
-.ww-btn:hover{border-color:var(--gold);color:var(--gold-light)}
-.ww-btn.gold{background:linear-gradient(180deg,#7a3f4a,#5a2630);border-color:#9a4a58;color:#f2dcc4}
-.ww-btn.gold:hover{filter:brightness(1.12)}
-.ww-btn.sm{padding:6px 11px;font-size:12px}
-.ww-btn.ghost{background:transparent;border-color:transparent;color:var(--text-dim)}
-.ww-btn.ghost:hover{color:var(--gold-light)}
-.ww-btn:disabled{opacity:.4;cursor:not-allowed}
-.ww-input{font-family:Cinzel,serif;letter-spacing:3px;text-transform:uppercase;background:var(--surface);border:1px solid var(--border);
-  color:var(--text);padding:9px 12px;border-radius:var(--radius);width:120px;text-align:center}
-.ww-hero{text-align:center;padding:8px 0 4px}
-.ww-hero h1{font-family:Cinzel,serif;font-size:30px;color:var(--gold-light)}
-.ww-hero p{color:var(--text-dim)}
-.ww-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:center}
-.ww-section{font-family:Cinzel,serif;color:var(--gold);font-size:14px;margin-top:10px;border-bottom:1px solid var(--border);padding-bottom:4px}
-.ww-card{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--surface);border:1px solid var(--border);
-  border-radius:var(--radius);padding:10px 14px}
-.ww-card-title{font-family:Cinzel,serif}
-.ww-card-meta{color:var(--text-dim);font-size:12px}
-.ww-empty{color:var(--text-muted);text-align:center;padding:20px}
-.ww-toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#2a1c20;border:1px solid var(--gold);
-  color:var(--gold-light);padding:10px 18px;border-radius:var(--radius);z-index:50;font-size:14px}
-/* How-to-play (Rules) modal */
-.ww-modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;z-index:60;padding:16px}
-.ww-modal{background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius);padding:20px;max-width:540px;width:100%;display:flex;flex-direction:column;max-height:86vh}
-.ww-modal h3{font-family:Cinzel,serif;color:var(--gold-light);font-size:1rem;margin-bottom:8px}
-.ww-rules-body{overflow-y:auto;scrollbar-gutter:stable;padding-right:6px}
-.ww-rules-body p{color:var(--text-dim);font-size:14px;line-height:1.5;margin-bottom:10px}
-.ww-rules-lead{color:var(--text)}
-.ww-rules-note{color:var(--text-muted);font-size:12px;font-style:italic;margin-bottom:0}
-.ww-rules-body h4{font-family:Cinzel,serif;color:var(--gold);font-size:14px;margin:14px 0 6px}
-.ww-rules-body ul{margin:0 0 10px;padding-left:20px}
-.ww-rules-body li{color:var(--text-dim);font-size:13px;line-height:1.5;margin-bottom:4px}
-.ww-rules-body b{color:var(--text)}
-
-/* waiting room */
-.ww-code{font-family:Cinzel,serif;font-size:40px;letter-spacing:8px;color:var(--gold-light);text-align:center}
-.ww-players-list{display:flex;flex-direction:column;gap:6px}
-.ww-pl{display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px}
-.ww-pl .crown{color:var(--gold)}
-
-/* the table */
-.ww-table-wrap{display:flex;flex-direction:column;align-items:center;gap:8px}
-.ww-banner{min-height:30px;text-align:center;font-family:Cinzel,serif;color:var(--gold-light);font-size:16px}
-.ww-sub{text-align:center;color:var(--text-dim);font-size:13px;min-height:18px}
-.ww-table{position:relative;width:min(92vw,68vh);aspect-ratio:1;margin:4px auto}
-.ww-table.night{filter:saturate(.5) brightness(.62)}
-.ww-arrows{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3}
-.ww-seat{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:3px;z-index:2}
-.ww-seat .seat-name{font-size:11px;color:var(--text-dim);max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ww-seat.me .seat-name{color:var(--gold-light)}
-.ww-pcard{width:var(--pcw,72px);height:var(--pch,94px);border-radius:8px;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;
-  text-align:center;font-family:Cinzel,serif;font-size:var(--pcf,11px);line-height:1.1;padding:3px;overflow-wrap:anywhere;background:#1a1622;position:relative;transition:all .15s}
-.ww-pcard.back{background:repeating-linear-gradient(45deg,#241a2e,#241a2e 6px,#2c2038 6px,#2c2038 12px);color:transparent}
-.ww-pcard.back::after{content:"?";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#54486a;font-size:24px}
-.ww-pcard.clickable{cursor:pointer;border-color:var(--gold)}
-.ww-pcard.clickable:hover{box-shadow:0 0 0 2px var(--gold-light);transform:translateY(-2px)}
-.ww-pcard.selected{box-shadow:0 0 0 3px var(--gold-light)}
-.ww-pcard.revealed{box-shadow:0 0 0 3px #e0c14c}
-.ww-badge{position:absolute;top:-9px;right:-9px;background:var(--gold);color:#1a1410;border-radius:999px;min-width:20px;height:20px;
-  display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;padding:0 5px}
-.ww-lock{position:absolute;top:-9px;left:-9px;font-size:14px}
-.ww-ready{position:absolute;bottom:-8px;font-size:13px}
-
-/* center: the 3 face-down cards + the token row */
-.ww-center{position:absolute;top:42%;left:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:8px;z-index:2}
-.ww-center-cards{display:flex;gap:8px}
-.ww-ccard{width:62px;height:82px;border-radius:7px;border:2px solid var(--border);background:repeating-linear-gradient(45deg,#241a2e,#241a2e 6px,#2c2038 6px,#2c2038 12px);
-  display:flex;align-items:center;justify-content:center;text-align:center;font-family:Cinzel,serif;font-size:11px;line-height:1.1;padding:3px;overflow-wrap:anywhere;color:transparent;position:relative}
-.ww-ccard::after{content:"";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#54486a;font-size:18px}
-.ww-ccard.up{background:#1a1622;color:var(--text)}
-.ww-ccard.clickable{cursor:pointer;border-color:var(--gold)}
-.ww-ccard.clickable:hover{box-shadow:0 0 0 2px var(--gold-light)}
-.ww-ccard.selected{box-shadow:0 0 0 3px var(--gold-light)}
-.ww-tokens{display:flex;gap:5px;flex-wrap:wrap;justify-content:center;max-width:230px}
-.ww-token{width:26px;height:26px;border-radius:999px;border:1px solid #6a5a3a;background:#2a2418;color:var(--gold-light);
-  display:flex;align-items:center;justify-content:center;font-family:Cinzel,serif;font-size:11px;font-weight:700;cursor:pointer;user-select:none}
-.ww-token:hover{border-color:var(--gold);color:#fff}
-.ww-token-info{max-width:280px;margin-top:2px;text-align:center;font-family:Crimson Pro,serif;font-size:12px;line-height:1.25;
-  color:var(--text-dim);background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:5px 9px;cursor:pointer}
-
-/* action bar */
-.ww-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:center;min-height:44px}
-.ww-you{font-size:13px;color:var(--text-dim)}
-.ww-you b{color:var(--gold-light)}
-.ww-timer{font-family:Cinzel,serif;font-size:18px;color:var(--gold-light)}
-
-/* win screen */
-.ww-win{text-align:center;padding:14px}
-.ww-win h2{font-family:Cinzel,serif;font-size:30px;margin-bottom:6px}
-.ww-win.villagers h2{color:#7ed07a}
-.ww-win.wolves h2{color:#e0655a}
-.ww-win.tanner h2{color:#d6a24a}
-.ww-win.neutral h2{color:var(--gold-light)}
-.ww-dead{position:absolute;top:-9px;left:-9px;font-size:14px}
-.ww-won{color:#7ed07a;font-weight:700}
-.ww-lost{color:var(--text-muted)}
-
-/* host role picker */
-.ww-deck-status{font-family:Crimson Pro,serif;font-size:13px;margin-left:8px}
-.ww-deck-status.ok{color:#7ed07a}
-.ww-deck-status.bad{color:#d99}
-.ww-rolepick{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px 10px;margin:4px 0}
-.ww-rolepick.readonly{display:flex;flex-wrap:wrap;gap:6px}
-.ww-rolepick-row{display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:4px 8px}
-.ww-rp-name{flex:1;font-family:Cinzel,serif;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ww-rp-count{min-width:14px;text-align:center;font-family:Cinzel,serif}
-.ww-cap-btn{width:24px;height:24px;border-radius:6px;border:1px solid var(--border);background:var(--surface3);color:var(--text);cursor:pointer;font-size:15px;line-height:1}
-.ww-cap-btn:hover:not(:disabled){border-color:var(--gold);color:var(--gold-light)}
-.ww-cap-btn:disabled{opacity:.35;cursor:not-allowed}
-.ww-rp-chip{border:1px solid var(--border);border-radius:999px;padding:3px 9px;font-size:12px;font-family:Cinzel,serif}
-
-/* ── Phone: use the whole screen — the table becomes a TALL ellipse so YOU sit at
-   the very bottom and everyone else rings the edges; cards shrink (see cardVars). ── */
-@media(max-width:600px){
-  .ww-wrap{min-height:100dvh;padding:8px 6px 6px;gap:8px}
-  .ww-banner{font-size:14px;min-height:24px}
-  .ww-sub{font-size:12px;min-height:16px}
-  /* the game's table area fills the space between the sub-prompt and the action bar */
-  .ww-table-wrap{flex:1;min-height:0;width:100%;gap:4px}
-  .ww-table{width:100%;height:auto;flex:1;min-height:0;aspect-ratio:auto;margin:0}
-  /* center cluster sits a bit higher so the tall ellipse stays balanced */
-  .ww-center{top:40%;gap:5px}
-  .ww-ccard{width:50px;height:66px;font-size:10px}
-  .ww-tokens{gap:4px;max-width:96vw}
-  .ww-token{width:23px;height:23px;font-size:10px}
-  .ww-seat .seat-name{font-size:10px;max-width:64px}
-  .ww-actions{min-height:38px;gap:8px}
-}
-`;
+const css = baseCss + lobbyCss + _cssText + gameMenuCss + createModalCss + lobbyCreateRowCss + rulesModalCss;
 
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function WhereWolf({ myId, authUser, onExit }) {
   const [screen, setScreen] = useState("lobby");      // lobby | waiting | game
   const [roomId, setRoomId] = useState("");
   const [roomData, setRoomData] = useState(null);
-  const [openGames, setOpenGames] = useState([]);
-  const [myGames, setMyGames] = useState([]);
-  const [joinCode, setJoinCode] = useState("");
+  const [openGames, setOpenGames] = useState(() => readLobbyCache("ww", myId, "open", []));
+  const [myGames, setMyGames] = useState(() => readLobbyCache("ww", myId, "mine", []));
   const [showRules, setShowRules] = useState(false);  // lobby "How to Play" modal
+  const [showCreateModal, setShowCreateModal] = useState(false);  // New Game confirm modal
   const [toast, setToast] = useState("");
+  // room connect in flight (create / join / deep-link resume) — show the spinner
+  // instead of the lobby while it is, so a reconnect doesn't flash the lobby.
+  const [connecting, setConnecting] = useState(false);
 
   // narration
   const [caption, setCaption] = useState("");
@@ -388,8 +266,17 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   const overRef = useRef(false);
   overRef.current = phase === "over";
 
+  // ── URL routing (segment 2 = room id; the shell owns segment 1 = "/werewolf") ──
+  const screenRef = useRef(screen);
+  screenRef.current = screen;
+  const roomIdRef = useRef(roomId);
+  roomIdRef.current = roomId;
+  const didInitRef = useRef(false);       // StrictMode double-mount guard for the deep-entry effect
+  const popHandlerRef = useRef(() => {}); // fresh-closure mirror for the mount-once popstate effect
+
   // ── socket ──
   const handleMessage = useCallback((msg) => {
+    setConnecting(false);        // any authoritative reply ends the connect loader
     if (msg.type === "error") {
       const m = msg.message || "error";
       const at = attemptRef.current;
@@ -413,6 +300,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
         if (at.kind === "join" || at.kind === "resume") setToast("That game is no longer available");
         attemptRef.current = { kind: null, rid: null, retried: false };
         setScreen("lobby");   // the lobby effect refreshes the games list
+        replacePath(buildPath("werewolf"));   // strip a dead room URL (dedup no-op otherwise)
         return;
       }
       setToast(m);
@@ -438,39 +326,78 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     setRoomData(room);
     const inGame = room.status === "playing" || room.status === "over";
     if (msg.type === "created" || msg.type === "joined" || msg.type === "reconnected") {
+      // Entering the room gives it its URL (server-confirmed, never at click time;
+      // waiting + game share it and pushPath's dedup makes repeats no-ops).
+      if (rid) pushPath(buildPath("werewolf", rid));
       setScreen(inGame ? "game" : "waiting");
     } else if (msg.type === "room_update") {
       setScreen(inGame ? "game" : "waiting");
     }
-  }, [myId, roomId]);
+  }, [myId, roomId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { connected, connect, send, disconnect } = useSocket(handleMessage);
 
   const fetchGames = useCallback(() => {
-    fetch(`${WW_HTTP}/games`).then((r) => r.json()).then((d) => setOpenGames(d.games || [])).catch(() => {});
+    fetch(`${WW_HTTP}/games`).then((r) => r.json()).then((d) => { const g = d.games || []; setOpenGames(g); writeLobbyCache("ww", myId, "open", g); }).catch(() => {});
     if (authUser && !authUser.guest && authUser.session_token) {
       fetch(`${WW_HTTP}/games/mine`, { headers: { Authorization: `Bearer ${authUser.session_token}` } })
-        .then((r) => r.json()).then((d) => setMyGames(d.games || [])).catch(() => {});
+        .then((r) => r.json()).then((d) => { const g = d.games || []; setMyGames(g); writeLobbyCache("ww", myId, "mine", g); }).catch(() => {});
     }
-  }, [authUser]);
+  }, [authUser, myId]);
 
   useEffect(() => { if (screen === "lobby") fetchGames(); }, [screen, fetchGames]);
 
-  // auto-resume a saved room on mount
+  // Mount: do NOT auto-resume a saved game — it snapped you from the lobby into the game
+  // on load (jarring). Resume is EXPLICIT via the lobby's Rejoin button. Keep only the
+  // disconnect cleanup so an explicit connection tears down on unmount. (A room id IN THE
+  // URL is different — that's an explicit destination; see the deep-entry effect below.)
   useEffect(() => {
-    try {
-      const rid = localStorage.getItem("werewolf_roomId");
-      const tok = rid ? localStorage.getItem(`werewolf_token_${rid}_${myId}`) : null;
-      if (rid && tok) {
-        setRoomId(rid);
-        attemptRef.current = { kind: "auto", rid, retried: true };   // silent on failure
-        connect(`${WW_WS}/${rid}/${myId}`, { action: "reconnect", token: tok });
-      }
-    } catch {}
     return () => disconnect();
   }, []); // eslint-disable-line
 
+  // ── URL deep entry + popstate (this component owns "/werewolf/<ROOMID>") ──
+  // Mount with a room in the URL → the EXISTING resume semantics (saved token →
+  // reconnect, else join — the invite-link behavior; the stale-error branch above
+  // handles failures with a toast + lobby + URL cleanup). Plain /werewolf mounts at
+  // the lobby exactly as before.
+  useEffect(() => {
+    if (didInitRef.current) return;
+    didInitRef.current = true;
+    const r = parsePath();
+    if (r.game === "werewolf" && r.room) resume(r.room);
+  }, []); // eslint-disable-line
+  // Back/Forward while mounted: only our own segment 2 — mode changes unmount us via
+  // the shell. Routed through a ref so the mount-once subscription never goes stale.
+  popHandlerRef.current = (r) => {
+    if (r.game !== "werewolf") return;
+    // NB leaveToLobby keeps roomId (WW leave keeps membership), so "same id" is not
+    // "already there" — re-enter whenever we're sitting in the lobby.
+    if (r.room && (r.room !== roomIdRef.current || screenRef.current === "lobby")) {
+      resume(r.room);
+    } else if (!r.room) {
+      if (screenRef.current === "game" || screenRef.current === "waiting") {
+        leaveToLobby();   // WW leave keeps membership; its pushPath dedups after a pop
+      } else if (attemptRef.current.kind) {
+        // Popping back during a still-connecting attempt: kill it, or the late
+        // "reconnected"/"joined" would push the room URL right back.
+        attemptRef.current = { kind: null, rid: null, retried: false };
+        leaveToLobby();
+      }
+    }
+  };
+  useEffect(() => subscribe((r) => popHandlerRef.current(r)), []); // eslint-disable-line
+
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 2400); return () => clearTimeout(t); } }, [toast]);
+
+  // a connect that never answers must not leave the spinner up forever
+  useEffect(() => {
+    if (!connecting) return;
+    const t = setTimeout(() => {
+      setConnecting(false);
+      setToast("Still connecting — the server may be waking up. Try again in a moment.");
+    }, 15000);
+    return () => clearTimeout(t);
+  }, [connecting]);
   // clear transient selection when the step changes
   useEffect(() => { setCenterSel([]); setTmSel([]); }, [step, phase]);
 
@@ -511,6 +438,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     setRoomId(rid);
     try { localStorage.setItem("werewolf_roomId", rid); } catch {}
     attemptRef.current = { kind: "create", rid, retried: true };
+    setConnecting(true);
     connect(`${WW_WS}/${rid}/${myId}`, { action: "create", name: playerName });
   };
   const startJoin = (rid) => {
@@ -519,6 +447,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     setRoomId(rid);
     try { localStorage.setItem("werewolf_roomId", rid); } catch {}
     attemptRef.current = { kind: "join", rid, retried: false };
+    setConnecting(true);
     connect(`${WW_WS}/${rid}/${myId}`, { action: "join", name: playerName, session_token: authUser?.session_token });
   };
   const resume = (rid) => {
@@ -526,6 +455,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     setRoomId(rid);
     try { localStorage.setItem("werewolf_roomId", rid); } catch {}
     attemptRef.current = { kind: tok ? "resume" : "join", rid, retried: false };
+    setConnecting(true);
     connect(`${WW_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName, session_token: authUser?.session_token });
   };
   // Step out to the lobby but STAY a member of the room (socket only drops): the
@@ -533,6 +463,8 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   // bring you right back. Use Cancel (host) to actually dispose of an open game.
   const leaveToLobby = () => {
     disconnect();
+    setConnecting(false);
+    pushPath(buildPath("werewolf"));   // leave the room URL (dedup no-op when popstate-driven)
     setRoomData(null); setCaption(""); setScreen("lobby"); fetchGames();
   };
   // Force a fresh connection to the current room (manual recovery from a drop).
@@ -601,132 +533,119 @@ export default function WhereWolf({ myId, authUser, onExit }) {
       if (pid === myId) return;
       mv({ type: "robber_swap", target: pid });
     } else if (step === "troublemaker" && myDealt === "troublemaker" && !acted.troublemaker) {
-      setTmSel((sel) => {
-        const next = sel.includes(pid) ? sel.filter((x) => x !== pid) : [...sel, pid];
-        if (next.length === 2) { mv({ type: "troublemaker_swap", a: next[0], b: next[1] }); return []; }
-        return next;
-      });
+      // Compute from current state, then send OUTSIDE the updater — a setState updater must be
+      // pure; a send() inside it can double-fire under StrictMode / a concurrent re-render.
+      const next = tmSel.includes(pid) ? tmSel.filter((x) => x !== pid) : [...tmSel, pid];
+      if (next.length === 2) { setTmSel([]); mv({ type: "troublemaker_swap", a: next[0], b: next[1] }); }
+      else { setTmSel(next); }
     }
   };
   const clickCenter = (idx) => {
     if (phase !== "night") return;
     if (step === "seer" && myDealt === "seer" && !acted.seer) {
-      setCenterSel((sel) => {
-        const next = sel.includes(idx) ? sel.filter((x) => x !== idx) : [...sel, idx];
-        if (next.length === 2) { mv({ type: "seer_peek_center", indices: next }); return []; }
-        return next;
-      });
+      // Compute from current state, then send OUTSIDE the updater (updaters must be pure).
+      const next = centerSel.includes(idx) ? centerSel.filter((x) => x !== idx) : [...centerSel, idx];
+      if (next.length === 2) { setCenterSel([]); mv({ type: "seer_peek_center", indices: next }); }
+      else { setCenterSel(next); }
       return;
     }
     if (step === "drunk" && myDealt === "drunk" && !acted.drunk) { mv({ type: "drunk_swap", center_index: idx }); return; }
     if (loneWolfActive) { mv({ type: "wolf_peek_center", index: idx }); return; }
   };
 
+  // Rules modal — defined once and rendered in the lobby AND the in-game options menu,
+  // so "How to Play" is reachable during a game too.
+  const wwRulesModal = showRules && (
+    <RulesModal title="How to play — Where Wolf?" onClose={() => setShowRules(false)}>
+      <WhereWolfRules />
+    </RulesModal>
+  );
+
   // ─── Lobby ─────────────────────────────────────────────────────────────────
+  // connecting to a room while still on the lobby → spinner, not a lobby flash (CoC)
+  if (connecting && screen === "lobby") {
+    return (
+      <div className="ww" style={{ "--lby-accent": "#6f86d6" }}><style>{css}</style>
+        <LobbyLoading label="Connecting…" />
+      </div>
+    );
+  }
   if (screen === "lobby") {
     const savedId = (() => { try { return localStorage.getItem("werewolf_roomId"); } catch { return null; } })();
     const savedTok = savedId ? (() => { try { return localStorage.getItem(`werewolf_token_${savedId}_${myId}`); } catch { return null; } })() : null;
     return (
-      <div className="ww"><style>{css}</style>
+      <div className="ww" style={{ "--lby-accent": "#6f86d6" }}><style>{css}</style>
+        <LobbyHeader
+          onBack={onExit}
+          title="Where Wolf"
+          user={<span className="lby-head-name">{playerName}</span>}
+        />
         <div className="ww-wrap">
-          <div className="ww-top">
-            <div className="ww-top-left">
-              <button className="ww-btn ghost sm" onClick={onExit}>← Back</button>
-              <button className="ww-btn ghost sm" onClick={() => setShowRules(true)}>📖 Rules</button>
-              <span className="ww-title">Where Wolf?</span>
-            </div>
-            <span className="ww-user">{playerName}</span>
-          </div>
-          <div className="ww-hero">
-            <h1>Where Wolf?</h1>
-            <p>A night of deception. One of you is not who they seem.</p>
-            <p className="ww-card-meta">3–10 players · one device each</p>
-          </div>
+          <LobbyCreateRow
+            onCreate={() => setShowCreateModal(true)}
+            onJoin={(code) => startJoin(code)}
+            onRefresh={fetchGames}
+            onRules={() => setShowRules(true)}
+            codeMaxLength={4} />
 
-          <div className="ww-row">
-            <button className="ww-btn gold" onClick={startCreate}>+ New Game</button>
-            <input className="ww-input" placeholder="CODE" value={joinCode} maxLength={4}
-              onChange={(e) => setJoinCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && startJoin(joinCode)} />
-            <button className="ww-btn" onClick={() => startJoin(joinCode)}>Join</button>
-            <button className="ww-btn ghost sm" onClick={fetchGames}>↻</button>
-          </div>
-
-          {savedId && savedTok && !myGames.some((g) => g.id === savedId) && (
-            <>
-              <div className="ww-section">Resume</div>
-              <div className="ww-card">
-                <div><div className="ww-card-title">Game in progress</div><div className="ww-card-meta">{savedId}</div></div>
-                <button className="ww-btn gold sm" onClick={() => resume(savedId)}>Resume</button>
+          {showCreateModal && (
+            <CreateModal title="New Game" onClose={() => setShowCreateModal(false)}>
+              <div className="cm-info">
+                <span className="cm-info-line">3–10 players, one device each</span>
+                <span className="cm-info-line">Friends join from the lobby or your room code</span>
+                <span className="cm-info-line">You'll pick the roles together in the waiting room once everyone's in</span>
               </div>
-            </>
+              <div className="cm-footer">
+                <button type="button" className="cm-create"
+                  onClick={() => { setShowCreateModal(false); startCreate(); }}>
+                  Create Room
+                </button>
+              </div>
+            </CreateModal>
           )}
 
-          {myGames.length > 0 && (
-            <>
-              <div className="ww-section">Your Games</div>
-              {myGames.map((g) => (
-                <div className="ww-card" key={g.id}>
-                  <div><div className="ww-card-title">{g.status === "open" ? "Waiting room" : "In progress"}</div>
-                    <div className="ww-card-meta">{g.id} · {g.players} player{g.players === 1 ? "" : "s"}{g.you_are_host ? " · host" : ""}</div></div>
-                  <div className="ww-row" style={{ gap: 6 }}>
+          {savedId && savedTok && !myGames.some((g) => g.id === savedId) && (
+            <div className="lby-card">
+              <div className="lby-card-info"><div className="lby-card-title">Game in progress</div><div className="lby-card-meta">{savedId} · resume to rejoin</div></div>
+              <div className="lby-card-actions"><button className="ww-btn gold sm" onClick={() => resume(savedId)}>Resume</button></div>
+            </div>
+          )}
+
+          <div className="ww-lobby-grid">
+            <div className="ww-lobby-col">
+              <LobbySectionHd title="Open Games" note={openGames.length ? `${openGames.length} waiting` : "3–10 players"} />
+              {openGames.length === 0 ? (
+                <div className="lby-empty">No open games. Start one!</div>
+              ) : <div className="lby-list">{openGames.map((g) => (
+                <div className="lby-card" key={g.id}>
+                  <div className="lby-card-info"><div className="lby-card-title">{g.host_name || "Game"}</div>
+                    <div className="lby-card-meta">{g.id} · {g.players} player{g.players === 1 ? "" : "s"}</div></div>
+                  <div className="lby-card-actions">
+                    {g.host_id === myId
+                      ? <button className="ww-btn ghost sm" onClick={() => handleCancel(g.id)}>Cancel</button>
+                      : <button className="ww-btn sm" onClick={() => startJoin(g.id)}>Join</button>}
+                  </div>
+                </div>
+              ))}</div>}
+            </div>
+            <div className="ww-lobby-col">
+              <LobbySectionHd title="Your Games" note={myGames.length ? `${myGames.length} active` : null} />
+              {myGames.length === 0 ? (
+                <div className="lby-empty">No games yet — create or join one.</div>
+              ) : <div className="lby-list">{myGames.map((g) => (
+                <div className="lby-card" key={g.id}>
+                  <div className="lby-card-info"><div className="lby-card-title">{g.status === "open" ? "Waiting room" : "In progress"}</div>
+                    <div className="lby-card-meta">{g.id} · {g.players} player{g.players === 1 ? "" : "s"}{g.you_are_host ? " · host" : ""}</div></div>
+                  <div className="lby-card-actions">
                     <button className="ww-btn gold sm" onClick={() => resume(g.id)}>Rejoin</button>
                     {g.you_are_host && g.status === "open" && <button className="ww-btn ghost sm" onClick={() => handleCancel(g.id)}>Cancel</button>}
                   </div>
                 </div>
-              ))}
-            </>
-          )}
-
-          {openGames.length > 0 && (
-            <>
-              <div className="ww-section">Open Games</div>
-              {openGames.map((g) => (
-                <div className="ww-card" key={g.id}>
-                  <div><div className="ww-card-title">{g.host_name || "Game"}</div>
-                    <div className="ww-card-meta">{g.id} · {g.players} player{g.players === 1 ? "" : "s"}</div></div>
-                  {g.host_id === myId
-                    ? <button className="ww-btn ghost sm" onClick={() => handleCancel(g.id)}>Cancel</button>
-                    : <button className="ww-btn sm" onClick={() => startJoin(g.id)}>Join</button>}
-                </div>
-              ))}
-            </>
-          )}
-        </div>
-        {showRules && (
-          <div className="ww-modal-bg" onClick={() => setShowRules(false)}>
-            <div className="ww-modal" onClick={(e) => e.stopPropagation()}>
-              <h3>📖 How to Play — Where Wolf?</h3>
-              <div className="ww-rules-body">
-                <p className="ww-rules-lead">A fast game of secret roles and lying to your friends. Everyone gets a hidden role; the werewolves want to survive, the village wants to sniff them out. <b>3–10 players, one device each.</b></p>
-                <h4>Setup</h4>
-                <ul>
-                  <li>The host picks a deck of <b>players + 3</b> role cards. Each player is secretly dealt one; the extra <b>3 sit face-down in the center</b>.</li>
-                  <li>The role you're <b>dealt</b> is the one you act as during the night — even if your card changes later.</li>
-                </ul>
-                <h4>Night</h4>
-                <ul>
-                  <li>Roles wake in a set order and act: werewolves see each other, the <b>seer</b> peeks a card, the <b>robber</b> steals a role, the <b>troublemaker</b> swaps two other players, the <b>drunk</b> blind-swaps with the center, and more.</li>
-                  <li>Swaps move the <b>card in front of you</b> — so you may end the night as a role you don't know about.</li>
-                </ul>
-                <h4>Day &amp; the vote</h4>
-                <ul>
-                  <li>Everyone discusses (there's a timer) and argues about who the werewolves are.</li>
-                  <li>On the signal, all players vote at once. The player(s) with the <b>most votes die</b> — a tie kills everyone tied; if no one gets 2+ votes, nobody dies. A dead <b>hunter</b> also takes down whoever they voted for.</li>
-                </ul>
-                <h4>Who wins</h4>
-                <ul>
-                  <li><b>Village</b> wins if at least one <b>werewolf</b> card dies.</li>
-                  <li><b>Werewolves</b> win if a werewolf is in play and none of them die (the <b>minion</b> wins with them).</li>
-                  <li>The <b>tanner</b> wins only by dying — and their death blocks a werewolf win.</li>
-                </ul>
-                <p className="ww-rules-note">Your final card at dawn decides your team, so pay attention to what moved in the night.</p>
-              </div>
-              <div className="ww-row" style={{ justifyContent: "flex-end", marginTop: 6 }}>
-                <button className="ww-btn gold" onClick={() => setShowRules(false)}>Got it</button>
-              </div>
+              ))}</div>}
             </div>
           </div>
-        )}
+        </div>
+        {wwRulesModal}
         {toast && <div className="ww-toast">{toast}</div>}
       </div>
     );
@@ -748,11 +667,11 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     const selected = curDeck.length;
     const deckOk = selected === need;
     return (
-      <div className="ww"><style>{css}</style>
+      <div className="ww" style={{ "--lby-accent": "#6f86d6" }}><style>{css}</style>
         <div className="ww-wrap">
           <div className="ww-top">
-            <div className="ww-top-left"><button className="ww-btn ghost sm" onClick={leaveToLobby}>← Leave</button>
-              <span className="ww-title">Where Wolf?</span></div>
+            <div className="ww-top-left"><GameMenu items={[{ label: "Return to menu", icon: "←", onClick: leaveToLobby }, { label: "View rules", icon: "📖", onClick: () => setShowRules(true) }]} />
+              <span className="ww-title">Where Wolf</span></div>
             <div className="ww-row" style={{ gap: 8 }}>
               {!connected && <button className="ww-btn sm" onClick={() => reconnectNow()} title="Reconnect">⟳ Reconnecting…</button>}
               <span className="ww-user">{playerName}</span>
@@ -813,6 +732,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
                   {!enough ? `Need ${roomData?.min_players || 3}+ players` : !deckOk ? `Deck ${selected}/${need}` : "Deal & Start"}</button>
               : <span className="ww-card-meta">Waiting for the host to start…</span>}
           </div>
+          {wwRulesModal}
           {toast && <div className="ww-toast">{toast}</div>}
         </div>
       </div>
@@ -905,11 +825,11 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   }).filter(Boolean);
 
   return (
-    <div className="ww"><style>{css}</style>
+    <div className="ww" style={{ "--lby-accent": "#6f86d6" }}><style>{css}</style>
       <div className="ww-wrap">
         <div className="ww-top">
-          <div className="ww-top-left"><button className="ww-btn ghost sm" onClick={leaveToLobby}>← Leave</button>
-            <span className="ww-title">Where Wolf?</span></div>
+          <div className="ww-top-left"><GameMenu items={[{ label: "Return to menu", icon: "←", onClick: leaveToLobby }, { label: "View rules", icon: "📖", onClick: () => setShowRules(true) }]} />
+            <span className="ww-title">Where Wolf</span></div>
           <div className="ww-row" style={{ gap: 8 }}>
             {!connected && <button className="ww-btn sm" onClick={() => reconnectNow()} title="Reconnect">⟳ Reconnecting…</button>}
             <button className="ww-btn ghost sm" title="Narration voice" onClick={toggleNarrate}>{effNarrate ? "🔊" : "🔇"}</button>
@@ -1010,6 +930,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
             </div>
           </div>
         )}
+        {wwRulesModal}
         {toast && <div className="ww-toast">{toast}</div>}
       </div>
     </div>

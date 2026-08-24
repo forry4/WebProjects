@@ -4,5 +4,6 @@ uvicorn[standard]
 pydantic
 websockets
 pytest
+pytest-xdist        # the suite runs `-n auto` by default (pytest.ini addopts) — NOT optional
 numpy
 libsql              # Turso/libSQL client for persistent prod DB (imported only when TURSO_DATABASE_URL is set)

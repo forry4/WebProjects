@@ -1,0 +1,34 @@
+//! Castles of Crimson search core. Module layout mirrors spender-core:
+//! generated static tables (boards_gen) + tile data (tiles) + compact engine (engine) +
+//! fixed action space (actions) + heuristic scaffold (heuristic) + PUCT (mcts) +
+//! search drivers (vsearch) + nets (valuenet/attn) + wasm entries (wasm).
+
+pub mod boards_gen;
+pub mod rng;
+pub mod tiles;
+pub mod valuenet;
+
+pub mod actions;
+// Offline-play serialization (full-fidelity save + render dict + ledger). Serde-backed,
+// so native builds get them only with the `bridge` feature (same gate as pxio).
+#[cfg(any(feature = "bridge", target_arch = "wasm32"))]
+pub mod dump;
+#[cfg(any(feature = "bridge", target_arch = "wasm32"))]
+pub mod gamedict;
+pub mod attn;
+pub mod batch;
+pub mod engine;
+pub mod feats;
+pub mod heuristic;
+pub mod mcts;
+pub mod netio;
+pub mod proj;
+pub mod tokfeats;
+pub mod pxio;
+pub mod vsearch;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod gpueval;
+
+#[cfg(target_arch = "wasm32")]
+pub mod wasm;

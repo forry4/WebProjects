@@ -1,0 +1,2570 @@
+/* Dissonance — layout on top of shared/theme.js tokens.
+   Mobile @media blocks come BEFORE the base rules in this file, so every
+   mobile override is .dis-prefixed to out-specify the later base rule. */
+
+/* Every other game hands the shared lobby its own accent; without one the kit
+   falls back to Spender's gold, so Dissonance's lobby was wearing another game's
+   colour while its board wore this green.
+
+   `--accent` IS DEFINED HERE BECAUSE NOTHING ELSE DEFINES IT. It is not a theme
+   token — `shared/theme.base-css.css` ships --gold/--text/--surface and no
+   accent at all, and the only `--accent:` anywhere else is scoped to Spender's
+   home cards. This sheet referenced `var(--accent)` in eight places from the day
+   it shipped, and every one of them was dead.
+
+   That failed SILENTLY, which is why it lasted: `var()` with no fallback makes
+   the whole declaration invalid at computed-value time, so `background:
+   var(--accent)` dropped to transparent and left the paired `color: #08131f`
+   as near-black text on a dark button — a selected bid you cannot read, in
+   BOTH auction modes. The outline rules lost their outline entirely. Anything
+   added here that reaches for a token must either be defined on this rule or
+   carry a `var(--x, fallback)`; `shared/tests/test_css_tokens.py` enforces it. */
+.dis {
+  min-height: 100vh; color: var(--text);
+  background: var(--bg, #0f0e0c);
+  --accent: #6fe0a0;
+  /* Lifted accent for hover, and the near-black that goes ON the accent. Both
+     were written as literals in eight places between them; naming them is what
+     lets the go button, the bid toggles and the announcement outline agree by
+     construction rather than by everyone remembering the same two hex codes. */
+  --accent-hi: #8bebb5;
+  --ink: #08131f;
+  --lby-accent: var(--accent);
+}
+
+/* THE LOBBY STANDS ON THE GAME'S OWN GROUND — a wide, very low green wash from
+   the top and a floor glow, so three short lists do not read as content dropped
+   into a void.
+
+   IT IS A PINNED LAYER, NOT `background-attachment: fixed` ON `.dis`. The
+   fixed attachment did exactly what it says — the ground stayed put while the
+   page scrolled — but it takes the element's background out of its own layer,
+   so every hover, focus and re-render on top of it repaints the whole viewport
+   against a fixed image. That is what made the lobby's Create/Resume buttons
+   and the board's Back to lobby BLINK (reported from the live site, not a
+   theory). A fixed pseudo-element composites on its own layer and costs
+   nothing to paint over. `z-index: 0` on the element is what keeps this
+   `-1` layer above the page and behind the content. */
+.dis { position: relative; z-index: 0; isolation: isolate; }
+/* NOTHING ON THE BOARD IS SELECTABLE. Dragging across a hand used to paint
+   half the table blue and leave a caret behind — on a phone a long-press on a
+   card raised the selection handles and the copy callout instead of playing
+   it. This is a game surface, not a document. `-webkit-` for iOS Safari,
+   which still needs the prefix, and `-webkit-touch-callout` for the long-press
+   menu specifically.
+   INPUTS ARE EXEMPT and must stay so: the lobby's room-code field is typed
+   into and pasted into, and a field you cannot select text in is broken. */
+.dis {
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+.dis input, .dis textarea, .dis [contenteditable] {
+  user-select: text; -webkit-user-select: text;
+}
+.dis::before {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(120% 60% at 50% -8%, rgba(60, 160, 110, 0.16), rgba(60, 160, 110, 0) 62%),
+    radial-gradient(90% 45% at 50% 108%, rgba(40, 120, 84, 0.10), rgba(40, 120, 84, 0) 70%);
+}
+
+/* THE LOBBY'S PRIMARY ACTION IS THE GREEN TOO. The shared kit's primary is
+   `btn-gold` — Spender's colour, arriving here through the same fallback that
+   once dressed this whole lobby in the wrong accent. Dissonance already sets
+   `--lby-accent` green, so section titles, hover borders and the phone tabs
+   were green while Create / Join / Resume stayed gold: two primaries on one
+   screen. Same treatment as the board's go button, so the lobby and the table
+   agree about what an action looks like. Scoped to `.dis`, and the game screen
+   has no `btn-gold` at all (it uses `.dis-gobtn`). */
+/* A GRADIENT NEVER SWAPS FOR A FLAT COLOUR ON HOVER — that is the blink.
+   The shared kit puts `transition: all .15s` on `.btn`, and a
+   `linear-gradient()` and a solid colour are not interpolable: the browser
+   cannot tween them, so the first hover re-rasterizes the whole face and the
+   button flashes (reported on Next round, Create game and Resume). Every
+   green button here keeps ONE background for its whole life and brightens
+   with `filter`, which composites on the existing layer and animates
+   properly. The transition is named rather than `all`, so nothing else can
+   quietly join it later. */
+.dis .btn-gold, .dis .lby-cta, .dis-gobtn {
+  transition: filter 0.13s ease, box-shadow 0.13s ease, transform 0.08s ease;
+}
+.dis .btn-gold { background: linear-gradient(180deg, var(--accent-hi), var(--accent) 55%); color: var(--ink); }
+.dis .btn-gold:hover:not(:disabled) { filter: brightness(1.09); }
+/* The CREATE ROW hardcodes `var(--gold)` rather than reading `--lby-accent`
+   like the rest of the kit, so Create / Join-by-code / the code field's focus
+   ring stayed gold on a green screen. Overridden here rather than in the
+   shared sheet: the token fix belongs there, but it would repaint five other
+   lobbies that nobody has looked at in this pass. */
+.dis .lby-cta {
+  background: linear-gradient(180deg, var(--accent-hi), var(--accent) 55%); color: var(--ink);
+}
+.dis .lby-cta:hover:not(:disabled) { filter: brightness(1.09); }
+.dis .lby-join-btn { color: var(--accent); border-color: var(--accent); }
+.dis .lby-join-btn:hover { background: var(--accent); color: var(--ink); }
+.dis .lby-code:focus { border-color: var(--accent); }
+
+/* THE PRIMARY ACTION, and the reason it needs a class at all.
+   `.btn` in the shared kit is GEOMETRY ONLY — padding, radius, font, and
+   `border:none`. It sets no background and no colour, because every game is
+   expected to name a variant (`btn-gold`, `btn-outline`, `btn-ghost`). This
+   file had NINE bare `className="btn"` buttons and was the only file in the
+   repo that did, so Bid / Start / Swap / Look / Next round / Back to lobby all
+   fell through to the browser's default button face: `rgba(239,239,239,.3)`
+   on `rgba(16,16,16,.3)` — a white chip with grey text, on a dark green board.
+   Measured in a browser, not guessed.
+   Gold was the wrong fix even though it is the kit's primary: the lobby, the
+   board, the selected bid and the turn badge are all this green, and gold is
+   Spender's colour arriving through the same fallback that already dressed
+   this game's lobby in the wrong accent once. */
+/* The go button is a pressed-metal key: lit top edge, real weight under it. */
+.dis-gobtn {
+  background: linear-gradient(180deg, var(--accent-hi, #5ec78f), var(--accent) 55%);
+  color: var(--ink);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 2px 8px rgba(0, 0, 0, 0.30);
+}
+.dis-gobtn:hover:not(:disabled) { filter: brightness(1.09); }
+.dis-gobtn:active:not(:disabled) {
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.25); transform: translateY(1px);
+}
+
+/* ── mobile overrides (must precede the base rules; see above) ───────────── */
+@media (max-width: 760px) {
+  /* Fill the phone. The table sized itself to its CONTENT, so a 13-trick game
+     with short hands left a third of the screen dead black below the board.
+     Growing it to the viewport and spacing the rows apart puts the opponent at
+     the top, the trick in the middle and your hand at the thumb — which is
+     where a card table wants them anyway.
+     The subtraction is the header, and it is ONE token now — `--dis-hdr`,
+     MEASURED at 61px on a 390x844 phone with the fonts loaded, not the 72px
+     that was estimated from its parts. The 11px difference is real: the board
+     stopped 11px short of the bottom of the screen and the gap read as the
+     board not reaching the fold. Two places used the estimate and they must
+     agree, so they take the token. `dvh` so the iOS URL bar collapsing does
+     not leave a gap; the `vh` line is the fallback for anything without dvh. */
+  .dis { --dis-hdr: 61px; }
+  .dis .dis-table {
+    gap: 0.5rem; padding: 0.5rem;
+    min-height: calc(100vh - var(--dis-hdr));
+    min-height: calc(100dvh - var(--dis-hdr) - env(safe-area-inset-top, 0px));
+    justify-content: space-between;
+  }
+  /* During play the slack must not fall BETWEEN the trick and its caption
+     (counter, chip, turn bar) — space-between paid the free height into
+     every gap equally, so "Your lead" floated a whole screen-third above
+     the chip that explains it. Auto margins on the group's outer edges pay
+     the slack above the trick and below the caption instead: opponent at
+     the top, your hand at the thumb, the trick + caption one cluster in
+     the middle. */
+  .dis .dis-table.ph-play, .dis .dis-table.ph-over {
+    justify-content: flex-start;
+  }
+  .dis .dis-table.ph-play > .dis-trick, .dis .dis-table.ph-over > .dis-trick {
+    margin-top: auto;
+  }
+  .dis .dis-table.ph-play > .dis-playside, .dis .dis-table.ph-over > .dis-playside {
+    margin-bottom: auto;
+  }
+  .dis .dis-card { --cw: 42px; font-size: 0.78rem; }
+  .dis .dis-hand { gap: 0.18rem; }
+  /* THE HAND FANS AGAIN (2026-08-12) — and the rule that removed the fan was
+     right at the time, which is why this says what changed rather than just
+     reversing it. The old objection: a card tucked under the next one loses
+     its index, because the index lives in the TOP-RIGHT corner. Cards now
+     carry a MIRRORED index at the bottom-LEFT as well (the second corner a
+     real playing card has), so a left-tucking fan covers the top-right index
+     of every card but the last while every card keeps a readable corner —
+     which is the arrangement a fanned hand has always relied on.
+     WHAT IT BUYS is vertical, not horizontal. The phone board is WIDTH-bound:
+     seven slots across 390px cap the card at ~52px while the height budget
+     allows ~73px, so the surplus height became a ~280px dead band in the
+     middle of the table. Fanning narrows each card's FOOTPRINT, so
+     `--dis-slots` can drop with it and the card grows into slack that was
+     empty. The two numbers are a PAIR and must be solved together: a hand is
+     `cw + 6 x (cw x (1 - overlap) + gap)` wide, so `--dis-slots` is
+     `7 - 6 x overlap` and nothing else.
+
+     THE OVERLAP IS 42% (2026-08-13), up from 30%, because the ROW is what is
+     fixed and the strip is what pays: seven cards fill the phone's width
+     either way, so `row = 6 x strip + cw` — a bigger card is exactly a
+     narrower visible strip, and the only floor that matters is the 44px touch
+     target. At 30% the strip measured 51px on a 390px phone, i.e. 7px of
+     slack nobody was using; 42% spends it, taking the card 66 → 76px (+15%)
+     with the strip still ~50. The last card is whole either way. */
+  /* 7 - 6 x 0.42 = 4.48, PLUS a little: the slot term divides the TABLE's
+     width while the row is laid out inside the hand's, which is narrower by
+     the seat's padding. The old pair carried the same 0.15 of margin for the
+     same reason, and it is load-bearing -- at exactly 4.48 the row came out
+     ~10px wider than the box and the hand WRAPPED, which on a phone is three
+     cards on a second line rather than a fan. */
+  .dis .dis-table { --dis-slots: 4.7; }
+  /* A QUARTET SEAT MUST NOT BE SQUASHED. The phone table is a flex column and
+     a seat's default `flex-shrink: 1` lets the result panel compress it: at
+     the round end, measured at 390x844, all four seats collapsed to 15-25px
+     while the three kept cards -- 63px tall -- carried on drawing straight
+     through the bottom of their own box.
+     `.dis-game .dis-table > .dis-seat` already does this on the DESKTOP board;
+     there is no phone equivalent, and quartet is the mode that needs one
+     because it has four seats to squash instead of two. Scoped to `.dis-4seat`
+     rather than fixed globally: the other modes may well have the same latent
+     behaviour at the round end, but changing their layout is a measurement
+     nobody has taken. */
+  /* REVERTED `min-height: fit-content` here: it let the seats grow enough to
+     cover one another, and a covered card stops being clickable -- the whole
+     board went dead and the render gate sat out a 5s actionability timeout on
+     every attempt. `flex` alone is what stays. */
+  .dis .dis-table.dis-4seat > .dis-seat { flex: 0 0 auto; }
+  /* QUARTET FANS HARDER ON A PHONE, and the four extra classes are deliberate:
+     this block sits BEFORE the base rules, so a base-specificity override here
+     would lose to the `.dis-4seat` fan further down the file.
+     Twelve cards across a phone's hand box is the tightest row on any board in
+     this game. At the shared 42% they came out just wider than the box, wrapped
+     to a second line, and the second line drew straight OUTSIDE the seat --
+     measured as twelve cards escaping their seat at 390x844. 55% keeps the row
+     whole; the visible strip is still ~17px on a 38px card, which is a card you
+     can read the corner of, and the last card is whole either way. */
+  .dis .dis-table.dis-4seat .dis-seat .dis-hand > :first-child:nth-last-child(n+8):nth-last-child(-n+10) ~ * {
+    margin-left: min(0px, calc((var(--dis-rowspace) - 10 * var(--dis-cw)
+      - 9 * var(--dis-gap)) / 9));
+  }
+  .dis .dis-table.dis-4seat .dis-seat .dis-hand > :first-child:nth-last-child(n+11) ~ * {
+    margin-left: min(0px, calc((var(--dis-rowspace) - 12 * var(--dis-cw)
+      - 11 * var(--dis-gap)) / 11));
+  }
+  /* ...and the two hidden hands keep their own, scaled to the smaller card they
+     are drawn at. Same specificity as the rule above and later in the block, so
+     it wins for those two seats. */
+  .dis .dis-table.dis-4seat .dis-qtheirs .dis-hand > :first-child:nth-last-child(n+8):nth-last-child(-n+10) ~ *,
+  .dis .dis-table.dis-4seat .dis-qopp .dis-hand > :first-child:nth-last-child(n+8):nth-last-child(-n+10) ~ * {
+    margin-left: min(0px, calc((var(--dis-rowspace) - 10 * var(--dis-cw) * 0.6
+      - 9 * var(--dis-gap)) / 9));
+  }
+  .dis .dis-table.dis-4seat .dis-qtheirs .dis-hand > :first-child:nth-last-child(n+11) ~ *,
+  .dis .dis-table.dis-4seat .dis-qopp .dis-hand > :first-child:nth-last-child(n+11) ~ * {
+    margin-left: min(0px, calc((var(--dis-rowspace) - 12 * var(--dis-cw) * 0.6
+      - 11 * var(--dis-gap)) / 11));
+  }
+  .dis .dis-seat .dis-hand > * + * { margin-left: calc(var(--dis-cw, 42px) * -0.42); }
+  /* THE FAN PAINTS BACKWARDS, and this is the half that makes it readable.
+     Flex paints later children on top, so each card covered the one before
+     it — hiding exactly the TOP-RIGHT index and leaving the mirrored corner,
+     i.e. every rank in the hand read upside down. Counting z-index DOWN puts
+     the earlier card on top, so each card is tucked under its LEFT neighbour
+     and the strip that stays visible is its right edge — the upright index,
+     the way a fanned hand is actually held. A hand is at most 7 cards in
+     every mode; an eighth would fall to the base `z-index: 1` and tuck the
+     wrong way, which is visible rather than silent. */
+  .dis .dis-seat .dis-hand > * { position: relative; z-index: 1; }
+  .dis .dis-seat .dis-hand > *:nth-child(1) { z-index: 8; }
+  .dis .dis-seat .dis-hand > *:nth-child(2) { z-index: 7; }
+  .dis .dis-seat .dis-hand > *:nth-child(3) { z-index: 6; }
+  .dis .dis-seat .dis-hand > *:nth-child(4) { z-index: 5; }
+  .dis .dis-seat .dis-hand > *:nth-child(5) { z-index: 4; }
+  .dis .dis-seat .dis-hand > *:nth-child(6) { z-index: 3; }
+  .dis .dis-seat .dis-hand > *:nth-child(7) { z-index: 2; }
+  /* AT THE REPORT THE SEATS ARE SPENT — every card has been played, so the
+     four card rows are empty wells reserving a card's height each. On a
+     desktop they sit either side of a rail; on a phone they are two thirds
+     of the screen, above and below the one thing worth reading. The rows go
+     and the seat NAMES stay (they carry each side's points, which is the
+     line the report is about). Keyed on the report being present, so the
+     completed-trick hold — which still has cards on the table — is
+     untouched. */
+  .dis .dis-table.dis-rail-result > .dis-seat > .dis-hand,
+  .dis .dis-table.dis-rail-result > .dis-seat > .dis-piles { display: none; }
+  /* ...and the table stops reserving a board's worth of height once those
+     rows are gone, or the felt keeps a full screen of it and simply moves
+     the emptiness below the report instead of above it. The panels beneath
+     scroll up to meet it. */
+  .dis .dis-table.dis-rail-result { min-height: 0; }
+  /* THUMB-SIZED BID KEYS. The level pad and the denomination row measured
+     ~36px against the 44px floor the go button already cleared — the two
+     controls a phone player touches most in the auction. */
+  .dis .dis-bidgrid button, .dis .dis-denoms button, .dis .dis-valgrid button {
+    min-height: 44px;
+  }
+  /* The title's rule sits closer to the words it underlines here. */
+  .dis .dis-auction > .muted:first-child { padding-bottom: 0.28rem; }
+  /* THE AUCTION USED TO BUY THE PANEL'S LAST PIXELS FROM THE CARDS on a
+     phone under ~820px tall — a hard `--dis-cw: 54px`, against the 60-66 the
+     same phone showed in play. It is GONE (2026-08-13), for two reasons and
+     the second is the real one. It made a small phone's cards SMALLER at the
+     one moment a player is counting them; and it was buying a screen that was
+     never bought anyway — measured, a phone board plus its panels runs ~400px
+     past the viewport during the auction and ~580 in play, so the page
+     scrolls regardless and the cards were paying for a fit that does not
+     exist. A phone's card size is now one number in every phase, which is the
+     property the desktop budget already holds itself to. */
+  /* ...and the mobile card is 42px, so its reserved row is smaller. See the
+     base `.dis-hand` rule for why this exists at all. This still governs the
+     TALON panels' 3-card rows; a SEAT hand is fluid and reserves its own height
+     off `--dis-cw` (see `.dis-seat` in the base rules). */
+  .dis .dis-hand { gap: 0.18rem; flex-wrap: wrap; min-height: calc(42px * 1.4 + 2px); }
+  /* The seat's own gap, tighter on a phone. `.dis `-prefixed to out-specify the
+     base `.dis-seat` rule — this block precedes it, so equal specificity would
+     lose. The card WIDTH is deliberately not pinned here: seven fluid slots is
+     the whole point, and on a 390px phone that comes out well above the 42px
+     this used to hardcode. */
+  /* Enough air between phone cards that each reads as its own object — the
+     old 0.18rem shingled them edge to edge. Slightly smaller cards are the
+     honest price. The pile row inherits the same gap (one rhythm). */
+  .dis .dis-seat { --dis-gap: 0.3rem; }
+  /* THE PEEK IS THE WHOLE POINT OF A PILE, so on a phone it is sized from the
+     card like the desktop's rather than pinned at 11px. At 11px against a
+     66px card the covering card sat almost on top of the buried one and hid
+     the corner that identifies it — the corner is the ONLY thing the offset
+     is protecting, so if it is covered the pile says nothing. */
+  .dis .dis-pilewrap { --pk: max(18px, calc(var(--dis-cw, 56px) * 0.3)); }
+  /* ...and the panels' own cards keep some pace with the board's. The talon
+     you paid the auction to see rendered at 34px beside a 75px hand, which
+     read as a legend rather than as three cards you are counting. Three of
+     these plus their gaps still cross a 360px phone with room to spare. */
+  .dis .dis-side .dis-card.sm { --cw: 52px; font-size: calc(var(--cw) * 0.28); }
+  /* THE REPORT'S TALON, +15% (2026-08-13). The round-end reveal is six cards
+     in one row, and at the shared 34px they were the smallest thing on a
+     screen whose whole job at that moment is showing you what was out of
+     play. 39px keeps them on ONE row at the narrowest phone this file
+     supports — 6 x 39 + 5 gaps is 254px inside a ~344px panel — which is the
+     constraint that sets the ceiling here, not the height. The type follows
+     `--cw` (see `.dis-card.sm`), so this is one number. */
+  .dis .dis-table > .dis-result .dis-card.sm { --cw: 39px; }
+  /* ...and the three piles stand apart. They inherit the hand's tight gap,
+     which is right for a fanned hand and wrong for three separate stacks. */
+  .dis .dis-piles { gap: 0.6rem; }
+  /* On a phone a full-card carved slot reads as a tappable control. Keep its
+     layout box (the pile row must not reflow) but draw it at ~2/3 size — a
+     small impression in the felt, not a button. */
+  .dis .dis-card.ghost { transform: scale(0.66); }
+  .dis .dis-valgrid { grid-template-columns: repeat(5, 1fr); }
+  /* Thumb-sized actions — the end-of-round buttons and the lobby's Join /
+     Resume all measured ~36–42px, under the 44px touch guideline. */
+  .dis .dis-result .btn,
+  .dis .lby-card .btn, .dis .lby-cta, .dis .lby-join-btn { min-height: 44px; }
+  /* While BIDDING the board is exactly the viewport and the ladder takes
+     whatever is left, scrolling inside itself. A viewport-relative cap cannot
+     do this: the rest of the panel (the standing bid, the collision list, the
+     buttons, the log) is content-sized and varies, so any fixed vh either
+     overflows the page on a short phone or wastes space on a tall one.
+     Measured before this: the page ran 68px past the viewport and the grid
+     showed 35 of 36 rungs, i.e. it was not scrolling at all. */
+  /* A SEAT NEVER SHRINKS BELOW ITS CARDS. The table is a fixed-height flex
+     column on a phone, so a seat that was allowed to shrink simply overflowed
+     its own box and drew on top of whatever came next -- which is what a
+     three-seat board did to the auction panel. Cards have a fixed height and
+     cannot compress, so the honest thing is to refuse the shrink and let the
+     rules below decide where the extra height comes from. */
+  .dis .dis-seat { flex: 0 0 auto; }
+  /* THREE SEATS DO NOT FIT A PHONE, so a dummy board sizes to its content and
+     the PAGE scrolls, rather than being pinned to the viewport and spilling.
+     Both the base `min-height` and the auction pin have to go, or the taller
+     of them wins and the overflow comes back. */
+  .dis .dis-table.dis-3seat,
+  .dis .dis-table.dis-3seat.ph-auction,
+  .dis .dis-table.dis-4seat,
+  .dis .dis-table.dis-4seat.ph-auction { height: auto; min-height: 0; }
+  /* THE AUCTION TABLE IS A MINIMUM, NOT A PIN (2026-08-13). It used to be a
+     hard `height: calc(100dvh - var(--dis-hdr))`, which is only safe while
+     something inside is allowed to give — and once the bidding box stopped
+     being that thing (see its rule below), the fixed height had nowhere to
+     put the extra: the near seat's fanned hand simply drew 13px past the
+     felt and over the panel beneath it, with its own z-index painting it on
+     top. The base phone rule's `min-height` is the same number and already
+     fills the screen; dropping the pin lets the table grow the ~50px a
+     bigger card asks for and pays it in page scroll, which this tier does
+     anyway. */
+  /* THE BIDDING BOX FITS A PHONE WITHOUT SCROLLING, which is a budget, not a
+     preference: at 390x844 the panel ran 42px past its box. Its five 0.8rem
+     gaps were 64px of that — sized for a desktop rail where the panel floats
+     in a tall column, not for a box competing with the board. 0.42rem here,
+     tighter padding, and a tighter rule under the title: ~45px back, which
+     clears the overflow with room to spare on a 844-tall phone. The internal
+     scroll stays as the valve for the shortest screens. */
+  .dis .dis-table.ph-auction .dis-auction {
+    /* The last few pixels: the bigger pile peek (below) costs the board ~9px
+       a seat, and this panel is what gives. Trimmed here rather than taking
+       the peek back — an unreadable pile is worse than a tight panel. */
+    gap: 0.38rem; padding: 0.55rem 0.55rem;
+    display: flex; flex-direction: column; justify-content: flex-start;
+    /* THE PANEL KEEPS ITS HEIGHT AND THE PAGE TAKES THE SLACK (2026-08-13).
+       It used to be `flex: 1 1 auto; min-height: 0; overflow-y: auto` — the
+       item that gives, so the board could hold one screen. Two things make
+       that the wrong trade here, and the second is decisive: the table's
+       height is a MIN, not a fixed one, so letting the panel grow costs a
+       little page scroll and nothing else — and the phone page ALREADY
+       scrolls ~345px in the auction, because the side panels stack below the
+       board. So the squeeze was not buying a one-screen board; it was buying
+       a nested scroller inside a page that scrolls anyway, which is the worst
+       of both (you cannot tell which box a phone flick will move). With the
+       cards at their new size it measured 58px of hidden bid keys.
+       The old comment's failure mode — the panel overflowing VISIBLY under
+       the seat below — needed the panel to be shrunk below its content;
+       `flex: 0 0 auto` is what makes that unreachable, so the box always
+       fits its own contents. */
+    flex: 0 0 auto;
+  }
+  .dis .dis-table.ph-auction .dis-valgrid {
+    flex: 1 1 auto; min-height: 3.2rem; max-height: none;
+  }
+  /* The side panel STACKS below the board on a phone rather than vanishing.
+     Hiding it wholesale also hid the last trick, the talon you paid the auction
+     to see, and the move log — three things a phone player has no other way to
+     reach. Only the two that are genuinely duplicated elsewhere are dropped:
+     Contract (the chip in the middle column carries it) and Points (already on
+     both seat rows). Every rule here is `.dis `-prefixed because this @media
+     block PRECEDES the base rules, so a single-class override would lose. */
+  .dis .dis-side { display: flex; }
+  /* Contract and Points USED to be dropped here as duplicates — the chip in
+     the middle column carries the contract, the seat rows carry the points.
+     They are not duplicates any more: the bidding lives under the contract and
+     the round's trick history under the points, and neither is reachable from
+     anywhere else on a phone. (The bidding was previously inside the auction
+     panel, so hiding these two would have deleted it outright the moment the
+     auction ended.) They stack below the board like the rest of the column. */
+  .dis .dis-main { grid-template-columns: 1fr; grid-template-rows: none; }
+  /* The desktop tiers place every item by hand; a phone is one column and the
+     placement has to be handed back, or the table keeps its `1 / span 2`. */
+  .dis .dis-main > .dis-table,
+  .dis .dis-main > .dis-side-info,
+  .dis .dis-main > .dis-side-match { grid-column: auto; grid-row: auto; }
+  /* The MATCH — the standing the whole game is played to — stacks right
+     under the felt on a phone, ahead of the round-detail panels. Visual
+     order only; DOM (and screen-reader) order is unchanged. */
+  .dis .dis-main > .dis-side-match { order: 1; }
+  .dis .dis-main > .dis-side-info { order: 2; }
+  /* The bidding log's suit glyphs at full phone legibility. */
+  .dis .dis-p-contract .dis-bidlog { font-size: 0.8rem; }
+}
+
+/* ── cards ──────────────────────────────────────────────────────────────── */
+/* No image assets: a playing card is a rank and a suit glyph, so it renders
+   in CSS at any size and stays crisp. Suits differ by GLYPH as well as
+   colour, so red/black is never the only signal. */
+.dis-card {
+  --cw: 56px;
+  width: var(--cw);
+  height: calc(var(--cw) * 1.4);
+  border-radius: calc(var(--cw) * 0.11);
+  /* A paper face, not flat white: a warm top-lit gradient with a hairline
+     inner highlight, and a two-layer drop shadow (contact + ambient) so a
+     card reads as sitting ON the felt rather than printed on it. */
+  background: linear-gradient(155deg, #fffdf5 0%, #faf7ec 55%, #f0ecdf 100%);
+  color: #17171a;
+  /* ONE EDGE, NOT TWO. The card used to carry a 1px `border` AND an
+     `inset 0 0 0 1px` white ring. A border is drawn on the border box; an
+     inset shadow is drawn on the PADDING box — a curve 1px tighter — so at
+     every corner two differently-curved hairlines were antialiased over each
+     other, and the corner came out thick and muddy. Removing `overflow` (the
+     previous attempt) fixed the clip but left the two rings, which is why the
+     corners were still wrong.
+     Now: the printed edge is an OUTSET spread shadow, which follows the
+     border-radius exactly, and the paper highlight is a top edge only —
+     `inset 0 1px 0`, which never reaches a corner. Real card stock is lit
+     from above anyway; the full ring was always doing the job of a bevel it
+     did not have. */
+  border: 0;
+  box-shadow:
+    0 0 0 1px rgba(20, 16, 8, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    0 4px 10px rgba(0, 0, 0, 0.28);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  font-weight: 700; line-height: 1.05;
+  user-select: none; position: relative;
+  /* NO `overflow: hidden` ON THE CARD ITSELF. With a 1px border AND a radius,
+     overflow clips children to the PADDING box — a curve 1px tighter than the
+     border's — so every corner got a hairline where the clip and the border
+     disagreed. It read worst on the BOTTOM corners, where the drop shadow
+     darkens whatever is behind the seam, and that is exactly where it was
+     reported. The clip existed for ONE child (the centre watermark, which
+     would otherwise square off past the radius), so that child does its own
+     clipping now and the card's corners are drawn by the border alone. */
+  /* TRANSFORM ONLY, AND FAST. Animating `box-shadow` was the real lag: a
+     shadow is a paint property, so every frame of the lift repainted a
+     four-layer shadow around a card that can be 180px wide — on a hand of
+     seven, entering and leaving cards in a sweep, that is genuinely dropped
+     frames rather than a matter of taste. Transform is composited: the layer
+     moves, nothing repaints. The shadow still CHANGES on hover, it just
+     changes at once instead of being tweened. 90ms ease-out is past half its
+     travel in the first frame at 60Hz. */
+  transition: transform 0.09s ease-out;
+}
+/* THE LIFT'S SHADOW IS A PSEUDO-ELEMENT THAT FADES, not a box-shadow that
+   changes. This is the third pass at "the hover feels laggy" and the first two
+   attacked the wrong cost: shortening the duration did nothing, and taking
+   box-shadow out of the TRANSITION only stopped it being tweened — the shadow
+   still CHANGED on hover, which is a repaint of a four-layer shadow with a
+   20px blur around a card that is 180px wide on a big display. That repaint
+   is main-thread work, per card, every time the pointer crosses one; sweeping
+   a hand of seven does it seven times.
+   Now the card's own shadow never changes. The extra lift shadow lives on
+   `::after` and animates OPACITY, which the compositor can do on its own
+   thread without repainting anything.
+   `will-change: transform` STAYS, and the trade is worth stating because it
+   points the other way from the shadow: without it the card's layer is
+   created and rasterized when the hover starts, and a 180px card carries a
+   gradient face, a watermark pip and three-layer text-shadows on its suits —
+   at HiDPI that raster is tens of milliseconds spent BEFORE the first frame
+   of the lift, which is precisely the "it lags going up" the shadow work does
+   not explain. Pre-promoting costs a standing layer per playable card
+   (~700KB at 2x, times ten or twenty) and buys a hover that is pure
+   compositing: nothing about the card's paint changes now, so the layer is
+   rasterized once and only moved thereafter. */
+.dis-card.play { will-change: transform; }
+.dis-card::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit;
+  pointer-events: none; opacity: 0;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.42), 0 2px 4px rgba(0, 0, 0, 0.32);
+  transition: opacity 0.09s ease-out;
+}
+/* The ghosted centre pip — the same ink as the corner index, at watermark
+   strength, sized off the card's own token so every scale keeps the ratio. */
+.dis-center {
+  position: absolute; inset: 0;
+  /* The one thing that needed the card's old `overflow: hidden` — a pip sized
+     at 0.58 of the card can reach past the corner curve. `inherit` keeps it
+     the same radius as the card at every scale. */
+  overflow: hidden; border-radius: inherit;
+  display: flex; align-items: center; justify-content: center;
+  font-size: calc(var(--cw) * 0.58); line-height: 1;
+  opacity: 0.28; pointer-events: none;
+}
+/* The watermark keeps the INK, dimmed — the face ink at reduced alpha washed
+   the red to pink; a deeper red at readable strength lands near the printed
+   rose a real watermarked deck uses, and survives phone-scale cards. */
+.dis-card.red .dis-center { color: #a51d33; }
+.dis-ix {
+  position: absolute; top: 4%; right: 7%;
+  display: flex; flex-direction: column; align-items: center;
+  line-height: 1;
+}
+/* The second corner: bottom-left, rotated — the standard mirrored index. */
+.dis-ix-b {
+  top: auto; right: auto; bottom: 4%; left: 7%;
+  transform: rotate(180deg);
+}
+/* THE RANK IS TABULAR AND SPACED. "10" is the only two-glyph rank, and in
+   this serif its "1" and "0" all but touch at card size — it read as one
+   squashed mark rather than a number. Tabular figures give the "1" a full
+   digit's width instead of its narrow one, and a hair of tracking separates
+   the pair; the negative margin takes back the trailing space letter-spacing
+   adds after the last glyph, so a one-glyph rank stays optically centred. */
+.dis-card .dis-r {
+  font-size: 0.95em; font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: 0.05em; margin-right: -0.05em;
+}
+.dis-card .dis-s { font-size: 1.15em; }
+/* The card's WORTH under card scoring (skat, 2026-08-09). In the markup on
+   every card, shown only inside a `.dis-cardpts` board -- the room's class,
+   not the card, decides. Bottom-RIGHT, under the rank index. A buried pile
+   card's chip can sit behind the card covering it, which costs nothing: the
+   worth is read off the rank, and the buried card's rank corner is exactly
+   what the pile offset keeps clear. Colour is the sign, not the suit, and it
+   is paired with the +/− glyph itself so colour is never the only signal. */
+.dis-pts {
+  display: none;
+  position: absolute; bottom: 4%; right: 7%;
+  font-size: 0.62em; font-weight: 700; line-height: 1;
+  padding: 0.1em 0.25em; border-radius: 0.5em;
+}
+.dis-cardpts .dis-pts { display: block; }
+.dis-pts.pos { color: #1d6b2f; background: rgba(29, 107, 47, 0.12); }
+.dis-pts.neg { color: #9c3540; background: rgba(156, 53, 64, 0.10); }
+/* The wide deck's 5 and 6 are worth NOTHING, which is a third state and not a
+   small negative: they are the mode's safe discard. Neutral ink, no tinted
+   plate, so a zero reads as "this card is inert" at a glance rather than as a
+   faint liability. */
+.dis-pts.nil { color: rgba(23, 23, 26, 0.55); background: rgba(23, 23, 26, 0.07); }
+.dis-card.red { color: #c0233a; }
+.dis-card.black { color: #17171a; }
+.dis-card.play { cursor: pointer; }
+/* HOVER ONLY WHERE THERE IS A POINTER. On a touch screen the browser leaves
+   :hover latched on the last thing you tapped until you tap somewhere else, so
+   after playing a card the card that reflowed into that slot came up raised —
+   which reads as the game having auto-selected it for you at the start of your
+   turn. */
+@media (hover: hover) and (pointer: fine) {
+  /* THE LIFT ADDS TO THE CARD'S OWN SHADOW STACK — it used to REPLACE it, and
+     the first thing in that stack is `inset 0 0 0 1px rgba(255,255,255,.65)`,
+     the white inner ring that lights the card's rounded edge. Dropping it on
+     hover took the light off the corners at the exact moment the card is
+     raised and most looked at, so a lifted card read as flat and dark-cornered
+     against the ones still in the hand. */
+  .dis-card.play:hover { transition: transform 0.06s ease-out; transform: translateY(-8px); }
+  .dis-card.play:hover::after { transition: opacity 0.06s ease-out; opacity: 1; }
+  /* AND THE PRESS ANSWERS INSTANTLY. A play is a server round trip — the card
+     does not leave your hand until the room broadcasts — so without a press
+     state the only feedback for ~100-300ms was nothing at all, which is what
+     "not snappy" is. The card drops toward the table under the pointer the
+     moment the button goes down, at no transition, so it cannot lag the
+     finger. */
+  /* The press is transform-only too, and drops the lift shadow by fading the
+     same pseudo-element back out. */
+  .dis-card.play:active { transition: none; transform: translateY(-2px) scale(0.985); }
+  .dis-card.play:active::after { transition: none; opacity: 0.35; }
+}
+/* NO DIMMING — every face-up card looks the same, playable right now or not.
+   Legality is carried by the `play` affordance (cursor + hover) and enforced
+   server-side, so the appearance of the card face never encodes it.
+
+   This replaces two earlier attempts, and the history is the warning: a pile's
+   top card sits ON TOP of its buried one (offset so only the buried card's
+   corner shows), so dimming the top with `opacity` let the card underneath
+   show straight through and the two read as one smeared card. Switching to
+   `filter: brightness()` fixed the transparency but kept the real problem —
+   a hand rendered as two different kinds of card. Do not reintroduce a `dim`
+   class in either form. */
+/* A RING, NOT AN OUTLINE. An outline is drawn outside the border box and keeps
+   its own corner geometry, so on a card whose radius scales with its width
+   (`--cw * 0.11`) the ring's corners and the card's corners disagreed — the
+   selected card read as if it had square corners inside a rounded one. A
+   spread box-shadow follows the border-radius exactly, and it composes with
+   the card's own stack instead of sitting on top of it. */
+.dis-card.sel {
+  box-shadow:
+    0 0 0 2px var(--accent),
+    0 0 10px rgba(111, 224, 160, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    0 4px 10px rgba(0, 0, 0, 0.28);
+}
+/* The back is a CARD BACK, not a stripe fill: a woven diamond lattice over a
+   deep indigo, lit from above, inside a printed frame (two inset rings). The
+   lattice is an inline SVG so it stays crisp at any card size; everything
+   scales off the same token as the face. */
+/* LONGHANDS, not the `position / size` shorthand: Vite's CSS pass silently
+   DROPPED the one layer that used `center / calc(var(--cw) * 0.5)` — the
+   bundle shipped two of these three images and the medallion never rendered.
+   Longhand background-* with var() survives the pipeline intact. */
+.dis-card.back {
+  background-image:
+    radial-gradient(90% 60% at 50% 28%, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 70%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' width='40' height='40'%3E%3Ccircle cx='20' cy='20' r='13' fill='none' stroke='rgba(212,175,84,0.5)' stroke-width='1.5'/%3E%3Cpath d='M20 9 28 20 20 31 12 20Z' fill='none' stroke='rgba(212,175,84,0.45)' stroke-width='1.3'/%3E%3Ccircle cx='20' cy='20' r='2' fill='rgba(212,175,84,0.4)'/%3E%3C/svg%3E"),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14'%3E%3Cpath d='M7 0 14 7 7 14 0 7Z' fill='none' stroke='rgba(255,255,255,0.13)' stroke-width='1'/%3E%3Ccircle cx='7' cy='7' r='1' fill='rgba(255,255,255,0.11)'/%3E%3C/svg%3E"),
+    linear-gradient(165deg, #2e4064 0%, #243352 55%, #1c2941 100%);
+  background-position: center, center, 0 0, 0 0;
+  background-size: auto, calc(var(--cw) * 0.5) calc(var(--cw) * 0.5), auto, auto;
+  background-repeat: no-repeat, no-repeat, repeat, no-repeat;
+  border-color: rgba(14, 18, 28, 0.55);
+  /* The frame is a PRINTED ring — a navy band with a gold pinstripe inside
+     it (the deck's brand color), thin enough that the back's corner
+     geometry reads the same as the face's. Drop shadows match the face's
+     contact+ambient pair: one light for the whole table. The gold medallion
+     (ring + diamond) is the back's focal point, echoing the faces' pip. */
+  box-shadow:
+    inset 0 0 0 calc(var(--cw) * 0.045) #17233a,
+    inset 0 0 0 calc(var(--cw) * 0.045 + 2px) rgba(212, 175, 84, 0.5),
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    0 4px 10px rgba(0, 0, 0, 0.28);
+  color: transparent;
+}
+/* An empty slot is a CARVED IMPRESSION in the felt — an inset well where a
+   card will land. No stroke glyph, no paper: the depression alone says
+   "empty" — a radial pool of shade, a darkened top lip where the light
+   falls away, and a faint bottom rim where it returns. The DOM glyph stays
+   (a slot is still findable by text) but paints transparent. */
+.dis-card.ghost {
+  background: radial-gradient(80% 70% at 50% 45%, rgba(0, 0, 0, 0.22), rgba(0, 0, 0, 0.09) 85%);
+  border: 1px solid rgba(0, 0, 0, 0.32);
+  /* The carve scales with the card — a fixed-px lip read as a flat box at
+     small sizes while the 1920 board looked properly recessed. */
+  box-shadow:
+    inset 0 calc(var(--cw) * 0.055) calc(var(--cw) * 0.125) rgba(0, 0, 0, 0.45),
+    inset calc(var(--cw) * 0.055) 0 calc(var(--cw) * 0.11) rgba(0, 0, 0, 0.18),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.07);
+  color: transparent;
+}
+
+/* `.muted` IS THIS GAME'S OWN CLASS AND NOTHING DEFINED IT. The JSX reaches for
+   it 48 times for every piece of de-emphasised text on the board, but the only
+   rule that ever mentioned it was a font-size tweak scoped to the last-trick
+   panel — so all 48 rendered at full text brightness and nothing was actually
+   muted. `baseCss` has no `.muted`; the shared kit's equivalent is `.lby-muted`,
+   which is a lobby class and not in scope at a board.
+
+   Scoped under `.dis` so it cannot leak into another game's markup, and pointed
+   at `--text-dim`, which is what `.lby-muted` and every other game already use
+   for exactly this. */
+.dis .muted { color: var(--text-dim); }
+
+/* THE HAND KEEPS ITS ROW WHEN IT IS EMPTY, and that is what stops the board
+   moving under your thumb. `.dis-table` on a phone is `min-height: 100dvh` with
+   `justify-content: space-between`, so the gaps are whatever is left over — the
+   instant any row changes height, every gap recomputes and the whole board
+   re-distributes. Playing your last card collapsed this row from a full card
+   height to ZERO, and that one collapse is the entire effect: reported from a
+   phone as the view shifting around, measured across two screenshots of the
+   same trick as 28.7 / 44.3 / 60 CSS px of movement, progressively more toward
+   the bottom, which is exactly how space-between pays out a freed 60px.
+   `.dis-trick` already reserves 96px and measures 96px empty, one card and two,
+   so it was never part of this — measured before changing anything.
+   The height is one card row: `--cw * 1.4` plus the 1px border top and bottom.
+   It is written per breakpoint rather than derived from `--cw`, because that
+   token lives on `.dis-card` and is not in scope here. */
+.dis-hand { display: flex; align-items: flex-end; justify-content: center; flex-wrap: wrap; gap: 0.25rem;
+  min-height: calc(56px * 1.4 + 2px); }
+
+/* A SEAT's cards fill the table: seven hand slots, left edge to right.
+   `.dis-table` is the query container rather than `.dis-seat`, because container
+   query units resolve against an ANCESTOR container — an element cannot measure
+   itself — and `--dis-cw` has to be readable by the seat for the piles as well as
+   the hand. `100cqw` is the table's CONTENT box, so the 0.9rem padding is already
+   out of it. The table is a `1fr` grid item, so its width never depends on its
+   contents and `contain: inline-size` costs nothing.
+   The size is pinned to SEVEN slots, not to how many cards are left: sizing by
+   `flex: 1` would swell the cards as the hand empties, and a card would change
+   size thirteen times a round.
+   `--dis-cw` is ONE number that the card width, the reserved row height and the
+   font all read. That is deliberate — the reserved height used to be a per
+   breakpoint literal (`calc(56px * 1.4 + 2px)`) precisely because `--cw` lived on
+   `.dis-card` and was out of scope here, so the two could drift and the empty-hand
+   row would stop reserving a real card's height. That collapse is the measured
+   layout shift the base rule above exists to prevent; keep them derived.
+   TWO bounds, whichever is smaller, and the second is not optional: the board
+   stacks FOUR card rows (a hand and a pile row per seat), so card height is a
+   vertical budget, not free. Measured on a 1280x900 desktop, filling the row
+   edge to edge alone wants a 136px card — 190px tall — and four of those plus
+   the trick run the board off the bottom of the screen. So width fills the row
+   until height says stop. On a phone and a narrow laptop the WIDTH term binds
+   and the hand spans the table exactly; on a wide desktop the height term does,
+   and the row stays centred rather than eating the window. */
+.dis-table { container-type: inline-size; }
+/* The TRICK takes the same token: the card you just played is the same object
+   that was in your hand a moment ago, and leaving it on the old fixed 56px made
+   it visibly shrink as it crossed the table. Both selectors are children of the
+   container, which is what lets them read `100cqw` — the container itself
+   cannot, since query units resolve against an ANCESTOR. */
+/* THE BOARD'S SIZING TOKENS LIVE ON THE TABLE, and the seats inherit them.
+   They used to sit on `.dis-seat`, which was fine while only the seats read
+   them -- but the table has to derive its own WIDTH from the same numbers
+   (see the desktop block), and a custom property inherits DOWN, so a seat
+   cannot lend one to its parent. `--dis-cw` itself stays on the seats: it is
+   built from container-query units, and those resolve against an ANCESTOR, so
+   the table cannot measure itself with them. */
+.dis-table {
+  --dis-slots: 7;
+  --dis-gap: 0.25rem;
+  /* CARD ROWS ON THE BOARD, which is what the height budget below divides by:
+     two seats show four (a hand and a pile row each), a DUMMY table shows six.
+     It was a literal 4, and that is precisely how dummy mode broke on a phone
+     -- every card came out half again too tall, the seats overflowed their
+     boxes and the hands drew straight over the auction panel. Derived from the
+     seat count instead, so a third hand costs no second magic number.
+     `--dis-reserve` is the non-card furniture the same budget has to leave
+     room for; a third seat adds another name row to it. */
+  --dis-rows: 4;
+  /* WHAT ONE UNIT OF CARD WIDTH COSTS IN BOARD HEIGHT — the divisor of the
+     height budget below. `rows * 1.4` is the card rows themselves; the railed
+     2-seat phases add the PILE PEEKS to it (see that rule), because a peek is
+     `0.24 * cw` and so grows with the very number being solved for. Charging
+     it to the fixed reserve instead is what made the budget systematically
+     too pessimistic on shorter screens: the reserve has to be sized for the
+     TALLEST display in the tier, so a 1080p board paid a 1600p board's peek
+     and left 60-150px of felt unused. In the divisor it is exact at every
+     height, which is the whole point. */
+  --dis-vden: calc(var(--dis-rows) * 1.4);
+  /* THE RAIL'S WIDTH, ONE TOKEN — read by the railed grids AND by the card
+     budget, which has to subtract exactly the column the cards do not get.
+     They were two hardcoded 17rems and drifting them apart is how the hand
+     wrapped at 1366. It widens on big screens (below): a 17rem strip beside
+     190px cards on a 2560x1600 display is a different design from the same
+     strip beside 60px cards on a laptop. */
+  --dis-rail: 17rem;
+  /* HOW WIDE A HAND'S ROW ACTUALLY IS -- the same width the card budget above
+     divides by `--dis-slots`, kept as its own token so the FAN can be solved
+     from it instead of guessed. Unrailed the seats get the whole table; the
+     railed rule below subtracts the column they do not get. The 1.2rem is the
+     seat's own padding, which the row is laid out inside. */
+  --dis-rowspace: calc(100cqw - 2rem);
+  /* THE PHONE/SHORT-WINDOW BUDGET (the `100dvh` formula below). 22rem, not
+     the old 27: the board is not pinned to the viewport at this tier, the
+     page scrolls, and the extra 5rem was reserving space for a one-screen fit
+     that measurement says never happens (~400px of page scroll in the
+     auction, ~580 in play). What it did do was cap the cards below what the
+     fan's width term already allowed. */
+  --dis-reserve: 22rem;
+  /* ...and the same budget measured from the TABLE's own height rather than
+     the window's, for the desktop layout below. It excludes the header (which
+     is outside the table) and counts only what is inside it: the padding, the
+     row gaps, each seat's name row and pile peek, and the tallest MIDDLE a
+     phase can produce -- the auction panel, measured at 309px, against play's
+     222px. Sized for that worst case so one number fits every phase. */
+  --dis-reserve-in: 30rem;
+}
+/* `100svh`, NOT `100dvh`, AND THAT IS THE WHOLE OF "THE BOARD RESIZES ON
+   MOBILE". Below 761px the page scrolls (deliberately — a phone cannot fit a
+   board plus its panels), and scrolling is exactly what makes a phone browser
+   retract its address bar. `dvh` is defined to track that: it grows by the
+   ~60-90px of chrome the moment you flick, so this budget re-solved and EVERY
+   CARD, PILE AND PEEK ON THE BOARD CHANGED SIZE MID-SCROLL — and again when
+   the bar came back. `svh` is the same viewport with the chrome SHOWN, i.e.
+   the one value that does not move, so the board is laid out once and holds
+   still. It costs nothing but the cards being sized for the smaller (always
+   correct) viewport; the alternative is a board that breathes whenever the
+   page moves.
+   The desktop tier below measures `100cqh` off the table's own box and was
+   never affected — this is a phone-only failure, which is why it survived
+   every desktop gate. */
+.dis-seat, .dis-trick {
+  /* The `vh` line is the fallback for anything without `svh`, exactly as the
+     phone table's min-height pairs its two declarations: an unsupported unit
+     invalidates the whole declaration, and a board with no `--dis-cw` at all
+     has no card size to fall back on. */
+  --dis-cw: min(
+    calc((100cqw - (var(--dis-slots) - 1) * var(--dis-gap)) / var(--dis-slots)),
+    calc((100vh - var(--dis-reserve)) / var(--dis-rows) / 1.4)
+  );
+  --dis-cw: min(
+    calc((100cqw - (var(--dis-slots) - 1) * var(--dis-gap)) / var(--dis-slots)),
+    calc((100svh - var(--dis-reserve)) / var(--dis-rows) / 1.4)
+  );
+}
+/* A DUMMY TABLE IS SIX CARD ROWS, not four -- one variable resizes the board.
+   On the TABLE now (the tokens moved there), so the table's own width budget
+   sees the third seat too. */
+.dis-table.dis-3seat {
+  --dis-rows: 6;
+  /* Same move as the 2-seat reserve above, one seat's furniture heavier. A
+     dummy phone board is HEIGHT-bound (six card rows), so this is the number
+     that decides its card size: 45px before, ~55 now. */
+  --dis-reserve: 24rem;
+  --dis-reserve-in: 33rem;
+}
+.dis-seat .dis-hand {
+  width: 100%; gap: var(--dis-gap);
+  min-height: calc(var(--dis-cw) * 1.4 + 2px);
+}
+/* Both the hand and the piles — they are the same object at the same seat, and
+   the piles holding still at 56px while the hand grew read as two card sizes. */
+.dis-seat .dis-card, .dis-trick .dis-card { --cw: var(--dis-cw); font-size: calc(var(--dis-cw) * 0.28); }
+
+/* ── piles ──────────────────────────────────────────────────────────────── */
+/* The pile row shares the HAND row's gap token, so the two rows of one seat
+   keep a single spacing rhythm instead of reading as two systems. */
+.dis-piles { display: flex; gap: var(--dis-gap, 0.35rem); justify-content: center; }
+.dis-pile { position: relative; display: flex; flex-direction: column; align-items: center; }
+/* The wrap reserves the peek offset as padding so the buried card cannot
+   overlap its neighbour or get clipped by the row. */
+/* The peek scales with the card, so a buried card's revealed corner reads as
+   a DESIGNED fan at every size — a fixed 15px on a 117px card looked like a
+   z-order accident. Floor of 12px so small cards still show a legible corner. */
+.dis-pilewrap { position: relative; padding-top: var(--pk); padding-right: var(--pk); --pk: max(12px, calc(var(--dis-cw, 56px) * 0.24)); }
+/* Seated 2px INTO the stack — flush with the wrap's top edge it read as
+   floating a hair above its host rather than tucked behind it. */
+.dis-buried { position: absolute; top: 2px; right: 0; z-index: 0; }
+/* The pile's top card casts a CONTACT shadow up-and-right onto the buried
+   card it covers — the seam is what sells two lifted pieces of paper instead
+   of one glued sticker. Low alpha so it reads as occlusion, not a second
+   light source. */
+.dis-pilewrap .dis-card { position: relative; z-index: 1; }
+.dis-pilewrap > .dis-card:not(.ghost):not(.back) {
+  /* The base stack PLUS the seam — and it has to restate the base, since a
+     box-shadow list replaces rather than extends. Kept in step with
+     `.dis-card` by hand; the edge ring is the first entry in both. */
+  box-shadow:
+    0 0 0 1px rgba(20, 16, 8, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    0 4px 10px rgba(0, 0, 0, 0.28),
+    4px -4px 7px rgba(0, 0, 0, 0.34);
+}
+
+/* ── DESKTOP: the whole board on screen, and nothing to scroll ──────────────
+   The board used to grow until it fitted its cards, and the page grew with it:
+   at 1920x1080 the document ran 1110px against a 1080 viewport and YOUR OWN
+   HAND sat below the fold -- worse during the auction, whose panel is 87px
+   taller than a mid-play middle. The card size was already viewport-aware, but
+   its budget was `100dvh - 27rem`: a guess that could not know the header
+   above the table, and could not tell an auction board from a playing one.
+
+   So the screen is pinned to the viewport and the sizing is inverted -- the
+   space decides the cards, rather than the cards deciding the page:
+
+   * `.dis-game` is exactly 100dvh, a flex column, `overflow: hidden`. There is
+     no page scrollbar to have.
+   * the table takes what the header leaves and becomes a SIZE container, so
+     the card budget reads the table's real height (`100cqh`) instead of
+     guessing from the window.
+   * seats keep their card-derived height; the MIDDLE takes the slack and
+     scrolls inside itself if a phase's panel is taller than the budget
+     allowed. A miscalculation therefore shows up as a scrollbar on one panel,
+     never as a hand clipped off the bottom of the screen.
+
+   Mobile is deliberately untouched: below 761px the page scrolls, which is
+   right on a phone, and that block sets its own heights. */
+/* Gated on HEIGHT as well as width: below 600px tall there is not enough room
+   for a board plus an auction panel at any card size, and pinning the viewport
+   there would clip rather than fit. A very short window therefore falls back
+   to the scrolling layout, which is the honest answer for it. */
+@media (min-width: 761px) and (min-height: 600px) {
+  .dis-game { height: 100dvh; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  /* `align-items: stretch`, overriding the base `start`, is what gives the
+     table a DEFINITE height -- and a size container with no definite height
+     reports `100cqh: 0`, which drove the card budget negative and collapsed
+     the whole board to a 31px sliver. It is the load-bearing line here. */
+  /* Symmetric padding. It used to be `0 16px 12px` — the board sat flush
+     against the header with a 12px buffer only underneath, which reads as the
+     whole screen having slipped upward. */
+  .dis-game .dis-main { flex: 1 1 auto; min-height: 0; padding: 12px 16px; align-items: stretch; }
+  /* THE SIDE PANELS ARE TWO GRID ITEMS, and every desktop tier has to place
+     BOTH of them by hand. They used to be one `.dis-side` column; the match
+     now lives in its own element so a wide screen can put it on the far side
+     of the felt. Auto-placement would drop it under the table, so the narrow
+     desktop tier stacks the two explicitly in the right-hand column — info
+     takes the slack and scrolls, the match sits under it at its own height,
+     which is exactly the single column they used to share. */
+  .dis-game .dis-main {
+    grid-template-columns: minmax(0, 1fr) minmax(15rem, 17rem);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+  .dis-game .dis-main > .dis-table { grid-column: 1; grid-row: 1 / span 2; }
+  .dis-game .dis-main > .dis-side-info { grid-column: 2; grid-row: 1; }
+  .dis-game .dis-main > .dis-side-match { grid-column: 2; grid-row: 2; }
+  .dis-game .dis-table {
+    height: 100%; min-height: 0; overflow: hidden;
+    container-type: size;
+    /* THE FELT FILLS ITS COLUMN. It briefly did the opposite -- an explicit
+       width sized from the card budget, so the table hugged its seven cards --
+       and that was the wrong trade: the cards are capped by HEIGHT on any
+       normal desktop, so hugging them left the surplus width as bare PAGE
+       either side of the board rather than as table. Black, not green. The
+       panels flanking it (above) take most of that width for content now; what
+       is left belongs to the felt.
+
+       `width: 100%`, not `justify-self: stretch`: a SIZE container has no
+       contents to size from, so the moment its width comes from anywhere
+       intrinsic it collapses to its padding -- a 31px sliver in a 1616px
+       column, which is how this was found the first time and again when a
+       malformed comment above silently dropped this very declaration. A
+       definite width is also what the container query needs. */
+    width: 100%;
+  }
+  /* The card budget, measured off the table itself rather than the window.
+     The FLOOR is what stops a short screen from starving the cards: the
+     auction panel is a fixed ~309px whatever the window does, so on a 720-tall
+     display the worst-case reserve left 24px cards -- smaller than the phone's
+     42px, on a desktop. Below the floor the panel gives way instead, scrolling
+     inside itself (see the safety valve above); the SEATS always fit, which is
+     what keeps the cards on screen. Measured at 1280x720: play fits whole with
+     20px to spare, and only the auction panel scrolls. */
+  .dis-game .dis-seat, .dis-game .dis-trick {
+    --dis-cw: max(3.4rem, min(
+      calc((100cqw - (var(--dis-slots) - 1) * var(--dis-gap)) / var(--dis-slots)),
+      calc((100cqh - var(--dis-reserve-in)) / var(--dis-vden))
+    ));
+  }
+  .dis-game .dis-table > .dis-seat { flex: 0 0 auto; }
+  /* The safety valve: the variable-height PANELS shrink and scroll in place.
+     Scoped to those two -- a blanket `min-height: 0` on every non-seat child
+     also hit `.dis-trick`, whose min-height is what RESERVES the trick's card
+     row, and "Your lead" then drew straight over "Trick 2 of 13". */
+  .dis-game .dis-auction, .dis-game .dis-result {
+    min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  }
+  /* ...and the panel's CONTENTS must not shrink with it. Both are flex
+     columns, so a squeezed panel shrank its children instead of scrolling:
+     at 1280x720 skat's value ladder collapsed to ZERO height -- still in the
+     DOM, still "visible" to a query, and impossible to click, which is
+     exactly how the render gate caught it. Refusing the shrink is what makes
+     the panel's own scrollbar the thing that gives. */
+  .dis-game .dis-auction > *, .dis-game .dis-result > * { flex-shrink: 0; }
+  /* PLAY has a shorter middle than the auction (222px against 309), and its
+     trick is a fifth CARD ROW rather than furniture. Budgeting it separately
+     is what turns ~300px of dead felt into bigger cards. Keyed on the
+     PLAYSIDE being present rather than on `ph-play`: the completed-trick hold
+     keeps the board up after the phase has already flipped to `over`, and a
+     phase-keyed budget shrank the cards for exactly that beat. The same
+     same `dis-rail-*` class the auction/result rail rules below use. */
+  .dis-game .dis-table.dis-rail-play { --dis-rows: 5; --dis-reserve-in: 17.5rem; }
+  .dis-game .dis-table.dis-3seat.dis-rail-play { --dis-reserve-in: 28.5rem; }
+  /* QUARTET NEEDS ITS OWN, and the absence of one is what put a player's own
+     hand off the bottom of the screen at every desktop size. `.dis-rail-play`
+     above is a THREE-class selector, so a two-class `.dis-table.dis-4seat`
+     could never win against it -- the four-seat board silently charged the
+     TWO-seat budget (two hands plus two pile rows) while rendering four full
+     hand rows. Measured at 1440x900 before the fix: the fourth seat ran
+     y=810..1040 against a 900px viewport. */
+  .dis-game .dis-table.dis-4seat.dis-rail-play { --dis-reserve-in: 28.5rem; }
+  /* Spread whatever slack is left the way a table does — opponent at the far
+     side, your hand nearest you — instead of packing everything to the top. */
+  .dis-game .dis-table { justify-content: space-between; }
+  /* The side column is its own scroller — a long match scorecard must not be
+     able to push the board off the screen. */
+  .dis-game .dis-side { height: 100%; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  /* THE LOBBY'S GUTTER. `.dis` cannot carry it the way `.duel` does: this game
+     uses the shared LobbyHeader, which is full-bleed by design (its background
+     and border-bottom span the window), so padding on the root would inset the
+     header too. The columns ran flush to both screen edges — "OPEN GAMES"
+     touching the left, History the right — where Duel insets 14px and CoC 22. */
+  .dis .lby-cols { padding-inline: 16px; }
+}
+
+/* ── WIDE DESKTOP: a column each side of the felt ───────────────────────────
+   At 1080p the two-column board spent its width on nothing. Everything the
+   round is about was stacked in one right-hand column — most of it empty below
+   the fold — and the whole left half of the screen was bare page. So the match
+   gets the LEFT column and the round's own information keeps the right; the
+   felt takes what is between them, and there is no bare page left over.
+
+   1200px is where that pays: two 17rem flanks plus the gutters leave ~600px of
+   middle, comfortably more than the seven cards need at any height this tier
+   can produce. Below it the tier above keeps the single right-hand column —
+   flanking a 400px middle would start costing the cards, which is the wrong
+   trade.
+
+   A CLASS THE RENDERER SETS (`dis-has-match`), not `:has()`: the panel is
+   CONDITIONAL (a
+   game saved before matches existed has none), and reserving a third column
+   for an element that is not there would re-create the empty flank this is
+   here to remove. */
+@media (min-width: 1200px) and (min-height: 600px) {
+  /* THE RAIL TAKES A WHOLE COLUMN, so a hand's row is that much narrower --
+     the same subtraction `--dis-cw`'s width branch makes.
+     IT BELONGS IN THIS BLOCK AND NOT THE 761px ONE, which is where it first
+     went: the rail GRID is created here, at 1200px, so subtracting its width
+     at 820 charged the row for a column that was not there and the fan solved
+     to a 15% visible strip -- cards almost entirely buried, on the one
+     viewport with room to spare. */
+  .dis-game .dis-table { --dis-rowspace: calc(100cqw - var(--dis-rail) - 2.5rem); }
+  .dis-game .dis-main.dis-has-match {
+    grid-template-columns: minmax(15rem, 17rem) minmax(0, 1fr) minmax(15rem, 17rem);
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .dis-game .dis-main.dis-has-match > .dis-side-match { grid-column: 1; grid-row: 1; }
+  .dis-game .dis-main.dis-has-match > .dis-table { grid-column: 2; grid-row: 1; }
+  .dis-game .dis-main.dis-has-match > .dis-side-info { grid-column: 3; grid-row: 1; }
+  /* THE MATCH PANEL FILLS ITS COLUMN, and the middle ground is what makes
+     that work. It stretched originally (a huge blank glowing card beside a
+     full right column at round 1), then was capped to its content (the
+     scorecard stopped short of the bottom while the felt beside it ran the
+     full height, which is what a reader notices). It stretches again — but
+     the SCORECARD is what takes the slack and scrolls in it, so an empty
+     match shows a short list in a full-height panel rather than a tall
+     empty one, exactly the treatment the trick history gets in the other
+     flank. */
+  .dis-game .dis-main.dis-has-match > .dis-side-match {
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .dis-game .dis-main.dis-has-match > .dis-side-match > .dis-panel {
+    flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
+  }
+  .dis-game .dis-main.dis-has-match > .dis-side-match .dis-mcard {
+    flex: 1 1 auto; min-height: 4rem; max-height: none;
+  }
+  /* ── THE PANEL SITS BESIDE THE CARDS, NOT BETWEEN THEM ──────────────────
+     The auction and the round-end report used to be a row IN the column, so
+     they pushed the two seats apart and the card budget had to pay for them:
+     `--dis-rows: 4` against a `30rem` reserve, versus play's 5 against
+     17.5rem. Two costs, both visible. The cards CHANGED SIZE when the round
+     ended — a board you have been reading for thirteen tricks redraws smaller
+     at the one moment you want to compare it with what you just played — and
+     the report is the tallest thing this screen ever shows, so it scrolled
+     inside itself while a third of the felt sat empty either side.
+
+     Beside the cards, both go away: the seats keep the PLAY budget (so the
+     cards are the size they have been all round, at every phase) and the
+     panel gets a full-height column to be tall in.
+
+     The seats auto-place down column 1 and the panel is pinned to column 2
+     spanning the explicit grid, so the row count is the only thing that has
+     to know about the dummy — `.dis-3seat` already says so. `min-height: 0`
+     on the panel is what keeps it OUT of the row sizing: an auto track sizes
+     to a spanning item's min-content otherwise, and the report would set the
+     seats' heights. */
+  /* THE RAIL IS 17rem IN EVERY PHASE, exactly the playside's — not a
+     minmax(17,24) of its own. Two reasons, both paid for: the card-width
+     term below subtracts one rail width, so a rail that could grow to 24rem
+     let the height budget size cards wider than their column and the hand
+     wrapped 5+2 at 1366 (seen in the auction, latent in the report); and
+     the cards-never-change-size-across-phases property only holds if every
+     phase charges the same width. The panel's innards adapt to the column
+     (below) instead of the column adapting to them. */
+  .dis-game .dis-table.dis-rail-auction,
+  .dis-game .dis-table.dis-rail-result {
+    /* THE SAME NUMBERS PLAY USES — see the playside rule for where they come
+       from. All railed phases must charge the identical budget or the board
+       RESIZES when a phase ends: raising play's reserve and leaving these
+       behind made the cards jump the moment a Kontra decision was answered
+       (reported from the live board). The auction and report panels are
+       content-height and centred, so a reserve sized for play costs them
+       nothing — they simply run one card row short of the felt. */
+    --dis-rows: 5; --dis-vden: 7.48; --dis-reserve-in: 6.2rem;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--dis-rail);
+    grid-template-rows: repeat(2, auto);
+    align-content: space-between;
+  }
+  /* THE REPORT GETS A WIDER COLUMN THAN THE OTHER RAILS — 26rem — and it can
+     have it for free. The card-width term below subtracts a FIXED 17rem, not
+     this column, so the cards keep the size they held all round (the property
+     the gate asserts) while the panel that has the most to say gets the room
+     to say it. It is also the one phase where nothing on the felt needs the
+     width: every card has been played, so the seats are empty wells. */
+  /* THE REPORT TAKES THE SAME RAIL AS EVERY OTHER PHASE. It used to claim a
+     wider column (26rem) because it has the most to say — and that is exactly
+     what made the cards SHIFT when a round ended: the cards column is what is
+     left over, so a wider panel moves them. A card must not move because the
+     text beside it changed. Its contents scale to the rail instead. */
+  /* The talon is six cards on ONE row inside the rail, so its card size is
+     derived from the rail rather than picked: six cards plus five gaps must
+     fit `--dis-rail` minus the panel's padding. 34px at 17rem, and the bigger
+     tiers below scale with their wider rails. A wrapped talon row is the
+     failure this avoids. */
+  /* THE REPORT'S SIX TALON CARDS GO TWO ROWS OF THREE. One row of six inside
+     a rail caps each card at about a sixth of it — the thumbnails the report
+     was criticised for. Three per row doubles the width each card gets, and
+     the panel is content-height, so the second row just makes it taller (it
+     may reach past the seats' rows; there is nothing beside it to collide
+     with). `max-width` on the row is what forces the wrap at three rather
+     than leaving it to chance. */
+  .dis-game .dis-table > .dis-result .dis-outrow {
+    gap: 0.4rem; flex-wrap: wrap; justify-content: center;
+    max-width: calc(3 * var(--dis-talon-cw) + 2 * 0.4rem);
+  }
+  .dis-game .dis-table > .dis-result .dis-card.sm { --cw: var(--dis-talon-cw); }
+  /* Every card inside a rail panel takes the board's own ratio, so the talon
+     reads at whatever size the rail gives it. */
+  .dis-game .dis-table > .dis-auction .dis-card,
+  .dis-game .dis-table > .dis-result .dis-card { font-size: calc(var(--cw) * 0.28); }
+  .dis-game .dis-table { --dis-talon-cw: 62px; }
+  .dis-game .dis-table.dis-3seat.dis-rail-auction,
+  .dis-game .dis-table.dis-3seat.dis-rail-result {
+    grid-template-rows: repeat(3, auto);
+  }
+  /* One row per SEAT -- four of them here. */
+  .dis-game .dis-table.dis-4seat.dis-rail-auction,
+  .dis-game .dis-table.dis-4seat.dis-rail-result {
+    grid-template-rows: repeat(4, auto);
+  }
+  .dis-game .dis-table.dis-rail-auction > .dis-seat,
+  .dis-game .dis-table.dis-rail-result > .dis-seat { grid-column: 1; }
+  .dis-game .dis-table > .dis-auction,
+  .dis-game .dis-table > .dis-result { grid-column: 2; grid-row: 1 / -1; }
+  /* In the rail the auction/report sit AS PANELS — the chrome's lit surface
+     at CONTENT height, centered in the column (align-self), never a
+     full-height glowing card (the match column already taught that
+     lesson). max-height keeps the internal-scroll safety valve. */
+  .dis-game .dis-table > .dis-auction,
+  .dis-game .dis-table > .dis-result {
+    /* FILLS ITS TRACK, which is `max-content` — so the panel is exactly as
+       wide as its widest line and there is no bare felt on either side of it.
+       `justify-self: end` was worse than it sounds: an item that is not
+       `stretch` shrinks to FIT-content while the track stays sized to
+       MAX-content, and the difference (194px, measured) became a gap between
+       the cards and a panel pinned to the right. Same object, two widths. */
+    align-self: center; max-height: 100%;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.028) 55%, rgba(255, 255, 255, 0.018));
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 12px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 2px 10px rgba(0, 0, 0, 0.25);
+  }
+  /* The panel's innards fit the 17rem column rather than the column fitting
+     them: tighter side padding, the skat ladder at five columns (six rows of
+     five reads better than seven rows of six squeezed keys), the ladder
+     allowed more of the tall rail before it scrolls, and the denomination
+     keys sized to share one row in classic (skat's declare adds Grand and
+     wraps, centered, which is fine). The ghost Pass gets a visible border —
+     on the felt the theme's default hairline vanishes entirely. */
+  .dis-game .dis-table > .dis-auction { padding: 1rem 0.7rem; }
+  /* max-height none, NOT a bigger cap: the panel is already the scroller
+     (overflow-y above), so a nested ladder scroller here just half-clips
+     its own last row ("60" cut through the middle at 1366x768). One
+     scroller — the panel — and the ladder shows whole whenever it fits. */
+  .dis-game .dis-table > .dis-auction .dis-valgrid {
+    grid-template-columns: repeat(5, 1fr); max-height: none;
+  }
+  .dis-game .dis-table > .dis-auction .dis-denoms button { min-width: 42px; }
+  .dis-game .dis-table > .dis-auction .btn-ghost {
+    border-color: rgba(255, 255, 255, 0.22); color: var(--text);
+  }
+  /* THE REPORT SCALES UP IN THE RAIL, same reason as the playside's type:
+     these lines were sized to share a row with the seats, and alone in a
+     full-height column the round's own verdict read as a footnote. The
+     verdict alone, not every .dis-big — the match verdict deeper in keeps
+     its subordinate size. */
+  .dis-game .dis-table > .dis-result > .dis-big:first-child { font-size: 1.9rem; }
+  .dis-game .dis-table > .dis-result > .muted { font-size: 0.95rem; line-height: 1.45; }
+  .dis-game .dis-table > .dis-result .dis-maths { font-size: 0.95rem; }
+  .dis-game .dis-table > .dis-result { gap: 0.65rem; padding: 1.2rem 0.9rem; }
+  /* ── PLAY'S OWN TEXT SITS BESIDE THE CARDS TOO (2026-08-12) ─────────────
+     The trick counter, the contract chip and the turn bar used to stack
+     BETWEEN the seats, and the card budget paid for every line of it. They
+     ride the rail now, same as the auction and the report — so the middle
+     holds nothing but the trick's own cards. The playside is a grid child,
+     so the trick row count per mode is the row template: three rows for two
+     seats + trick, four with a dummy.
+
+     THE RESERVE IS THE FURNITURE, COUNTED — not a guess with margin. The
+     board is five CARD rows tall (two hands, two pile rows, the trick), so
+     on a 16:9 desktop the HEIGHT is what bounds the cards and every rem of
+     reserve is a rem taken straight off them. What is really left in the
+     middle column at this tier: table padding (1.8rem), the two seat-name
+     rows (~2.75rem), the trick row's name labels (1.25rem), four 0.5rem
+     gaps and two 15px pile peeks (~3.9rem) ≈ 9.7rem — the reserve is
+     10.5rem, ~0.8rem of slack. ≥1440px moves the seat names sideways into
+     the felt's spare width and drops to 9rem (below). All phases in a tier
+     share the number, so the cards never change size across the auction,
+     play and the report — the property the gate asserts. */
+  .dis-game .dis-table { gap: 0.5rem; }
+  .dis-game .dis-table.dis-rail-play {
+    /* 12rem, not 10.5: the counted furniture missed the trick band's own
+       caption line. `.dis-trick`'s min-height is a card row PLUS 1.25rem for
+       the "who played this" name, while the budget counts the trick as one of
+       its five CARD rows and puts only the fixed furniture in the reserve —
+       so the board ran ~24px over its box. At 1080p that landed at exactly
+       zero slack and looked fine; the overflow is proportional to card size,
+       so it only became visible on a big display, where it clipped the near
+       seat's name off the bottom of the felt (reported from a 2560x1600
+       screen). MEASURED, not padded: scrollHeight vs clientHeight at
+       2560x1600, 2560x1400 and 1920x1080.
+
+       IT IS 5.4rem NOW, NOT 12, AND THE DIFFERENCE IS NOT A LOOSENING — the
+       12 was `fixed furniture + the pile peeks`, and the peeks moved into
+       `--dis-vden` where they belong (a peek is 0.24 × the card width, so it
+       grows with the answer). What is left is the genuinely fixed part,
+       MEASURED as `used height − card rows − peeks`: 97px at the base type
+       tier and ~103 at the bigger ones (two name rows and their gaps, the
+       trick's caption, and the table's own row gaps), i.e. ~6.1rem plus a
+       little air. The old
+       constant had to cover the tallest display in its tier, so a 1080p board
+       was charged a 1600p board's peeks: measured 66px of felt left unused at
+       1920x1080, 101 at 1600x900, 148 at 1366x768. Cards came out 9-12%
+       smaller than the screen could hold, which is what this fixes. */
+    --dis-vden: 7.48;              /* 5 card rows × 1.4 + 2 pile peeks × 0.24 */
+    --dis-reserve-in: 6.2rem;
+    display: grid;
+    /* THE RAIL TAKES THE FELT'S SPARE WIDTH — `minmax(--dis-rail, 1fr)`, not a
+       fixed column with the cluster centred. The centred version left slack on
+       BOTH sides: measured 105px at 1700x900 and 168px at 2560x1330 sitting
+       empty to the right of a 272px panel that was scrolling its own content.
+       ALL THREE railed phases share this template on purpose — the same
+       argument as the shared reserve: the cards take what the rail leaves, so
+       a rail that differed by phase would MOVE THE CARDS when a phase ended.
+       Which it did: this rule kept a `max-content` rail after the others went
+       fixed, and the board measured 806+449 in play against 887+368 at the
+       auction and the report — the cards sliding 40px sideways at the top of
+       every round and back at the end of it. */
+    grid-template-columns: minmax(0, 1fr) var(--dis-rail);
+    grid-template-rows: repeat(3, auto);
+    align-content: space-between;
+  }
+  /* THE WIDTH TERM MUST PAY FOR THE RAIL. `100cqw` is the whole table, but a
+     railed board's cards live in column 1 = table minus the 17rem rail — so
+     the un-corrected term let the height budget size cards WIDER than their
+     column, the hand row wrapped, and the wrapped row pushed the bottom seat
+     off the felt (seen at 1366x768; latent for the auction/report rails since
+     they shipped). One rule for every railed state. */
+  .dis-game .dis-table:is(.dis-rail-play, .dis-rail-auction, .dis-rail-result) :is(.dis-seat, .dis-trick) {
+    --dis-cw: max(3.4rem, min(
+      calc((100cqw - var(--dis-rail) - 1.25rem - (var(--dis-slots) - 1) * var(--dis-gap)) / var(--dis-slots)),
+      calc((100cqh - var(--dis-reserve-in)) / var(--dis-vden))
+    ));
+  }
+  .dis-game .dis-table.dis-3seat.dis-rail-play {
+    grid-template-rows: repeat(4, auto);
+  }
+  /* Four seats plus the trick. */
+  .dis-game .dis-table.dis-4seat.dis-rail-play {
+    grid-template-rows: repeat(5, auto);
+  }
+  .dis-game .dis-table.dis-rail-play > .dis-seat,
+  .dis-game .dis-table.dis-rail-play > .dis-trick { grid-column: 1; }
+  /* THE PLAY RAIL IS A PANEL, like the auction's. Three lines of type sitting
+     straight on the felt had nothing to hold them: the counter, the contract
+     and the turn bar read as text scattered on green rather than as the
+     board's status column. Same material as the auction/report panels one
+     rule up, so every phase's rail is the same object. Content height and
+     centered, never a full-height glowing card. */
+  .dis-game .dis-table > .dis-playside {
+    grid-column: 2; grid-row: 1 / -1;
+    min-height: 0; justify-content: center;
+    align-self: center; max-height: 100%;
+    padding: 1rem 0.9rem; gap: 1.1rem;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.028) 55%, rgba(255, 255, 255, 0.018));
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 12px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 2px 10px rgba(0, 0, 0, 0.25);
+    /* Left-anchored beside the trick it captions, not centered in its own
+       far field — cause and caption read as one unit. */
+    align-items: flex-start; text-align: left;
+  }
+  /* IN THE RAIL THE TYPE SCALES UP. These three lines were sized for the
+     sliver between the seats they used to occupy; alone in a full-height
+     column they read as lost. The phone keeps the compact sizes — there
+     they really are wedged between the cards. */
+  .dis-game .dis-table > .dis-playside .dis-trickinfo { font-size: 1.2rem; }
+  .dis-game .dis-table > .dis-playside .dis-trickinfo .dis-val { font-size: 1.15rem; }
+  .dis-game .dis-table > .dis-playside .dis-chip {
+    font-size: 1.05rem; padding: 0.55rem 1rem; gap: 0.6rem;
+  }
+  .dis-game .dis-table > .dis-playside .dis-chip-den { font-size: 1.55rem; }
+  .dis-game .dis-table > .dis-playside .dis-turnbar { font-size: 1.35rem; }
+  .dis-game .dis-table > .dis-playside .dis-mhead { font-size: 0.95rem; }
+  /* The SAME trade on the other flank: the info panels stack from the top and
+     used to leave the bottom third of the column as bare page. The trick
+     history is the one list here that is never finished, so it takes the
+     slack — at 1080p that is all thirteen tricks on screen instead of a
+     five-row window with black underneath it. */
+  .dis-game .dis-main.dis-has-match > .dis-side-info .dis-p-points {
+    flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
+  }
+  .dis-game .dis-main.dis-has-match > .dis-side-info .dis-trickhist {
+    flex: 1 1 auto; min-height: 3rem; max-height: none;
+  }
+}
+
+/* ── FULL-WIDTH DESKTOP (2026-08-12) ──────────────────────────────────────
+   THE SEAT NAME STAYS WITH ITS OWN CARDS, ALWAYS — above the opponent's,
+   below yours, in flow, at every width and in every phase. It does not move.
+
+   It briefly did move: at 16:9 the five stacked card rows are HEIGHT-bound
+   while the felt has hundreds of px of spare WIDTH, so the two non-card rows
+   in the middle column were absolutely placed at the felt's left edge to buy
+   the cards their height back (reserve 9rem instead of 10.5rem). That trade
+   is rejected — REPORTED FROM THE LIVE BOARD, and it is two separate faults,
+   which is why the whole idea goes rather than the worse half:
+     * the anchor is the SEAT box, and the seat is a `max-content` column, so
+       its left edge is wherever the widest row happens to be. In play that
+       is the seven-card hand and the name sits clear on the felt; at the
+       report every card is spent and the widest row is three empty wells, so
+       the same rule parked the name ON the first well.
+     * even when it does not collide it MOVES — sideways at the auction, back
+       at the report, a different offset per phase — and a label that names
+       who a row of cards belongs to has to be somewhere the eye can stop
+       looking for it.
+   The ~1.5rem of card height it bought is not worth either. The 3-seat
+   reserves that used to be re-asserted here went with it: the dummy's budget
+   is one block now (see THE DUMMY'S RESERVES below), and a per-width tier of
+   its own only mattered while its divisor was wrong. */
+/* The dummy's numbers are re-asserted after the big-screen block below so the
+   generic 2-seat reserve cannot claim a 3-seat table. */
+
+/* ── BIG DISPLAYS: THE RAIL GROWS WITH THE BOARD ──────────────────────────
+   On a 2560x1600 screen the height budget puts the cards near 190px, and a
+   17rem rail beside them is a strip — the talon's three cards render at the
+   default ~57px next to board cards three times their size, which is what
+   makes the panel read as cramped rather than small. The rail is a fraction
+   of the screen, not a constant.
+
+   IT COSTS THE CARDS NOTHING AT THESE WIDTHS, and that is checkable rather
+   than hoped for: the card size is `min(width term, height term)` and a
+   16:10 screen this wide is HEIGHT-bound with hundreds of px of slack in
+   the width term, so widening the rail moves the term that is not binding.
+   `--dis-rail` feeds both the grid and that term, so even if a window ever
+   made width bind, the two cannot disagree. */
+/* THE CLAIM ABOVE IS TRUE ONLY BECAUSE THE FLANKS GIVE WAY FIRST, and that
+   is worth stating because it was measured false once. At 1920x1080 the width
+   term with a 23rem rail read 112.6px against a height term of 112.5 -- dead
+   even, so every rem of rail came straight off the cards. What fixed it was
+   not narrowing the rail (worth 2.4px of card and a visibly smaller panel)
+   but the FLANKS: their own widening is gated on height now, so a 1080p board
+   keeps 17rem side columns and hands the middle 96px, which puts the width
+   term back above the height term where this comment assumes it. Rail and
+   flanks are the same budget seen from two ends; if one grows on a short
+   screen the other must not. */
+@media (min-width: 1800px) { .dis-game .dis-table { --dis-rail: 23rem; } }
+@media (min-width: 2200px) { .dis-game .dis-table { --dis-rail: 26rem; } }
+/* ...and what the panels put in that room: the cards they show scale toward
+   the board's, and the type comes up with them. A talon you are choosing
+   from should not be a row of thumbnails beside a hand of full-size cards. */
+@media (min-width: 1800px) {
+  /* THE TALON IS THREE CARDS IN A COLUMN THAT HOLDS SIX at the report, so it
+     has room to be far bigger than the rail's other cards. Sized from the
+     rail: three of these plus two gaps fit inside it with the panel's padding
+     off. */
+  .dis-game .dis-table > .dis-auction .dis-card { --cw: 104px; }
+  .dis-game .dis-table { --dis-talon-cw: 92px; }
+  .dis-game .dis-table > .dis-auction .dis-card.sm { --cw: 92px; }
+  .dis-game .dis-table > .dis-auction { padding: 1.2rem 1rem; gap: 0.9rem; }
+  .dis-game .dis-table > .dis-auction .dis-contract {
+  white-space: nowrap; font-size: 1.7rem; }
+  .dis-game .dis-table > .dis-auction .muted { font-size: 0.92rem; }
+  .dis-game .dis-table > .dis-auction > .muted:first-child { font-size: 0.86rem; }
+  /* The CONTROLS scale too, not just the prose. A Kontra box whose rows and
+     buttons stay laptop-sized in a 1500px column reads as a dialog someone
+     forgot to finish, however well it fits. */
+  .dis-game .dis-table > .dis-auction .btn { font-size: 1rem; padding: 0.7rem 1.3rem; }
+  .dis-game .dis-table > .dis-auction .dis-ktable .dis-scorerow { font-size: 1rem; }
+  .dis-game .dis-table > .dis-auction .dis-hint { font-size: 0.92rem; }
+  .dis-game .dis-table > .dis-auction .dis-bidgrid button,
+  .dis-game .dis-table > .dis-auction .dis-valgrid button { font-size: 1rem; padding: 0.62rem 0.2rem; }
+  .dis-game .dis-table > .dis-auction .dis-denoms button { font-size: 1.25rem; min-width: 52px; }
+  .dis-game .dis-table > .dis-auction .dis-clears { font-size: 0.88rem; }
+}
+@media (min-width: 2200px) {
+  .dis-game .dis-table > .dis-auction .dis-card { --cw: 120px; }
+  .dis-game .dis-table { --dis-talon-cw: 108px; }
+  .dis-game .dis-table > .dis-auction .dis-card.sm { --cw: 108px; }
+  .dis-game .dis-table > .dis-auction .btn { font-size: 1.12rem; padding: 0.8rem 1.5rem; }
+  .dis-game .dis-table > .dis-auction .dis-ktable .dis-scorerow { font-size: 1.12rem; }
+  .dis-game .dis-table > .dis-auction .dis-contract { font-size: 2rem; }
+  .dis-game .dis-table > .dis-auction .dis-bidgrid button,
+  .dis-game .dis-table > .dis-auction .dis-valgrid button { font-size: 1.12rem; padding: 0.72rem 0.2rem; }
+  .dis-game .dis-table > .dis-auction .dis-denoms button { font-size: 1.4rem; min-width: 60px; }
+  /* The report's own lines, same argument. */
+  .dis-game .dis-table > .dis-result > .dis-big:first-child { font-size: 2.2rem; }
+  .dis-game .dis-table > .dis-result > .muted,
+  .dis-game .dis-table > .dis-result .dis-maths { font-size: 1.08rem; }
+  .dis-game .dis-table > .dis-result .btn { font-size: 1.1rem; padding: 0.78rem 1.4rem; }
+}
+
+/* ── ...AND SO DO THE FLANKS. The side columns are rem-sized, so on a 2560px
+   screen the felt scales (its type is card-derived) while every panel beside
+   it stays laptop-sized — the board grows, the reading matter does not, and
+   the two stop looking like one screen. Each row is nudged rather than the
+   column zoomed: `zoom` would scale the column's BOX as well and overflow the
+   grid track it sits in. The tracks widen to match. */
+@media (min-width: 1800px) and (min-height: 1200px) {
+  .dis-game .dis-main.dis-has-match {
+    grid-template-columns: minmax(17rem, 20rem) minmax(0, 1fr) minmax(17rem, 20rem);
+  }
+  .dis-game .dis-side .dis-panel h4 { font-size: 0.84rem; }
+  .dis-game .dis-side .dis-scorerow { font-size: 1.02rem; }
+  .dis-game .dis-side .dis-ctbid { font-size: 1.62rem; }
+  .dis-game .dis-side .dis-ctline > b { font-size: 1.05rem; }
+  .dis-game .dis-side .dis-ctsub { font-size: 0.92rem; }
+  .dis-game .dis-side .dis-bidlog { font-size: 0.88rem; }
+  .dis-game .dis-side .dis-trickhist { font-size: 0.82rem; max-height: none; }
+  .dis-game .dis-side .dis-th-row .dis-val { font-size: 0.78rem; }
+  .dis-game .dis-side .dis-mcard { font-size: 1rem; }
+  .dis-game .dis-side .dis-mrow-hd { font-size: 0.86rem; }
+  .dis-game .dis-side .dis-dblrow { font-size: 0.92rem; }
+  .dis-game .dis-side .muted { font-size: 0.9rem; }
+  .dis-game .dis-side .dis-card.sm { --cw: 46px; }
+  /* The bid log's cap is a rem, so bigger type showed FEWER calls and cut the
+     last one mid-row — on a screen with room to spare. It grows with them. */
+  .dis-game .dis-side .dis-p-contract .dis-bidlog { max-height: 12rem; }
+  /* The felt's own type keeps pace with the cards it captions. */
+  .dis-game .dis-table > .dis-playside .dis-trickinfo { font-size: 1.4rem; }
+  .dis-game .dis-table > .dis-playside .dis-turnbar { font-size: 1.55rem; }
+  .dis-game .dis-table > .dis-playside .dis-chip { font-size: 1.2rem; }
+  .dis-game .dis-table > .dis-playside .dis-chip-den { font-size: 1.8rem; }
+  .dis-game .dis-table .dis-seatname { font-size: 1rem; }
+  .dis-game .dis-table .dis-trickval { font-size: 1.3rem; padding: 0.2rem 0.7rem; }
+  .dis-game .dis-table .dis-tp .muted { font-size: 0.9rem; }
+  /* The type above is furniture too, so the reserve pays for it — a bigger
+     seat-name row on both seats plus a bigger trick caption is ~8px, which is
+     exactly what put the board back over its box at 1600px tall. */
+  .dis-game .dis-table:is(.dis-rail-play, .dis-rail-auction, .dis-rail-result) {
+    --dis-reserve-in: 6.5rem;
+  }
+}
+@media (min-width: 2200px) and (min-height: 1400px) {
+  .dis-game .dis-main.dis-has-match {
+    grid-template-columns: minmax(19rem, 23rem) minmax(0, 1fr) minmax(19rem, 23rem);
+  }
+  .dis-game .dis-side .dis-panel h4 { font-size: 0.92rem; }
+  .dis-game .dis-side .dis-scorerow { font-size: 1.14rem; }
+  .dis-game .dis-side .dis-ctbid { font-size: 1.85rem; }
+  .dis-game .dis-side .dis-ctsub { font-size: 1.02rem; }
+  .dis-game .dis-side .dis-bidlog { font-size: 0.98rem; }
+  .dis-game .dis-side .dis-trickhist { font-size: 0.92rem; }
+  .dis-game .dis-side .dis-mcard { font-size: 1.1rem; }
+  .dis-game .dis-side .muted { font-size: 1rem; }
+  .dis-game .dis-side .dis-card.sm { --cw: 54px; }
+  .dis-game .dis-side .dis-p-contract .dis-bidlog { max-height: 15rem; }
+  .dis-game .dis-table > .dis-playside .dis-trickinfo { font-size: 1.6rem; }
+  .dis-game .dis-table > .dis-playside .dis-turnbar { font-size: 1.75rem; }
+  .dis-game .dis-table > .dis-playside .dis-chip { font-size: 1.35rem; }
+  .dis-game .dis-table > .dis-playside .dis-chip-den { font-size: 2rem; }
+  .dis-game .dis-table .dis-seatname { font-size: 1.12rem; }
+  .dis-game .dis-table .dis-trickval { font-size: 1.5rem; padding: 0.24rem 0.8rem; }
+  .dis-game .dis-table .dis-tp .muted { font-size: 1rem; }
+  .dis-game .dis-table:is(.dis-rail-play, .dis-rail-auction, .dis-rail-result) {
+    --dis-reserve-in: 6.8rem;
+  }
+}
+
+/* ── table ──────────────────────────────────────────────────────────────── */
+/* Two columns, and the side panels are TWO items stacked in the right-hand
+   one. This is the fallback the viewport-pinned tiers above do not cover — a
+   window under 600px tall, where the page scrolls instead — so it still has to
+   place all three by hand: auto-placement would put the match column under the
+   TABLE, in a fresh row, which is neither of the two layouts anyone wants. */
+.dis-main {
+  display: grid; gap: 0.75rem; align-items: start;
+  grid-template-columns: 1fr 260px;
+  grid-template-rows: auto auto;
+}
+.dis-main > .dis-table { grid-column: 1; grid-row: 1 / span 2; }
+.dis-main > .dis-side-info { grid-column: 2; grid-row: 1; }
+.dis-main > .dis-side-match { grid-column: 2; grid-row: 2; }
+.dis-table {
+  display: flex; flex-direction: column; gap: 0.9rem;
+  padding: 0.9rem; border-radius: 14px;
+  /* The felt is a SURFACE: a soft key light falling from the top, a vignette
+     pooling at the rim, and a grain of woven noise (SVG turbulence) so the
+     green reads as cloth rather than as a flat fill. The rail/border pair —
+     a dark edge with a 1px inner highlight — gives the table its lip. */
+  background:
+    radial-gradient(130% 90% at 50% 22%, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0) 58%),
+    radial-gradient(140% 110% at 50% 115%, rgba(0, 0, 0, 0.36), rgba(0, 0, 0, 0) 50%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.09 0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E") repeat,
+    linear-gradient(180deg, #1e4230 0%, #183827 55%, #132c1f 100%);
+  border: 1px solid rgba(8, 14, 10, 0.65);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 0 0 6px rgba(0, 0, 0, 0.14),
+    inset 0 0 52px rgba(0, 0, 0, 0.24),
+    0 10px 28px rgba(0, 0, 0, 0.35);
+}
+.dis-seat { display: flex; flex-direction: column; gap: 0.4rem; align-items: center; }
+/* TEXT ON THE FELT NEEDS ITS OWN DIM, and this is why: `--text-dim` (#8a7d6a)
+   is a warm beige chosen against the site's near-black panels, where it has
+   real contrast. The table is a mid-green (composites to about rgb(30,62,46)),
+   and the same beige lands close enough in value to sit ON the green rather
+   than over it — measured around 2.6:1, under the 4.5:1 a body-size label
+   wants. `--felt-dim` is a light, very slightly warm grey that reads at every
+   card size and does not compete with the ivory faces. Anything the table
+   prints (seat names, the trick line, the "who played this" caption, empty
+   states) takes it; the panels keep the site token. */
+.dis-table { --felt-dim: rgba(233, 240, 232, 0.72); }
+.dis-table .muted, .dis-table .dis-trickinfo { color: var(--felt-dim); }
+.dis-seatname { font-size: 0.85rem; color: var(--felt-dim); display: flex; gap: 0.5rem; align-items: center; }
+.dis-seatname b { color: #f2f7f1; }
+
+.dis-trick {
+  /* Reserved off the SAME token as the card, not a literal. 96px had slack over
+     a 56px card (78px tall) and silently lost it the moment cards grew — an
+     empty trick reserving less than the card that lands in it is the measured
+     layout shift the hand row already guards against, one row up the table.
+
+     The 1.25rem past the card row covers the "who played this" name under a
+     played card, so an EMPTY trick ("Your lead") reserves what a full one
+     occupies and the board does not redistribute between tricks. The trick
+     line/chip/turn bar that used to stack here live in `.dis-playside` now —
+     in flow below on small screens, in the rail beside the felt on a wide
+     desktop — so a squeeze still cannot make two rows overlap. */
+  min-height: max(96px, calc(var(--dis-cw) * 1.4 + 2px + 1.25rem));
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 0.15rem; position: relative;
+}
+/* THE TRICK ROW IS CARDS + WHAT THEY ARE WORTH, side by side — the pill is a
+   member of the row rather than something placed over it, so it tracks the
+   cards at any size and at any count (a dummy trick is three cards wide) and
+   the cluster stays centred as a unit. Beside, not under: the band's reserved
+   height is the card row plus one name line, and stacking would either eat
+   that reserve or grow the band and cost the cards their height. */
+.dis-trickcards { display: flex; align-items: center; justify-content: center; gap: 1.2rem; }
+.dis-trickval { font-size: 1.05rem; padding: 0.16rem 0.6rem; align-self: center; }
+/* The trick's value is the whole game, so the pill on the trick line is loud.
+   It is now the ONLY place the parity is shown — the 13-cell +2/-1 strip that
+   used to sit under the board was removed as noise. */
+.dis-val { font-weight: 800; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.9rem; }
+.dis-val.good { background: rgba(70, 190, 120, 0.2); color: #6fe0a0; }
+.dis-val.bad { background: rgba(220, 90, 90, 0.18); color: #ff9a9a; }
+
+/* In flow, never positioned over the cards (see `.dis-trick`).
+   `flex-shrink: 0` so a squeezed band takes it out of the CARDS' height rather
+   than crushing a one-line label to nothing. */
+.dis-trickinfo {
+  flex-shrink: 0;
+  font-size: 0.72rem; line-height: 1.15; color: var(--text-dim);
+}
+
+/* Everything the play middle says that is not a card: the trick counter, the
+   contract chip, the turn bar. One block so the wide desktop can lift the
+   whole thing into the rail beside the felt in a single move; on small
+   screens it stacks under the trick exactly where these lines always were. */
+.dis-playside {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 0.55rem; text-align: center;
+}
+
+
+/* ── auction ────────────────────────────────────────────────────────────── */
+.dis-auction { display: flex; flex-direction: column; gap: 0.8rem; align-items: center; padding: 1rem; }
+/* Every auction-family panel opens with a title div (Auction / The talon /
+   Declare / Kontra?), and it wore plain muted body type — the one heading on
+   the screen that didn't. It takes the chrome's own header voice: gold
+   smallcaps, tracked out, with the panels' hairline rule under it. The
+   selector leans on the panels' real shape (title first, always) rather
+   than a class threaded through seven JSX sites. */
+.dis-auction > .muted:first-child {
+  font-size: 0.8rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.1em; color: rgba(216, 183, 104, 0.8);
+  align-self: stretch; text-align: center;
+  padding-bottom: 0.45rem; border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.dis-contract {
+  font-size: 1.5rem; font-weight: 800; letter-spacing: 0.01em;
+  display: flex; align-items: center; gap: 0.4rem;
+}
+/* Optical correction: the suit glyphs sit on the baseline a hair below the
+   numeral's optical centre at this display size. */
+.dis-contract .dis-suit-r, .dis-contract .dis-suit-b {
+  position: relative; top: -0.055em;
+}
+/* Centered FLEX at fifth-widths, not a 5-column grid: a responder's legal
+   set is often 3 levels, and grid tracks left the short row hugging the
+   left edge with two dead tracks beside it — it read as half-loaded. Flex
+   centers any count, and the fixed basis keeps a full 1..10 set forming
+   the same two clean rows of five the grid drew. */
+/* THE STANDING-BID LINE RESERVES ITS ROW even before anything stands, so the
+   keypad below it does not drop 33px the moment the first bid lands. One line,
+   fixed: the text swaps, the geometry does not. */
+/* The holder's name, riding INSIDE the contract line so the standing bid is one
+   row -- "Ada 5♦". Sized in `em` so it tracks the contract's own responsive
+   font-size rather than needing a copy at each breakpoint, and NOWRAP on the
+   line because a long name plus a two-digit level would otherwise wrap in the
+   17rem rail and push the keypad down, which is the failure the row's
+   `min-height` reserve exists to prevent. */
+.dis-holder { font-size: 0.58em; font-weight: 600; opacity: 0.75; }
+/* What a contract pays and costs. RESERVES ITS HEIGHT like the contract row
+   above it: it is empty until there is something to price, and a row that
+   appeared when the first bid landed would push the keypad down -- the failure
+   this panel has already been through twice. `nowrap` for the same reason the
+   contract line has it: two numbers plus their labels wrapping in the 17rem
+   rail costs a second line and moves everything below. */
+.dis-worth {
+  min-height: 1.2em; line-height: 1.2; text-align: center;
+  /* `--text-dim`, NOT `--muted` -- this sheet has no such token, and a
+     var() that resolves to nothing makes the browser drop the whole
+     declaration silently. `shared/tests/test_css_tokens.py` caught it. */
+  font-size: 0.82rem; color: var(--text-dim); white-space: nowrap;
+}
+.dis-worth b { color: var(--text); font-weight: 700; }
+/* The SELECTED bid's price sits under the Bid button, so it reads as a
+   consequence of the pending action rather than as part of the headline. */
+.dis-worth-pick { margin-top: 0.15rem; }
+.dis-worth-lbl { opacity: 0.8; }
+/* ...and the row above it, for the same reason one rung up: a standing
+   contract renders at 1.5rem where the placeholder is body text. Reserve the
+   taller form's height so the swap costs no layout. */
+/* 2.2rem, and the number is arithmetic rather than taste: the contract renders
+   at `font-size: 1.5rem` in a panel whose line-height is ~1.4, i.e. a 2.1rem
+   line box, where the placeholder is body text. Reserving 1.9rem left the
+   taller form 3px over its row — measured — and the keypad below inherited
+   exactly that as a jump. `line-height: 1` on the row keeps the box from
+   inheriting a second time. */
+.dis-contractrow {
+  min-height: 2.2rem; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+}
+.dis-bidlog { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; width: 100%; max-width: 420px; }
+.dis-bidlog div { display: flex; justify-content: space-between; padding: 0.15rem 0.4rem; border-radius: 6px; background: rgba(255, 255, 255, 0.04); }
+/* IN THE CONTRACT PANEL the log is a footnote under the contract it produced,
+   not a panel of its own — hence the rule and the smaller type, matching the
+   scorecard's treatment under the match total. It scrolls in place: an auction
+   is usually three or four calls but has no fixed length, and a long one must
+   not push the Last trick panel off the bottom of the column. */
+.dis-p-contract .dis-bidlog {
+  margin-top: 0.45rem; padding-top: 0.4rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  max-height: 7.5rem; overflow-y: auto; font-size: 0.72rem;
+}
+
+/* THE ROUND'S TRICKS, under the running points they explain. Newest first, so
+   the rows being reasoned about are the ones at the top and the list does not
+   have to be scrolled to be current. Same shape as the scorecard above it: a
+   rule, quieter type, tabular numbers, and a fixed window that scrolls rather
+   than a panel that keeps growing. */
+.dis-trickhist {
+  display: flex; flex-direction: column; gap: 0.15rem;
+  margin-top: 0.45rem; padding-top: 0.4rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  max-height: 11rem; overflow-y: auto;
+  font-size: 0.72rem; font-variant-numeric: tabular-nums;
+}
+.dis-th-row {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.12rem 0.35rem; border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.dis-th-n { color: var(--text-dim); flex: 0 0 auto; min-width: 1.6rem; }
+/* The only variable-width thing in the row, so it ellipsises rather than
+   wrapping the row to two lines — the same treatment the scorecard's declarer
+   column gets, for the same reason. */
+.dis-th-who { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dis-th-row .dis-val { font-size: 0.7rem; padding: 0.05rem 0.4rem; flex: 0 0 auto; }
+
+/* ── side panel ─────────────────────────────────────────────────────────── */
+.dis-side { display: flex; flex-direction: column; gap: 0.7rem; }
+/* The match panel now has a `.dis-side` of its own (`.dis-side-match`), so it
+   is last by being the last COLUMN rather than by ordering within a shared
+   list. The `order` is kept because it costs nothing and still holds the line
+   if a second panel is ever added beside it. */
+.dis-p-match { order: 1; }
+/* Panels share the table's material language: a softly lit surface (top
+   highlight, gentle falloff) sitting just above the page, never louder than
+   the felt they flank. Headers are the deck's gold in tracked smallcaps
+   over a hairline rule — the same brand ink as the card backs' medallion. */
+.dis-panel {
+  padding: 0.85rem 0.9rem; border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.028) 55%, rgba(255, 255, 255, 0.018));
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 2px 10px rgba(0, 0, 0, 0.25);
+}
+.dis-panel h4 {
+  margin: 0 0 0.5rem; font-size: 0.74rem; text-transform: uppercase;
+  letter-spacing: 0.1em; color: rgba(216, 183, 104, 0.8);
+  padding-bottom: 0.35rem; border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.dis-scorerow { display: flex; justify-content: space-between; font-size: 0.92rem; padding: 0.15rem 0; }
+.dis-scorerow b { font-variant-numeric: tabular-nums; }
+
+/* The match scorecard, under the running total: one line per round played.
+   It SCROLLS IN PLACE rather than growing the panel — a match runs a median of
+   ten rounds and has been seen past sixteen, and a column that keeps getting
+   taller pushes the Last trick panel off the bottom of a laptop screen by the
+   back half of the match. The cap is deliberately a hair under six rows, so
+   there is always a part-row showing and the list reads as scrollable.
+
+   THE GRID IS ON THE CONTAINER AND EVERY ROW IS `display: contents` — with a
+   grid per row the `auto` columns are sized per row, so the Pts and Score
+   columns would step in and out by a character as the numbers changed and the
+   header would line up with nothing. One grid, one set of column widths. */
+.dis-mcard {
+  /* The round number sizes to ITSELF (`max-content`), not to a 1.6rem slot.
+     The slot was wide enough for a three-digit round nobody will ever play,
+     so every line opened with a gap between the number and the contract it
+     belongs to — the two are one label and read as one. The remaining
+     0.25rem is the space between a list marker and its item; the wider
+     0.4rem gap stays between the number COLUMNS on the right, which are
+     separate quantities. */
+  /* FOUR columns since the DD figure moved into the round's story: #,
+     contract, points, score. A fifth track for a cell nobody renders is not
+     free — the row measured wider than its box. */
+  display: grid; grid-template-columns: max-content minmax(0, 1fr) auto auto;
+  gap: 0.12rem 0.4rem; align-items: baseline;
+  /* ROWS PACK TO THE TOP. The card takes the slack in its column now (so a
+     long match uses the height it is given), and a grid's default
+     `align-content` is stretch — which spread four played rounds evenly down
+     a 900px column, a ladder of lonely lines with no relation to each other.
+     `start` keeps them a list. */
+  align-content: start;
+  margin-top: 0.45rem; padding-top: 0.4rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  max-height: 9.2rem; overflow-y: auto;
+  /* 0.72rem was sized for a 260px column that had to hold the whole side
+     panel. The match has a column to itself now, so the type follows it.
+
+     1rem IS THE MEASURED ANSWER TO THE RIGHT QUESTION, and the first attempt
+     asked the wrong one. Nothing here can WRAP or overflow at ANY size — the
+     name column is `nowrap` and the other four are short numbers in `auto`
+     tracks, so the `1fr` name column simply absorbs whatever the numbers take
+     (verified to 22px: no cell overflows its box, the card never overflows its
+     column, a row stays one line). What actually changes with size is only
+     whether a LONG declarer name ellipsises, which that column has always been
+     built to do. So the cap is legibility, not layout: 1rem matches the panel
+     headings around it, and a name past ~12 characters gets the ellipsis it
+     was always going to get in a 250px row. */
+  font-size: 1rem; font-variant-numeric: tabular-nums;
+}
+.dis-mrow { display: contents; }
+.dis-mrow-pts, .dis-mrow-sc, .dis-mrow-hd span:nth-child(3),
+.dis-mrow-hd span:nth-child(4) { justify-self: end; }
+.dis-mrow-hd {
+  color: var(--text-dim); font-size: 0.78rem;
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.dis-mrow-n { color: var(--text-dim); }
+/* Only the number-to-contract gap tightens; the columns on the right keep the
+   grid's own 0.4rem. A negative margin would fight the track sizing, so the
+   cell that owns the gap pays for it. */
+.dis-mrow-n, .dis-mrow-hd span:first-child { margin-right: -0.15rem; }
+/* The declarer's name is the one variable-width thing in a fixed column, so it
+   ellipsises rather than wrapping the row to two lines. */
+.dis-mrow-ct { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
+.dis-mrow-ct.mine { color: var(--text); }
+.dis-mrow-ct b { color: var(--text); }
+/* THE DEFENDER'S BET on the round it doubled. Gold rather than the good/bad
+   pair the Score column uses: a Double is not itself good or bad news — it
+   doubles whichever way the round fell — and it must not read as a third
+   suit colour beside the contract it follows. */
+.dis-mrow-dbl {
+  margin-left: 0.25rem; padding: 0 0.22rem; border-radius: 3px;
+  font-size: 0.72em; font-weight: 800; letter-spacing: 0.02em;
+  color: var(--gold-light, #e8c96a); background: rgba(201, 168, 76, 0.16);
+}
+.dis-mrow-pts { color: var(--text-dim); }
+.dis-mrow-sc { font-weight: 700; }
+.dis-mrow-sc.good { color: var(--accent); }
+.dis-mrow-sc.bad { color: #ff9a9a; }
+/* The DD column — what double dummy would have scored (hover the header for
+   the full sentence). Same vocabulary as Score, one visual step quieter, so
+   the round's REAL result stays the loudest number on the line. */
+.dis-mrow-dd { font-weight: 600; opacity: 0.85; }
+.dis-mrow-dd.good { color: var(--accent); }
+.dis-mrow-dd.bad { color: #ff9a9a; }
+.dis-mrow-dd.muted { opacity: 0.6; }
+
+/* ── result ─────────────────────────────────────────────────────────────── */
+.dis-result { text-align: center; padding: 1rem; display: flex; flex-direction: column; gap: 0.5rem; align-items: center; }
+.dis-result .dis-big { font-size: 1.6rem; font-weight: 800; }
+/* The verdict is the round's headline — give it the settling weight of a
+   hairline under it, the same sectioning the match standing already draws
+   above itself, so the panel reads verdict / narration / standing as three
+   registers instead of one centered stack. */
+.dis-result > .dis-big:first-child {
+  align-self: stretch; padding-bottom: 0.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  letter-spacing: 0.01em;
+}
+.dis-result .made { color: #6fe0a0; }
+.dis-result .set { color: #ff9a9a; }
+/* The ghost secondary (Back to lobby) needs the same felt-visible border the
+   auction's Pass got — the theme's default hairline vanishes on the table. */
+.dis-result .btn-ghost { border-color: rgba(255, 255, 255, 0.22); color: var(--text); }
+/* The narration must not strand a single word on its own centered line — a
+   sentence sized for the rail wraps, and `balance` splits it evenly instead
+   of leaving "short" alone under it. Progressive: a browser without it just
+   keeps the old wrap. */
+.dis-result > .muted, .dis-result .dis-maths,
+.dis-reveal .muted { text-wrap: balance; }
+/* The suit glyph in "bid 4♠" needs air against the numeral, and the felt
+   rim that earns its keep on the dark board is too loud on the panel's lit
+   surface — one soft ring, not three. */
+.dis-result .dis-suit-r, .dis-result .dis-suit-b {
+  margin-left: 0.09em;
+  text-shadow: 0 0 1px rgba(255, 255, 255, 0.85), 0 0 2px rgba(255, 255, 255, 0.45);
+}
+/* THIS ROUND vs the MATCH: labelled in the section-header voice and a step
+   smaller than the match total, because in round 1 the two rows carry the
+   same numbers and read as an accidental duplicate otherwise. */
+.dis-round-tally { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; }
+.dis-round-tally > .muted:first-child {
+  font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.1em; color: rgba(216, 183, 104, 0.8);
+}
+.dis-round-tally .dis-scorerow { gap: 1.5rem; font-size: 1.02rem; justify-content: center; }
+.dis-match .dis-match-total { gap: 1.5rem; font-size: 1.35rem; }
+.dis-maths { font-size: 0.85rem; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+/* THE ROUND'S TWO CURRENCIES, colour-keyed between the sentence and the
+   formula under it: the same number is the same colour in both, so "took 3
+   extra points" and the `+ 3` it becomes read as one quantity rather than two
+   coincidences. The contract is the plain full-strength text (the dark
+   theme's stand-in for black), trick POINTS are blue, and the SCORE — the
+   only number that reaches the scoreboard — is the green this panel already
+   uses for a made contract. */
+.dis-n-lvl { color: var(--text); font-weight: 700; }
+.dis-n-pts { color: #7fb8ff; font-weight: 700; }
+.dis-n-score { color: #6fe0a0; font-weight: 700; }
+
+/* The match standing under the round's own result: separated by a rule, since
+   the two score rows are the same shape and read as one list otherwise. */
+.dis-match {
+  display: flex; flex-direction: column; align-items: center; gap: 0.2rem;
+  padding-top: 0.5rem; margin-top: 0.2rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12); align-self: stretch;
+}
+.dis-match .dis-scorerow { justify-content: center; }
+.dis-match .dis-big { font-size: 1.25rem; margin-top: 0.2rem; }
+.dis-resbtns { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; }
+
+.dis-turnbar { display: flex; align-items: center; justify-content: center; gap: 0.6rem; font-size: 0.9rem; min-height: 1.6rem; }
+/* "Your turn" breathes — a slow opacity swell, no layout movement, so the
+   one line that asks for action registers without flashing. */
+.dis-yourturn { color: var(--accent); font-weight: 700; animation: dis-turnbreathe 2.4s ease-in-out infinite; }
+@keyframes dis-turnbreathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.62; } }
+
+/* v2: the Null bid stands apart from the number ladder */
+
+/* ── skat mode ──────────────────────────────────────────────────────────────
+   A second auction over the same table, so everything here reuses the bid-grid
+   vocabulary above rather than inventing a parallel one. */
+
+/* Why the hand narrowed: must-head is in force and this seat holds a winner.
+   Beside "Your turn", quiet enough not to compete with it. */
+.dis-mhead {
+  margin-left: 0.5rem; font-size: 0.72rem; letter-spacing: 0.04em;
+  color: var(--accent-hi); opacity: 0.9;
+}
+
+/* Lobby-card badges breathe: the shared `.lby-badge` carries no margin of its
+   own (JSX adjacency gives it none), so on a row with no mode badge "Your
+   turn" sat flush against the opponent's name. Scoped to this game — other
+   lobbies space their badges their own way, and a margin on the shared class
+   would double up wherever they already do. Matches `.dis-modebadge`'s gap. */
+.dis .lby-card-title .lby-badge { margin-left: 0.4rem; }
+
+/* Which auction a room runs. Classic is the default and carries no badge. */
+.dis-modebadge {
+  margin-left: 0.4rem; padding: 0.05rem 0.4rem; border-radius: 999px;
+  font-size: 0.62rem; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase; vertical-align: middle;
+  background: rgba(138, 111, 216, 0.18); color: #b9a5f2;
+  border: 1px solid rgba(138, 111, 216, 0.45);
+}
+
+/* The value ladder is longer than the 1..12 level row, so it scrolls in place
+   rather than pushing the table off the screen. */
+.dis-valgrid {
+  display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.35rem;
+  width: 100%; max-width: 420px; max-height: 26vh; overflow-y: auto;
+  padding-right: 2px;
+}
+.dis-valgrid button {
+  padding: 0.45rem 0.2rem; border-radius: 9px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.05));
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.14); cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 1px 3px rgba(0, 0, 0, 0.22);
+}
+/* `:not(.on)` for the reason spelled out at .dis-bidgrid: this pair TIES on
+   specificity and only keeps its green because `.on` happens to come second.
+   Reordering these two lines would silently break it, so say it in the selector. */
+.dis-valgrid button:hover:not(.on) { background: rgba(255, 255, 255, 0.15); }
+.dis-valgrid button.on {
+  background: var(--accent); color: var(--ink); border-color: transparent;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.28);
+}
+
+/* The collision list: one number, several games. This IS the mode's argument,
+   so it is shown rather than explained. */
+.dis-clears {
+  display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center;
+  justify-content: center; font-size: 0.78rem; max-width: 420px;
+}
+/* The label is a LINE, not the first chip: sharing the flex row with six
+   chips wrapped the sixth (1Grand) onto an orphaned second line in the
+   desktop rail. As a full-width line the six chips fit the 17rem column
+   in one centered row, and the label reads as the caption it is. */
+.dis-clears > .muted { flex-basis: 100%; text-align: center; }
+.dis-clear {
+  padding: 0.05rem 0.4rem; border-radius: 6px; font-weight: 700;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.06));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+/* At chip size the ♣/♠ pips read as identical black blobs — the glyph, not
+   the chip, gets the size (an em, so it rides the chip's own scale). */
+.dis-clear .dis-suit-r, .dis-clear .dis-suit-b { font-size: 1.25em; }
+
+/* EVERY ACTION ROW IN AN AUCTION-FAMILY PANEL, and it WRAPS. These were eight
+   inline `display:flex; gap:.5rem` divs, three of which also set `flexWrap`
+   and five of which did not — so a row whose labels grew simply overflowed.
+   `Swap 7♣ for 8♠` beside `Stand pat` is exactly that row, and the overflow
+   was HORIZONTAL, which is the failure I kept missing: `overflow-y: auto` on
+   the panel computes `overflow-x` to `auto` as well, so a too-wide row gives
+   the panel a horizontal scrollbar and clips the second button off the right
+   edge. A wrapped row cannot do that. `white-space: normal` on the buttons is
+   the second half: a label with nowrap forces its own width however narrow
+   the panel gets. */
+.dis-actrow {
+  display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center;
+  max-width: 100%;
+}
+.dis-actrow .btn { white-space: normal; }
+
+.dis-hint { font-size: 0.8rem; max-width: 420px; text-align: center; }
+
+/* The Double's two-sided bet, as rows: what each outcome pays now and what it
+   pays if you take it. The doubled number is the accent so the eye lands on
+   what the bet changes rather than on what it currently is. */
+.dis-ktable { align-self: stretch; display: flex; flex-direction: column; gap: 0.1rem; }
+.dis-ktable .dis-scorerow { font-size: 0.82rem; }
+.dis-ktable b { font-variant-numeric: tabular-nums; color: var(--text-dim); font-weight: 600; }
+.dis-kbig { color: var(--accent); font-weight: 800; }
+
+/* Declaration: the denomination buttons carry their base as a subscript, so
+   the price table is legible without a lookup. */
+.dis-denoms button small {
+  display: block; font-size: 0.6rem; font-weight: 600; opacity: 0.7;
+  margin-top: 1px;
+}
+
+/* Announcements — toggles, not a ladder: each adds one to the multiplier. */
+.dis-anns { display: flex; gap: 0.4rem; flex-wrap: wrap; justify-content: center; }
+.dis-ann {
+  padding: 0.35rem 0.7rem; border-radius: 999px; font-weight: 700;
+  font-size: 0.82rem; cursor: pointer;
+  background: rgba(255, 255, 255, 0.06); color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+/* Same guard: Sharp/Open are toggles, and this rule out-specified `.on` too. */
+.dis-ann:hover:not(:disabled):not(.on) { background: rgba(255, 255, 255, 0.14); }
+.dis-ann.on { background: var(--accent); color: var(--ink); border-color: transparent; }
+.dis-ann:disabled { opacity: 0.32; cursor: not-allowed; }
+/* The declare panel's "and Sharp" / "and Open" button. It was #6fa8d8/#a5d0f2 —
+   a blue borrowed from nothing, on a board with no other blue in it. It is an
+   OUTLINE of the accent now, so it reads as the same family as the toggles
+   above it while staying visibly one step down from the solid go button. */
+/* PASS, DECLINE, SKIP AND BACK ARE REAL BUTTONS, and `btn-ghost` did not make
+   them look like any. The shared kit's ghost face is `transparent` with
+   `--text-dim` text on a hairline `--border` — designed for a light panel, and
+   on this board's dark green it measured as an almost invisible rectangle:
+   the SAME failure as the nine bare `.btn`s this file already carries a note
+   about, one variant further along. Ten call sites use it (both Passes, the
+   two stand-pats, the three declines, Back to lobby, the story close), so the
+   fix belongs on the class rather than on each of them.
+   It stays deliberately NOT green: `.dis-gobtn` is the commit, and two solid
+   greens side by side read as two equal choices. This is the bid keys' own lit
+   surface, so a secondary action looks like exactly what it is — a key you can
+   press, subordinate to the one that acts. */
+/* THE EDGE IS AN INSET RING, NOT A BORDER, and that is layout rather than
+   taste: `.btn` is `border: none`, so a 1px border here made a ghost button
+   2px taller than the green one beside it — and with the rail centring the
+   panel, Pass appearing after the opening moved the whole keypad. An inset
+   shadow paints the same edge and occupies no space. */
+.dis .btn-ghost {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.06));
+  color: var(--text);
+  border: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10), 0 1px 3px rgba(0, 0, 0, 0.22);
+}
+.dis .btn-ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.18); border-color: rgba(255, 255, 255, 0.34);
+  color: var(--text);
+}
+.dis .btn-ghost:active:not(:disabled) {
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.25); transform: translateY(1px);
+}
+/* `.dis `-PREFIXED, and that is load-bearing rather than tidy: the rule above
+   is (0,2,0) and sets `color`, so a bare `.dis-annbtn` at (0,1,0) would lose
+   its accent no matter what order the two appear in — the announcement button
+   would come out the same grey as a Pass. Same reason the mobile block at the
+   top of this file prefixes everything. */
+.dis .dis-annbtn { border-color: var(--accent); color: var(--accent); background: none; }
+.dis .dis-annbtn:hover:not(:disabled) { background: var(--accent); color: var(--ink); }
+
+/* Kontra is the defender's one moment of leverage; it reads as a threat — but
+   it is the same KIND OF OBJECT as the go button beside it, and it was not
+   built like one. A flat fill against a pressed-metal key reads as a mock-up
+   next to a control: no lit top edge, no weight under it, and a hover that
+   swapped the whole colour rather than lighting the one it has. Same
+   construction as `.dis-gobtn`, in red — the light comes from the same place
+   on both, which is what makes them one set. */
+.dis-kontrabtn {
+  background: linear-gradient(180deg, #d2606c, #b8434f 55%);
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 2px 8px rgba(0, 0, 0, 0.30);
+}
+.dis-kontrabtn:hover:not(:disabled) { filter: brightness(1.09); }
+.dis-kontrabtn:active:not(:disabled) {
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.28); transform: translateY(1px);
+}
+
+/* ── cards you are allowed to keep looking at ───────────────────────────────
+   All three of these render real cards rather than text codes: a rank+glyph
+   run like "10h 7s Kd" is something you decode, and a row of cards is
+   something you read. They are the same `.dis-card` object as the hand, just
+   `small`. */
+/* A SMALL CARD'S TYPE IS DERIVED FROM ITS WIDTH, exactly like a board card's
+   (`calc(--dis-cw * 0.28)`). It used to be a rem literal beside a `--cw`
+   literal, and the two came apart the moment anything resized the card: the
+   report's talon went to 92px while its rank and pip stayed at 0.62rem, so a
+   big card carried tiny glyphs. Deriving it means a width change can never
+   leave the type behind. */
+.dis-card.sm { --cw: 34px; font-size: calc(var(--cw) * 0.28); }
+
+/* The trick just gone, beside the board. */
+.dis-lasttrick { display: flex; align-items: center; gap: 0.4rem; }
+.dis-lt-play { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; }
+.dis-lt-play .muted { font-size: 0.62rem; }
+/* The winner is marked on the card itself — which of the two took it is the
+   whole point of showing them side by side. */
+.dis-lt-play.won .dis-card { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dis-lt-note {
+  display: flex; flex-direction: column; gap: 0.15rem;
+  font-size: 0.65rem; margin-left: auto; text-align: right;
+}
+.dis-lt-note .dis-val { font-size: 0.7rem; align-self: flex-end; }
+
+/* The talon, and the end-of-round reveal, share a row. */
+.dis-outrow { display: flex; gap: 0.25rem; flex-wrap: wrap; justify-content: center; }
+/* The three the declarer was shown, outlined — the same treatment the round's
+   story uses, so the two screens say "these three" the same way. A ring rather
+   than a tint: the cards themselves are never recoloured. */
+.dis-out-seen .dis-card {
+  box-shadow:
+    0 0 0 2px rgba(216, 183, 104, 0.85),
+    0 0 0 1px rgba(20, 16, 8, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    0 4px 10px rgba(0, 0, 0, 0.28);
+}
+/* ...and the DISCARD is a different fact from a shown card: it is in the
+   talon, in the slot the taken card left, but the declarer was never shown it
+   — it came out of their own hand. Dashed, the badge the round's story already
+   uses for the same card, so the two screens agree. */
+.dis-out-gave .dis-card {
+  outline: 2px dashed #e8c35a; outline-offset: 1px;
+}
+.dis-reveal {
+  display: flex; flex-direction: column; align-items: center; gap: 0.35rem;
+  margin-top: 0.3rem;
+  /* Ruled off like the match standing above it — the reveal is the third
+     section of the report, not a caption floating under the second. */
+  align-self: stretch; padding-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+/* "The talon" and "Match to N" open their sections in the chrome's own
+   header voice — gold smallcaps, quiet size — instead of muted body type. */
+.dis-reveal > .muted:first-child, .dis-match > .muted:first-child {
+  font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.1em; color: rgba(216, 183, 104, 0.8);
+}
+
+/* The contract, in the middle column. The side panel carries the full
+   breakdown but is display:none on a phone, which left the one fact the whole
+   round turns on invisible from the end of the auction onwards. */
+.dis-chip {
+  display: flex; align-items: center; justify-content: center;
+  gap: 0.5rem; flex-wrap: wrap; font-size: 0.78rem; color: var(--text-dim);
+  padding: 0.3rem 0.6rem; border-radius: 999px;
+  /* The same lit surface as the panels, so the one piece of chrome that sits
+     ON the felt belongs to the same family. */
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.035));
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 2px 8px rgba(0, 0, 0, 0.22);
+}
+/* The contract panel's headline: who bought it, and what. The bid is the
+   biggest thing in the box because it is the fact the whole round turns on. */
+.dis-ctline {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 0.5rem; margin-bottom: 0.15rem;
+}
+.dis-ctline > b { font-size: 0.95rem; }
+.dis-ctbid { font-size: 1.45rem; font-weight: 800; letter-spacing: 0.01em; }
+.dis-ctsub { font-size: 0.82rem; color: var(--text-dim); }
+.dis-ctsub b { color: var(--text); font-variant-numeric: tabular-nums; }
+/* The Null condition rides at the end of the money line, a step quieter than
+   the numbers it qualifies. */
+.dis-ctcond { font-size: 0.92em; opacity: 0.85; white-space: nowrap; }
+/* NO SUIT TINT on a contract label -- see the note by `DENOM_LABEL`. Only a
+   real card face is suit-coloured (`.dis-card.red`). */
+.dis-chip-den { font-size: 1.05rem; font-weight: 800; color: var(--text); }
+/* No divider rule: the ×2 is already a distinct colour and weight against the
+   contract beside it, so the pipe was one separator more than the chip needed. */
+.dis-chip-mult { font-weight: 700; color: var(--accent); }
+
+/* A completed trick stays face up for a beat before moving to the Last trick
+   panel, so you actually see the two cards together — the server clears the
+   led card the instant the second one lands. The winner is outlined, which is
+   the whole reason the pause is worth having. */
+.dis-tp { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0.15rem; }
+.dis-tp.won .dis-card { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+
+/* THE DUMMY SEAT (dummy mode, 2026-08-10). A third hand between the opponent
+   and the trick -- where it plays from, since it is second in every trick.
+   Marked out by a dashed edge rather than a colour: the board's accent is
+   already the turn signal and a second solid block would compete with it.
+   `.mine` (the declarer's own view) warms it slightly, because for that
+   player it is a hand they command rather than one they merely watch. */
+.dis-dummy {
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 0.25rem 0.4rem;
+  background: rgba(255, 255, 255, 0.02);
+}
+.dis-dummy.mine { border-color: var(--accent); background: rgba(255, 255, 255, 0.04); }
+.dis-dummy .dis-seatname { opacity: 0.85; }
+
+/* ── QUARTET's two extra hands (2026-08-21) ────────────────────────────────
+   Four hands, two players: `.dis-qopp` is the opponent's second hand (face
+   down, like their first -- both of theirs are hidden, which is the whole
+   reason this mode has finesses) and `.dis-qmine` is the hand opposite YOU,
+   face up and clickable when it is that position's turn.
+
+   Dashed like the dummy seat and for the same reason -- the board's accent is
+   already the turn signal, so a second solid block would compete with it --
+   but the two are NOT the same seat: a dummy is contested between the players
+   every trick, while these belong to one player for the whole round. */
+.dis-qopp,
+.dis-qmine {
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 0.25rem 0.4rem;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* THE PLAY-ORDER PIP -- which of the four seats plays first, second, third and
+   fourth in THIS trick. Small, round, and the same accent the board already
+   uses for "yours", because it is a positional fact rather than a warning.
+   It renders on all four seats and on each card in the trick, and it re-orders
+   every trick, since the winner leads the next one. */
+.dis-qorder {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 1.15rem; height: 1.15rem; padding: 0 0.25rem;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: 0.66rem; font-weight: 700; line-height: 1;
+  margin-inline: 0.3rem 0.1rem;
+}
+/* A SELECTED ANNOUNCEMENT BUTTON HAS TO LOOK SELECTED. `.dis-annbtn` is an
+   outline and nothing in the kit filled it in, so the quartet commit phase
+   drew two identical outlines and gave no sign which had been pressed -- the
+   screen a player got stuck on. Filled accent, matching the hover state, so
+   pressed and hovered agree. */
+.dis .dis-annbtn.sel {
+  background: var(--accent); color: var(--ink); border-color: var(--accent);
+}
+
+/* THE OPPONENT'S TWO HANDS ARE DRAWN SMALL, AND THAT IS THE WHOLE REASON THE
+   BOARD FITS. Four twelve-card hands stacked at full size do not: measured at
+   1440x900 the card had already been driven down to its 3.4rem floor and a
+   player's own hand STILL rendered below the bottom of the screen.
+
+   Shrinking every card further was the wrong lever. A face-down hand carries
+   exactly one piece of information -- how many cards are left -- and spending
+   a full card row on twelve backs to say "12" is the space that was missing.
+   So the two hidden hands render as a tight fan at 60% and the two the player
+   actually reads (their own hand, and the hand opposite them) keep full size.
+   That takes the board from four full rows to two, which is what a 2-seat
+   table already budgets for.
+
+   It also reads better: the two hands you command are now the visually
+   dominant things on the felt, which is what the mode is about. */
+/* THE FAN TUCKS THE RIGHT WAY ALL TWELVE CARDS DEEP. The phone block's ladder
+   runs `nth-child(1..7)` at z-index 8..2 under a note that says in as many
+   words: "A hand is at most 7 cards in every mode; an eighth would fall to the
+   base z-index 1 and tuck the wrong way." Quartet deals TWELVE, so cards 8..12
+   all sat at 1 and painted in DOM order -- the fan reversed direction halfway
+   along the hand, and the visible strip of those cards moved from the right
+   edge to the left.
+   It was not only ugly. A card whose visible part is not where the layout says
+   it is cannot be clicked there either: the render gate drove a whole board it
+   could not play a single card from, and reported it as "no trick was ever
+   four cards wide".
+   Declared in the BASE rules, not the phone block, because quartet fans at
+   every width. */
+.dis-4seat .dis-seat .dis-hand > * { position: relative; }
+.dis-4seat .dis-seat .dis-hand > :nth-child(1) { z-index: 13; }
+.dis-4seat .dis-seat .dis-hand > :nth-child(2) { z-index: 12; }
+.dis-4seat .dis-seat .dis-hand > :nth-child(3) { z-index: 11; }
+.dis-4seat .dis-seat .dis-hand > :nth-child(4) { z-index: 10; }
+.dis-4seat .dis-seat .dis-hand > :nth-child(5) { z-index: 9; }
+.dis-4seat .dis-seat .dis-hand > :nth-child(6) { z-index: 8; }
+.dis-4seat .dis-seat .dis-hand > :nth-child(7) { z-index: 7; }
+.dis-4seat .dis-seat .dis-hand > :nth-child(8) { z-index: 6; }
+.dis-4seat .dis-seat .dis-hand > :nth-child(9) { z-index: 5; }
+.dis-4seat .dis-seat .dis-hand > :nth-child(10) { z-index: 4; }
+.dis-4seat .dis-seat .dis-hand > :nth-child(11) { z-index: 3; }
+.dis-4seat .dis-seat .dis-hand > :nth-child(12) { z-index: 2; }
+
+/* THE FAN, at every width rather than only on a phone -- `.dis .dis-seat` in
+   the phone block does this for every mode, and quartet needs it on the
+   desktop board too because 12 cards is nearly twice the 7 that block was
+   written for.
+   AND IT IS TIERED BY HOW MANY CARDS ARE ACTUALLY IN THE HAND. A flat overlap
+   is only right at the moment of the deal: a quartet hand runs 12 cards down
+   to the 3 it keeps, and a 3-card hand crushed by a 12-card hand's fan is
+   overlapped for no reason at all -- there is a whole row of space beside it.
+   `:first-child:nth-last-child(n+N) ~ *` is how CSS counts siblings: it reads
+   "every card after the first, when the hand holds at least N". Below 8 there
+   is no fan at all, because 7 is what every other mode deals and the row
+   budget has always fitted that whole.
+   THE OVERLAP IS SOLVED, NOT PICKED, and that is the second half. A row of `n`
+   cards needs `(n-1) x (cw + gap + margin) + cw` to fit `--dis-rowspace`, so
+   the margin that just fits is
+   `(rowspace - n x cw - (n-1) x gap) / (n-1)` -- and `min()` with 0 means it
+   is only ever an OVERLAP, never a gap: where there is room the cards simply
+   sit side by side.
+   A FIXED FRACTION CANNOT WORK HERE, which is what three attempts at one
+   showed. The row space is not proportional to the card: the card bottoms out
+   at a 3.4rem floor while the box keeps shrinking, and the railed layout gives
+   a whole column to the rail -- so the tightest case is not the smallest
+   screen but a NARROW DESKTOP. Measured: the hand box is 514px at 1440, 662 at
+   1024 (unrailed, so it gets the lot) and only 354 at 1280. A 0.5 fraction fits
+   the first two and wrapped the third. */
+.dis-4seat .dis-seat .dis-hand > :first-child:nth-last-child(n+8):nth-last-child(-n+10) ~ * {
+  margin-left: min(0px, calc((var(--dis-rowspace) - 10 * var(--dis-cw)
+    - 9 * var(--dis-gap)) / 9));
+}
+.dis-4seat .dis-seat .dis-hand > :first-child:nth-last-child(n+11) ~ * {
+  margin-left: min(0px, calc((var(--dis-rowspace) - 12 * var(--dis-cw)
+    - 11 * var(--dis-gap)) / 11));
+}
+.dis-4seat .dis-qtheirs .dis-hand .dis-card,
+.dis-4seat .dis-qopp .dis-hand .dis-card {
+  --cw: calc(var(--dis-cw) * 0.6);
+  width: var(--cw);
+  height: calc(var(--cw) * 1.4);
+}
+/* The two hidden hands take the same tiers, scaled to the smaller card they
+   are drawn at -- overlapping a 0.6 card by a full-size card's fraction would
+   bury it entirely. Listed after the generic rule above and at equal
+   specificity, which is what lets them win for these two seats. */
+.dis-4seat .dis-qtheirs .dis-hand > :first-child:nth-last-child(n+8):nth-last-child(-n+10) ~ *,
+.dis-4seat .dis-qopp .dis-hand > :first-child:nth-last-child(n+8):nth-last-child(-n+10) ~ * {
+  margin-left: min(0px, calc((var(--dis-rowspace) - 10 * var(--dis-cw) * 0.6
+    - 9 * var(--dis-gap)) / 9));
+}
+.dis-4seat .dis-qtheirs .dis-hand > :first-child:nth-last-child(n+11) ~ *,
+.dis-4seat .dis-qopp .dis-hand > :first-child:nth-last-child(n+11) ~ * {
+  margin-left: min(0px, calc((var(--dis-rowspace) - 12 * var(--dis-cw) * 0.6
+    - 11 * var(--dis-gap)) / 11));
+}
+/* ...and the row they sit in stops reserving a FULL card's height, which is
+   the half that actually gives the space back -- `min-height` on `.dis-hand`
+   is what the height budget spends, not the cards themselves. */
+.dis-4seat .dis-qtheirs .dis-hand,
+.dis-4seat .dis-qopp .dis-hand {
+  min-height: calc(var(--dis-cw) * 0.6 * 1.4 + 2px);
+}
+.dis-qmine { border-color: var(--accent); background: rgba(255, 255, 255, 0.04); }
+.dis-qopp .dis-seatname,
+.dis-qmine .dis-seatname { opacity: 0.85; }
+
+/* FOUR HANDS BUT STILL FOUR CARD ROWS -- quartet deals no piles, so its four
+   hands occupy exactly the rows two seats' hands-plus-piles do and the card
+   size needs no change. What it DOES add is two more seat-name rows, which
+   the reserve has to pay for or the cards grow into them. */
+.dis-table.dis-4seat {
+  /* TWELVE CARDS TO A HAND, NOT SEVEN, AND THEY MUST BE FANNED -- together
+     these decide whether the board fits at all. `--dis-slots` is how many
+     card-widths the row budget divides into; every other mode deals 7 in hand
+     and quartet deals 12.
+     Left at 7 the card was sized for a 7-card row, the hand WRAPPED to a
+     second line, and every seat came out twice as tall as the height budget
+     expected -- which put a player's own hand off the bottom of the screen at
+     every desktop size while the cards themselves looked perfectly reasonable.
+     Measured at 1440x900: card 98px inside a 228px seat, i.e. two card rows
+     where the budget assumed one.
+     A flat 12 is not enough either, and that is the second half. The card has
+     a 3.4rem FLOOR, and 12 unfanned cards at that floor need 653px against a
+     hand box measured at 514 -- so at any realistic width the row still wraps.
+     Fanned at 42% (the overlap the phone board already uses) a row is
+     `cw + 11 x (cw x 0.58 + gap)`, so the slot count is `1 + 11 x 0.58 = 7.38`
+     -- plus the same sliver of margin the phone's 7-card pair carries, and for
+     the same reason: the slot term divides the TABLE's width while the row is
+     laid out inside the narrower hand box. */
+  --dis-slots: 7.6;
+  /* FOUR FULL HAND ROWS. Quartet deals no piles, so `--dis-rows` counts only
+     the four hands -- but four SEATS means four name rows and four gaps, which
+     is furniture the reserve has to pay for, and it is why this is not simply
+     the two-seat budget with the same row count. */
+  --dis-rows: 4;
+  --dis-reserve: 24rem;
+  --dis-reserve-in: 33rem;
+}
+
+/* ── the doubled bet (2026-08-11, re-homed 2026-08-12) ─────────────────────
+   A full-screen ×2 flash announced the bet for a beat and was removed on
+   request: it covered the board at the very moment the declarer wants to
+   read their lead. The bet now lives in the two places a player actually
+   looks — the gold chip on the felt's contract line, and `.dis-dblrow` at
+   the head of the Contract box. Gold on purpose: it is the scorecard's own
+   ×2/×4 colour (`.dis-mrow-dbl`), so the live round and its banked line
+   agree about what the bet looks like. */
+.dis-chip-mult.dbl {
+  color: #e8c35a; border-color: rgba(232, 195, 90, 0.6);
+  background: rgba(232, 195, 90, 0.12);
+  font-weight: 700;
+}
+.dis-dblrow {
+  margin-bottom: 0.4rem; padding: 0.3rem 0.5rem; border-radius: 8px;
+  font-size: 0.82rem; font-weight: 700;
+  color: #e8c35a; background: rgba(232, 195, 90, 0.12);
+  border: 1px solid rgba(232, 195, 90, 0.45);
+}
+
+/* ── the round story (2026-08-11; board-shaped 2026-08-12) ─────────────────
+   A scorecard row opens the whole round face up, laid out like the BOARD:
+   a felt on the left (opponent across the table, you nearest yourself, the
+   out-of-play cards in the middle where the trick lives), the bidding and
+   the settled contract in a column on the right — the live board's own
+   split. The rows advertise it. */
+.dis-mrow-open { cursor: pointer; }
+.dis-mrow-open:hover { background: rgba(255, 255, 255, 0.06); }
+/* The story needs real width — a felt of seven-card rows plus a side column.
+   Scoped by :has so no other modal moves. */
+/* THE FELT IS THE POINT OF THIS MODAL, so it gets the room to be read. The
+   panel was 860px with 34px cards — a seven-card row came to 250px inside a
+   560px column, and the ranks were at the edge of legible while half the
+   panel sat empty. The card size is one variable the felt scales from, and
+   the panel widens with it. */
+.dis .cm-panel:has(.dis-story) { width: min(94vw, 1180px); }
+/* --sc and --sf move TOGETHER — the card's width and the ink on it. They are
+   two variables rather than one derived from the other because `calc(54px *
+   0.0186)` is a PX result, not rem: it silently set a 1px font and the whole
+   felt rendered as blank cards with a pip. Ratio 0.0182rem per px, from the
+   34px/0.62rem base. */
+.dis-story { display: flex; flex-direction: column; gap: 0.65rem; --sc: 54px; --sf: 0.98rem; }
+.dis-story .dis-card.sm { --cw: var(--sc); font-size: var(--sf); }
+/* The pile peek scales with the card, or a bigger card swallows the buried
+   card's index corner — the board's own `--pk` argument at story scale. */
+.dis-story .dis-story-pile {
+  padding-top: calc(var(--sc) * 0.26); padding-right: calc(var(--sc) * 0.26);
+}
+.dis-story-sum { font-size: 1rem; text-wrap: balance; }
+.dis-story-grid {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(12rem, 16rem);
+  gap: 1rem; align-items: start;
+}
+@media (max-width: 1040px) { .dis-story { --sc: 44px; --sf: 0.8rem; } }
+/* A narrow window stacks the two columns — the felt keeps its shape and the
+   bidding follows below it, same as the live board on a phone. */
+@media (max-width: 640px) {
+  .dis-story-grid { grid-template-columns: 1fr; }
+  .dis-story { --sc: 38px; --sf: 0.69rem; }
+}
+/* The felt itself — the table's own surface, so the layout reads as the
+   board it is echoing. */
+/* The felt carries the BOARD's own material at modal scale — the same sheen,
+   vignette and inset frame — so the round reads as the table it was played
+   on rather than a green rectangle behind some cards. */
+.dis-story-felt {
+  display: flex; flex-direction: column; gap: 0.6rem; align-items: center;
+  padding: 0.9rem; border-radius: 12px;
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 55%),
+    radial-gradient(140% 110% at 50% 115%, rgba(0, 0, 0, 0.34), rgba(0, 0, 0, 0) 50%),
+    linear-gradient(180deg, rgba(30, 62, 46, 0.62), rgba(18, 38, 28, 0.62));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    inset 0 0 0 4px rgba(0, 0, 0, 0.13),
+    inset 0 0 34px rgba(0, 0, 0, 0.22);
+}
+.dis-story-seat { display: flex; flex-direction: column; gap: 0.35rem; align-items: center; }
+.dis-story-seatname { font-size: 0.82rem; color: var(--text-dim); display: flex; gap: 0.5rem; align-items: center; }
+.dis-story-seatname b { color: var(--text); }
+.dis-story-side { display: flex; flex-direction: column; gap: 0.7rem; }
+/* The section headers speak the chrome's header voice — gold smallcaps with
+   the panels' hairline under them — instead of dim grey body type, so the
+   modal's BIDDING / CONTRACT / OUT OF PLAY read as the same kind of label as
+   THE TALON and MATCH TO N do on the board behind it. */
+.dis-story-hd {
+  font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.1em; color: rgba(216, 183, 104, 0.8);
+  margin-bottom: 0.35rem; padding-bottom: 0.3rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex; align-items: center; gap: 0.5rem;
+}
+/* ...except over the felt, where a full-width rule would cut the table in
+   half: the out-of-play label is a caption on green, not a panel header. */
+.dis-story-out .dis-story-hd { border-bottom: none; padding-bottom: 0; }
+.dis-story-tag {
+  font-size: 0.68rem; text-transform: none; letter-spacing: 0;
+  border: 1px solid var(--accent); color: var(--accent);
+  border-radius: 999px; padding: 0 0.45rem;
+}
+/* The bid log reads top to bottom in its column, name against call — the
+   same two-column row the contract panel's live log uses. */
+.dis-story-bids { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.85rem; }
+.dis-story-bid {
+  display: flex; justify-content: space-between; gap: 0.35rem; align-items: baseline;
+  padding: 0.12rem 0.4rem; border-radius: 6px; background: rgba(255, 255, 255, 0.04);
+}
+.dis-story-bid > span:first-child { color: var(--text-dim); font-size: 0.78rem; }
+.dis-story-dbl > span:last-child { color: #e8c35a; font-weight: 700; }
+.dis-story-ctline {
+  font-size: 1.3rem; font-weight: 800;
+  display: flex; align-items: center; gap: 0.4rem;
+}
+.dis-story-cards { display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: flex-end; justify-content: center; }
+/* The talon's three badges: shown to the declarer, the discard, the take.
+   Outline + title, never colour alone. */
+.dis-story-shown .dis-card { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dis-story-gave .dis-card { outline: 2px dashed #e8c35a; outline-offset: 1px; }
+.dis-story-took .dis-card { outline: 2px solid #e8c35a; outline-offset: 1px; }
+/* A pile is the BOARD's pile shape, face up: the buried card offset up and
+   to the right so its index corner clears the card that covered it — the
+   same construction as `.dis-pilewrap`, at story scale. */
+.dis-story-piles { gap: 0.55rem; }
+.dis-story-pile { position: relative; display: inline-block; padding-top: 9px; padding-right: 9px; }
+.dis-story-pile .dis-story-buried { position: absolute; top: 0; right: 0; z-index: 0; }
+.dis-story-pile > .dis-card { position: relative; z-index: 1; }
+.dis-story-out { text-align: center; }
+.dis-story-out .dis-story-hd { justify-content: center; }
+/* The caption belongs to the row ABOVE it, so it sits tight under the cards
+   and keeps the felt's own gap below — it was equidistant between the two
+   and read as a label for the pile row it is not describing. */
+.dis-story-note { font-size: 0.78rem; margin-top: 0.15rem; }
+/* PAR: denominations down the side, the two players across — three columns,
+   because the names are long and the numbers are one or two digits. The
+   numeric columns are `1fr` so they sit under their own headers however wide
+   a name runs, and `tabular-nums` keeps a 12 from being wider than an 8. */
+.dis-partable {
+  display: grid; grid-template-columns: auto 1fr 1fr;
+  gap: 0.15rem 0.3rem; align-items: center;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.dis-parhd {
+  font-size: 0.72rem; color: var(--text-dim); text-align: center;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding-bottom: 0.15rem;
+}
+.dis-parden { font-size: 1rem; font-weight: 700; color: var(--text); padding-right: 0.15rem; }
+.dis-parcell {
+  display: flex; align-items: baseline; justify-content: center; gap: 0.25rem;
+  padding: 0.1rem 0.3rem; border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04); font-size: 0.98rem;
+}
+/* The cell that really happened, ringed rather than filled: the number in it
+   is the same kind of number as every other cell, and a filled chip would
+   read as a different quantity. */
+.dis-parcell-played { box-shadow: inset 0 0 0 1px var(--accent); }
+/* ...and each column's best denomination is the NUMBER lit, not the cell:
+   "where this player was strongest" is a property of the value, and a second
+   filled shape would compete with the ring above for the same meaning. */
+.dis-parcell-top b { color: var(--accent-hi, #9fd8a8); }
+.dis-parwait { color: var(--text-dim); opacity: 0.6; }
+.dis-parnull {
+  font-size: 0.62rem; font-weight: 700; line-height: 1;
+  color: #e8c35a; border: 1px solid rgba(232, 195, 90, 0.55);
+  border-radius: 4px; padding: 0.1rem 0.2rem;
+}
+/* The side column is the same PANEL the board's rail carries, and it stretches
+   to the felt's height: at 1180px a short auction left the right third as bare
+   modal ground and the two columns read as different layouts. The surface (not
+   a filler) is what makes them one composition. */
+@media (min-width: 641px) {
+  .dis-story-grid > .dis-story-side {
+    align-self: stretch; padding: 0.75rem 0.8rem; border-radius: 12px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.025) 55%, rgba(255, 255, 255, 0.015));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+}
+
+/* ── THE DUMMY'S RESERVES, LAST WORD ──────────────────────────────────────
+   A three-seat table has an extra hand row and an extra name row, so it
+   cannot take the 2-seat reserve the big-screen blocks above set generically.
+   Re-asserted here, after them, because source order is what decides between
+   two equal-specificity rules. */
+/* ...AND ITS BUDGET IS THE SAME SHAPE AS THE 2-SEAT ONE NOW, because the old
+   one was WRONG AND IT SHOWED. Measured on the railed tier before this: the
+   dummy board ran 278px past its box at 2560x1600 and 118 at 1920x1080, and
+   `.dis-game` clips — so the near seat's whole hand row was simply off the
+   bottom of the screen, in every dummy round, at the resolution the mode was
+   built on. Two causes, both of them arithmetic:
+     * `--dis-rows` is 6 for a dummy table, but PLAY shows SEVEN card rows
+       (three seats of hand + piles, plus the trick), so the divisor was
+       short by a whole row;
+     * the three pile peeks were charged to a fixed reserve, which cannot
+       track a peek that is `0.24 * cw` — the same error the 2-seat budget
+       above was carrying, one seat worse.
+   `10.52` is `7 * 1.4 + 3 * 0.24`, and the reserve is the measured fixed
+   furniture: ~149px at the base type tier and ~165 at the big ones (three name rows
+   and their gaps, the dummy's own labelled box, the trick caption and the
+   table's row gaps -- MEASURED, then checked for overflow at five viewports
+   in both phases). All
+   three railed phases take it, so a dummy board no longer resizes between
+   the auction and play either — it used to run a 14rem reserve at the
+   auction against 25 in play, which is a 106px card becoming an 80px one at
+   the moment the round starts. */
+@media (min-width: 1200px) and (min-height: 600px) {
+  .dis-game .dis-table.dis-3seat:is(.dis-rail-play, .dis-rail-auction, .dis-rail-result) {
+    --dis-vden: 10.52; --dis-reserve-in: 9.3rem;
+  }
+  /* Quartet: four hand rows plus the trick is five card rows, against the
+     three-seat board's seven -- but four name rows and four gaps against its
+     three. Sized by MEASUREMENT at six viewports, not by scaling the ratio. */
+  .dis-game .dis-table.dis-4seat:is(.dis-rail-play, .dis-rail-auction, .dis-rail-result) {
+    --dis-vden: 9.1; --dis-reserve-in: 9.3rem;
+  }
+}
+@media (min-width: 1800px) and (min-height: 1200px) {
+  .dis-game .dis-table.dis-3seat:is(.dis-rail-play, .dis-rail-auction, .dis-rail-result) {
+    --dis-reserve-in: 9.9rem;
+  }
+  .dis-game .dis-table.dis-4seat:is(.dis-rail-play, .dis-rail-auction, .dis-rail-result) {
+    --dis-reserve-in: 9.9rem;
+  }
+}
+@media (min-width: 2200px) and (min-height: 1400px) {
+  .dis-game .dis-table.dis-3seat:is(.dis-rail-play, .dis-rail-auction, .dis-rail-result) {
+    --dis-reserve-in: 10.3rem;
+  }
+  .dis-game .dis-table.dis-4seat:is(.dis-rail-play, .dis-rail-auction, .dis-rail-result) {
+    --dis-reserve-in: 10.3rem;
+  }
+}

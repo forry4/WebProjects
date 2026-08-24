@@ -8,6 +8,6 @@
 # Run from anywhere: .\play_B_tactics.ps1   (Ctrl+C to stop)
 Set-Location (Resolve-Path "$PSScriptRoot\..\..\..")                    # repo root, so `games.spender` imports
 $env:SPENDER_VALUE_MODEL = "none"                                       # rollout MCTS (card weights active)
-$env:SPENDER_WEIGHTS = "games/spender/ai/weights.tactics.json"         # deployed weights + tactical features on
+$env:SPENDER_WEIGHTS = "games/spender/ai/models/weights.tactics.json"  # deployed weights + tactical features on
 Write-Host "=== Config B: opponent-aware TACTICS (weights.tactics.json, rollout MCTS) ===" -ForegroundColor Green
 uvicorn games.spender.main:app --reload

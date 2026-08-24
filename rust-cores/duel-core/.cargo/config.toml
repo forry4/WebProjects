@@ -1,0 +1,16 @@
+# Native builds target THIS box (the crate's native bins are offline tooling only —
+# harvest/gate/bench run here and nowhere else). target-cpu=native unlocks AVX2/AVX-512
+# + FMA on the Ryzen 7645HX (Zen 4) dev box for two kernels in `valuenet.rs`: the chunked
+# f32 `dot` (wider SIMD FMA lanes) and — because Zen 4 HAS avx512vnni — the int8 `qdot`'s
+# `vpdpbusd` VNNI path. Mirrors coc-core/.cargo/config.toml.
+#
+# This does NOT change engine/heuristic float results: Rust keeps strict IEEE (no FP
+# contraction / no float reassociation) unless fast-math is set, so the `parity` / `ai_parity`
+# gates stay bit-exact (the 1e-12 leaf tolerance holds). Only reassociation-safe code (the
+# chunked dot, whose reordering the net's 1e-4 parity absorbs) benefits.
+#
+# The wasm serving build is untouched: target-specific rustflags don't apply to
+# wasm32-unknown-unknown; the wasm build gets SIMD via `-C target-feature=+simd128` on the
+# wasm-pack invocation (which is what enables `qdot`'s i32x4_dot arm in the browser).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-cpu=native"]

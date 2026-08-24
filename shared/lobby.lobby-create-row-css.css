@@ -1,0 +1,39 @@
+.lby-create-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:6px 0 26px}
+.lby-cta,.lby-join-btn,.lby-refresh,.lby-rules,.lby-extra{display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:var(--radius,8px);cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;letter-spacing:.05em;font-weight:600;white-space:nowrap;transition:background .15s,color .15s,border-color .15s}
+.lby-cta{padding:9px 16px;border:none;background:var(--gold,#c9a84c);color:#120c0d}
+.lby-cta:hover{background:var(--gold-light,#e8c96a)}
+.lby-join{display:flex;gap:8px}
+.lby-code{padding:9px 12px;width:130px;background:var(--surface2,#241d16);border:1px solid var(--border,#3a3226);border-radius:var(--radius,8px);color:var(--text,#e8dfce);font-family:'Cinzel','Cinzel Fallback',serif;letter-spacing:.12em;text-transform:uppercase;outline:none}
+.lby-code:focus{border-color:var(--gold,#c9a84c)}
+.lby-join-btn{padding:9px 16px;background:transparent;color:var(--gold,#c9a84c);border:1px solid var(--gold,#c9a84c)}
+.lby-join-btn:hover{background:var(--gold,#c9a84c);color:#120c0d}
+.lby-refresh{width:38px;height:38px;padding:0;font-size:1rem;background:transparent;color:var(--text-dim,#b8ab90);border:1px solid var(--border,#3a3226)}
+.lby-refresh:hover{color:var(--text,#e8dfce);border-color:var(--text-dim,#b8ab90)}
+.lby-refresh .lby-spinner{width:15px;height:15px;border-width:2px}
+/* Rules sits to the RIGHT of refresh and carries the game's accent, because it is
+   the only entry point to the how-to-play for someone who has never seen the game
+   (in-game it lives behind the ☰ menu, which you only reach by sitting down first). */
+.lby-rules,.lby-extra{padding:9px 14px;background:transparent;color:var(--lby-accent,var(--gold,#c9a84c));border:1px solid var(--border,#3a3226)}
+.lby-rules:hover,.lby-extra:hover{border-color:var(--lby-accent,var(--gold,#c9a84c));background:color-mix(in srgb,var(--lby-accent,#c9a84c) 14%,transparent)}
+.lby-rules-ic{font-size:.95em;line-height:1}
+/* `.lby-extra` is the create row's one optional slot (see `LobbyCreateRow`),
+   styled AS Rules rather than like it: one game keeps a second entry point
+   there and it has to read as the same kind of control. It is a separate class
+   because `.lby-rules` is how the harness counts Rules buttons -- reusing it
+   would make the game with the slot report two. */
+
+/* ── Phones: ONE row that scrolls sideways, never a wrapped stack ───────────
+   With Rules added, the five controls stop fitting at ~430px even after the
+   ≤600px tightening in lobby.lobby-css.css, and a wrap pushed the lists a whole
+   row further down. `safe center` keeps the row centered while it fits and
+   degrades to flex-start when it does not — plain `center` would push the
+   overflow off the LEFT edge, where no scroll can reach it. This block sits
+   after the base rules in the same file, so it wins without a specificity hack. */
+@media(max-width:600px){
+	.lby-create-row{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;justify-content:flex-start;justify-content:safe center;padding:0 10px 4px;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;scrollbar-width:thin;scrollbar-color:var(--border,#3a3226) transparent}
+	.lby-create-row>*{flex:0 0 auto}
+	.lby-create-row::-webkit-scrollbar{height:4px}
+	.lby-create-row::-webkit-scrollbar-thumb{background:var(--border,#3a3226);border-radius:3px}
+	.lby-create-row::-webkit-scrollbar-track{background:transparent}
+	.lby-rules,.lby-extra{padding-left:11px;padding-right:11px}
+}

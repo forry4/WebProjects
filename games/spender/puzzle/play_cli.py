@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import argparse
 
-from games.spender.ai.az import actions as A
-from games.spender.ai.az import engine as E
+from games.spender.ai.serving import actions as A
+from games.spender.ai.serving import engine as E
 from . import schema
 
 _ABBR = "wbgrk"

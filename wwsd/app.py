@@ -13,6 +13,7 @@ import hmac
 import json
 import os
 import time
+import traceback
 from collections import defaultdict, deque
 
 from fastapi import FastAPI, Request
@@ -57,8 +58,15 @@ def _rate_ok(ip: str) -> bool:
 
 
 def _client_ip(req: Request) -> str:
+    # Render's proxy APPENDS the real peer IP, so the LAST hop is trustworthy; the leftmost is
+    # client-spoofable and trusting it lets a secret-holder rotate the header to dodge the per-IP
+    # rate limit (the compute-abuse control).
     xff = req.headers.get("x-forwarded-for")
-    return xff.split(",")[0].strip() if xff else (req.client.host if req.client else "?")
+    if xff:
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if parts:
+            return parts[-1]
+    return req.client.host if req.client else "?"
 
 
 def _budget(t_param) -> float:
@@ -79,16 +87,17 @@ def process_move(raw_body: bytes, secret_header: str, ip: str, t_param=None):
         return 429, {"ok": False, "message": "rate limited — slow down"}
     try:
         doc = json.loads(raw_body)
-    except Exception as e:
-        return 400, {"ok": False, "message": f"bad json: {e}"}
+    except Exception:
+        return 400, {"ok": False, "message": "bad json"}   # don't echo the parser error to the client
     try:
         budget = _budget(t_param)
         result = W.analyze(doc, time_limit=budget)
         if isinstance(result, dict):
             result.setdefault("budget", round(budget, 1))
         return 200, result
-    except Exception as e:
-        return 500, {"ok": False, "message": f"analyze error: {e}"}
+    except Exception:
+        traceback.print_exc()   # detail stays in the server logs; the client gets a generic message
+        return 500, {"ok": False, "message": "analyze error"}
 
 
 @app.get("/health")

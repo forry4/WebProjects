@@ -1,6 +1,0 @@
-/target
-/target-perf
-/target-stage
-/pkg
-Cargo.lock
-tests/fixtures*/

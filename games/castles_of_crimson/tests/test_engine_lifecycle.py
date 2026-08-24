@@ -55,10 +55,38 @@ def test_depots_filled_to_2p_count():
 
 
 def test_depots_follow_fixed_plan():
+    # A 2-player game fills the first 2 spaces of each depot's 4-space plan.
     g = engine.new_game(["p1", "p2"], seed=7)
     for i in range(1, 7):
         types = sorted(t["type"] for t in g["depots"][str(i)]["hexes"])
-        assert types == sorted(tiles.DEPOT_PLAN[i]), (i, types)
+        assert types == sorted(tiles.DEPOT_PLAN[i][:2]), (i, types)
+
+
+def test_depots_fill_num_players_spaces():
+    # 2/3/4-player games fill 2/3/4 depot spaces (first N of the 4-space plan) and
+    # 4/6/8 black-depot tiles.
+    for n in (2, 3, 4):
+        g = engine.new_game([f"p{k}" for k in range(n)], seed=7)
+        for i in range(1, 7):
+            hexes = g["depots"][str(i)]["hexes"]
+            assert len(hexes) == n, (n, i, len(hexes))
+            assert sorted(t["type"] for t in hexes) == sorted(tiles.DEPOT_PLAN[i][:n])
+        assert len(g["black_depot"]) == tiles.black_fill(n) == 2 * n
+
+
+def test_three_player_depot6_castle_becomes_mine_in_bd():
+    # 3-player exception: depot 6's 3rd space is a castle in phases A/C/E, a mine in B/D.
+    for phase, want in [("A", "castle"), ("B", "mine"), ("C", "castle"), ("D", "mine"), ("E", "castle")]:
+        g = engine.new_game(["p1", "p2", "p3"], seed=11)
+        g["phase_letter"] = phase
+        engine._replenish_depots(g)
+        assert g["depots"]["6"]["hexes"][2]["type"] == want, (phase, want)
+    # 4-player: always castle (the exception is 3-player only).
+    for phase in ("A", "B", "C", "D", "E"):
+        g = engine.new_game(["p1", "p2", "p3", "p4"], seed=11)
+        g["phase_letter"] = phase
+        engine._replenish_depots(g)
+        assert g["depots"]["6"]["hexes"][2]["type"] == "castle", phase
 
 
 def test_supply_is_exactly_164_tiles():
@@ -171,7 +199,7 @@ def test_depots_refilled_each_phase():
     assert g["phase_letter"] == "B"
     for i in range(1, 7):
         types = sorted(t["type"] for t in g["depots"][str(i)]["hexes"])
-        assert types == sorted(tiles.DEPOT_PLAN[i]), (i, types)
+        assert types == sorted(tiles.DEPOT_PLAN[i][:2]), (i, types)
 
 
 def test_track_initial_order_and_advance():
@@ -214,6 +242,61 @@ def test_undo_turn_reverts_actions():
     # the undone action is no longer in the log (only the undo marker is most-recent)
     assert g["moves"][0]["type"] == "undo_turn"
     assert all(m["type"] != "take_workers" for m in g["moves"])
+
+
+def test_undo_snapshot_stores_the_log_position_not_the_log():
+    """The snapshot is persisted with the game, so copying `moves` in wrote the log
+    twice on every save — measured at half the stored blob. It stores `moves_seq`
+    instead and rewinds the live log."""
+    g = engine.new_game(["p1", "p2"], seed=4)
+    complete_setup(g)
+    g["turn"] = "p1"
+    g["dice"]["p1"] = {"values": [1, 1], "used": [False, False]}
+    engine._snapshot_turn(g)
+    assert "moves" not in g["turn_undo"]
+    assert g["turn_undo"]["moves_seq"] == g["moves_seq"]
+    before = [dict(m) for m in g["moves"]]
+    engine.apply_move(g, "p1", {"type": "take_workers", "die_index": 0})
+    assert engine.apply_move(g, "p1", {"type": "undo_turn"})[0]
+    assert g["moves"][1:] == before          # entry-for-entry, under the undo marker
+
+
+def test_undo_rewinds_the_log_after_the_cap_has_evicted_entries():
+    """Why `moves_seq` and not a length: `_log` PREPENDS and caps by evicting the tail,
+    so once the cap is reached the length stops moving and a length delta would restore
+    nothing at all. The counter keeps the delta exact."""
+    g = engine.new_game(["p1", "p2"], seed=4)
+    complete_setup(g)
+    g["turn"] = "p1"
+    g["dice"]["p1"] = {"values": [1, 1], "used": [False, False]}
+    # sit exactly on the cap, so every further record evicts one off the tail
+    g["moves"] = [{"pid": "p1", "type": "filler", "n": i} for i in range(2000)]
+    g["moves_seq"] = 2000
+    engine._snapshot_turn(g)
+    engine.apply_move(g, "p1", {"type": "take_workers", "die_index": 0})
+    assert len(g["moves"]) == 2000                       # length is pinned by the cap
+    assert engine.apply_move(g, "p1", {"type": "undo_turn"})[0]
+    assert g["moves"][0]["type"] == "undo_turn"
+    assert all(m["type"] != "take_workers" for m in g["moves"])
+    assert g["players"]["p1"]["workers"] == 1            # and the action really reverted
+
+
+def test_undo_reads_a_pre_compaction_snapshot():
+    """A game saved before the snapshot dropped its log carries a full `moves`; an
+    in-progress turn must survive the deploy."""
+    g = engine.new_game(["p1", "p2"], seed=4)
+    complete_setup(g)
+    g["turn"] = "p1"
+    g["dice"]["p1"] = {"values": [1, 1], "used": [False, False]}
+    engine._snapshot_turn(g)
+    g["turn_undo"]["moves"] = [dict(m) for m in g["moves"]]   # emulate the old shape
+    g["turn_undo"].pop("moves_seq", None)
+    w0 = g["players"]["p1"]["workers"]
+    before = [dict(m) for m in g["moves"]]
+    engine.apply_move(g, "p1", {"type": "take_workers", "die_index": 0})
+    assert engine.apply_move(g, "p1", {"type": "undo_turn"})[0]
+    assert g["players"]["p1"]["workers"] == w0
+    assert g["moves"][1:] == before
 
 
 def test_undo_turn_clears_pending():

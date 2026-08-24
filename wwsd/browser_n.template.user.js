@@ -114,7 +114,7 @@
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // ROOT-PARALLEL worker pool (mirrors the website's s-worker fan-out). The WASM does one search per
+  // ROOT-PARALLEL worker pool (mirrors the website's spender-worker fan-out). The WASM does one search per
   // thread; the page is single-threaded, so we fan the SAME position across N Web Workers with distinct
   // seeds and SUM their visit counts (root-parallel MCTS) → ~N× the sims in the same wall-clock. The
   // module is compiled ONCE on the main thread and the compiled WebAssembly.Module is shared to every

@@ -5,20 +5,42 @@ on:
     branches: [main]
     paths:
       - 'app.py'   # composition root — creates the FastAPI app + mounts the features
-      - 'core/**/*.py'   # shared DB + auth layer imported by main + coc + books
-      - 'games/spender/main.py'
+      - 'core/**/*.py'   # shared DB + auth layer + room primitives, imported by every game
+      # Spender's TOP-LEVEL modules: main.py (router/rooms/WS), engine.py (the
+      # authoritative rules), cards.py (static card data), app.py (deploy shim).
+      # A single `*` does not cross `/`, so this still excludes ai/offline/ below.
+      # Was `games/spender/main.py` literally — which meant a fix to the rules in
+      # engine.py would pass CI and silently never reach prod.
+      - 'games/spender/*.py'
       - 'books/**'
       - 'games/spender/requirements.txt'
-      - 'games/spender/app.py'
       - 'games/spender/Dockerfile'
-      - 'games/spender/ai/az_model.npz'
-      - 'games/spender/ai/az/**/*.py'   # serving imports: heuristic, valuation, engine, actions, mcts, infer_np
-      - 'games/spender/ai/weights*.json'   # variants A/B/C/C2 — loaded at import (main.load_weights)
-      - 'games/spender/ai/value_model.json'   # value-leaf model — loaded at import (main.load_value_model)
+      - 'games/spender/ai/serving/**/*.py'   # serving stack: heuristic, valuation, engine, actions, mcts, infer_np, v_state, vsearch, replay
+      - 'games/spender/ai/serving/*.json'   # serving data (turns tables)
+      - 'games/spender/ai/models/**'   # weights*.json / az_model.npz / value_model.json — loaded at import
+      # NOTE: games/spender/ai/offline/** is deliberately NOT a deploy trigger (offline tooling never serves)
       - 'games/spender/puzzle/**/*.py'   # puzzle-mode serve code
       - 'games/spender/puzzle/puzzles/*.json'   # the puzzle bank — served as static content by serve.py
       - 'games/castles_of_crimson/**/*.py'
       - 'games/wherewolf/**/*.py'
+      - 'games/spender_duel/**/*.py'
+      - 'games/dontminion/**/*.py'
+      - 'games/dissonance/**/*.py'
+      - 'games/rag_tag/**/*.py'
+      # Every trigger above is *.py-scoped except `books/**` and `ai/models/**`, so
+      # books/CLAUDE.md alone would restart prod for a docs edit (a real cold start for
+      # no code change). Trailing negative rather than `paths-ignore`: GitHub rejects
+      # both filters on one event, and later patterns override earlier ones.
+      - '!**/*.md'
+      # ...and a TEST file is the same problem, which the .md rule hid: every glob
+      # above is `<pkg>/**/*.py`, and that matches `<pkg>/tests/*.py`. So a
+      # test-only commit rebuilt the image and restarted prod — measured at ~3
+      # minutes of backend downtime on 2026-08-07, for a push containing no
+      # shipping code at all. Nothing under a tests/ directory is imported by the
+      # server (all 13 are nested, so this one pattern reaches every one), and the
+      # suite still runs on every push regardless: python-app.yml carries NO paths
+      # filter, so excluding tests here costs no coverage, only the restart.
+      - '!**/tests/**'
   workflow_dispatch:
 
 jobs:
@@ -38,15 +60,79 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r games/spender/requirements.txt
       - name: Run tests
-        run: |
-          python -m pytest core/tests/ games/spender/tests/ books/tests/ games/castles_of_crimson/tests/ games/wherewolf/tests/ wwsd/tests/ -q
+        # Bare pytest — the suite is defined by `testpaths` in pytest.ini, so this
+        # gate and the PR gate (python-app.yml) can't drift apart again.
+        run: python -m pytest -q
 
   deploy:
     needs: test
     runs-on: ubuntu-latest
     steps:
+      # Fired BEFORE the hook: the fallback gate below asks "did a process boot
+      # after this moment?", so it has to be read before anything is triggered.
+      - name: Mark the pre-deploy instant
+        id: pre
+        run: echo "t0=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       - name: Trigger Render deploy
         run: |
           response=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.RENDER_DEPLOY_HOOK }}")
           echo "Render response: $response"
           [ "$response" = "200" ] || [ "$response" = "202" ] || { echo "Deploy hook failed with status $response"; exit 1; }
+
+      # THE ACTUAL GATE. The step above only proves Render ACCEPTED the request —
+      # it is green whether the image builds or not. A failed Docker build (the
+      # Cython parity gate in the Dockerfile is designed to fail one) or a boot
+      # crash used to leave prod silently on the old code behind a green tick.
+      # Poll /health until it reports the commit we just pushed.
+      #
+      # `commit` is exact but needs Render to set RENDER_GIT_COMMIT. If it doesn't,
+      # fall back to `started_at` (a process that booted after t0) and say so, so
+      # the weaker check is never silent. Non-200s are normal here: the free tier
+      # returns 503 while spinning up and during the deploy swap.
+      - name: Verify the new build is actually live
+        env:
+          HEALTH_URL: https://splendid-nelz.onrender.com/health
+          WANT_SHA: ${{ github.sha }}
+          T0: ${{ steps.pre.outputs.t0 }}
+          TIMEOUT_SECONDS: "1200"   # 20 min: Docker build + wheelhouse + Cython on the free tier
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess, sys, time
+
+          url, want = os.environ["HEALTH_URL"], os.environ["WANT_SHA"]
+          t0, deadline = int(os.environ["T0"]), time.time() + int(os.environ["TIMEOUT_SECONDS"])
+          print(f"waiting for {want[:7]} at {url}", flush=True)
+
+          last = None
+          while time.time() < deadline:
+              try:
+                  out = subprocess.run(
+                      ["curl", "-s", "--max-time", "45", url],
+                      capture_output=True, text=True, timeout=60).stdout
+                  data = json.loads(out)
+              except Exception as e:
+                  data, last = None, f"unreachable ({type(e).__name__})"
+              if data:
+                  commit, started = data.get("commit", "unknown"), data.get("started_at", 0)
+                  last = f"commit={commit[:7] if commit != 'unknown' else 'unknown'} started_at={started}"
+                  if commit != "unknown":
+                      if commit.startswith(want) or want.startswith(commit):
+                          print(f"OK  live commit matches {want[:7]}")
+                          sys.exit(0)
+                  elif started > t0:
+                      print("::warning::/health reports commit=unknown — RENDER_GIT_COMMIT is not set "
+                            "on the service, so this deploy was verified only by process start time "
+                            "(weaker: a cold start can look like a deploy). Set it in the Render "
+                            "dashboard to get an exact check.")
+                      print(f"OK  a new process booted at {started} (> {t0})")
+                      sys.exit(0)
+              print(f"  ... {last}", flush=True)
+              time.sleep(15)
+
+          print(f"::error::Timed out after {os.environ['TIMEOUT_SECONDS']}s waiting for {want[:7]} "
+                f"to go live. Last seen: {last}. The Render build likely FAILED or the new process "
+                f"crashed on boot — check the Render dashboard logs. Prod is still serving the "
+                f"previous build (nothing was rolled back).")
+          sys.exit(1)
+          PY

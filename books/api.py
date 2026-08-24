@@ -162,7 +162,7 @@ def can_user_edit(conn, user: dict | None) -> bool:
         return True
     env_owner = _site_owner_name()
     if env_owner is not None:
-        return user.get("name") == env_owner
+        return (user.get("name") or "").casefold() == env_owner.casefold()  # usernames are NOCASE
     owner_id = _stored_owner_id(conn)
     if owner_id is None:
         return True  # unclaimed — any authenticated user may claim by saving
@@ -178,7 +178,7 @@ def is_owner(conn, user: dict | None) -> bool:
         return True
     env_owner = _site_owner_name()
     if env_owner is not None:
-        return user.get("name") == env_owner
+        return (user.get("name") or "").casefold() == env_owner.casefold()  # usernames are NOCASE
     owner_id = _stored_owner_id(conn)
     return owner_id is not None and user["id"] == owner_id
 
@@ -189,7 +189,7 @@ def _claim_or_check(conn, user: dict) -> bool:
         return True
     env_owner = _site_owner_name()
     if env_owner is not None:
-        return user.get("name") == env_owner
+        return (user.get("name") or "").casefold() == env_owner.casefold()  # usernames are NOCASE
     owner_id = _stored_owner_id(conn)
     if owner_id is None:
         cur = conn.cursor()

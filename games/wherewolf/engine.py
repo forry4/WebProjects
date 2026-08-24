@@ -33,6 +33,18 @@ STEP_INTRO, STEP_WOLVES, STEP_MINION, STEP_MASONS, STEP_SEER, STEP_ROBBER, \
 
 
 # ── RNG persistence (JSON-safe; mirrors the other engines) ────────────────────
+# DELIBERATELY NOT CALLED, and the reason is load-bearing. Unlike CoC and Duel, Where
+# Wolf consumes ALL of its randomness at setup — `new_game` builds the deck and shuffles,
+# and nothing after that draws (the night steps and the vote are pure functions of player
+# choices). So there is no future stream to reproduce, and persisting the state meant
+# every row carried 625 words of Mersenne noise that nothing ever read: measured at
+# 89.6% of the stored blob (5,306 -> 554 bytes), and incompressible, so it dominated the
+# row even after zlib.
+#
+# IF YOU ADD RANDOMNESS AFTER SETUP, re-arm this: `_load_rng` at the start of the move
+# that draws and `_save_rng` at the end, or the draw silently stops being reproducible
+# across a save/reconnect. `tests/test_rng_not_persisted.py` fails the moment any engine
+# call after `new_game` touches the module RNG, so the trap cannot reopen quietly.
 def _load_rng(game: dict) -> random.Random:
     rng = random.Random()
     st = game.get("rng_state")
@@ -116,9 +128,8 @@ def new_game(player_ids: list[str], names: dict[str, str] | None = None,
         "winning_teams": [],                  # ["village"] | ["werewolf"] | ["tanner"] | ...
         "headline": None,                     # human result string
 
-        "rng_state": None,
+        # No `rng_state`: all randomness is spent above, in the deal. See _save_rng.
     }
-    _save_rng(game, rng)
     return game
 
 
@@ -524,7 +535,11 @@ def player_view(game: dict, pid: str) -> dict:
         "center": center_out,
         "center_count": len(game["center"]),
         "roles_in_play": list(game["roles_in_play"]),
-        "deck": list(game.get("deck", [])),   # public multiset (== the token row)
+        # SORTED, never the live order: game["deck"] is position-tied (deck[i] == order[i]'s
+        # dealt_role, deck[n:] == the center), so shipping it raw would leak every hidden role
+        # and the whole center. The client only renders it sorted (the public token row), so a
+        # sorted copy is all it needs. (Do NOT ship list(game["deck"]).)
+        "deck": sorted(game.get("deck", [])),
         "you": pid,
         "your_dealt_role": dealt,
         "is_active": dealt in roles.ACTIVE_ROLES,

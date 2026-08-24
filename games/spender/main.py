@@ -23,6 +23,11 @@ from core.auth import (
     validate_credentials,
 )
 from core.ratelimit import SlidingWindowLimiter
+from core.build_info import build_info
+from core import rooms as _rooms
+from games.spender import engine
+from games.spender import persist               # at-rest compaction for the state_json blob
+from games.spender.ai.serving import legacy_variants as _legacy
 
 # Spender's HTTP + WebSocket routes live on this router. The composition root
 # (top-level app.py) creates the FastAPI app, applies CORS middleware, includes
@@ -31,157 +36,46 @@ from core.ratelimit import SlidingWindowLimiter
 router = APIRouter()
 
 
+def _db_ping() -> bool:
+    """Run a trivial query so the keep-alive cron's /health ping keeps the DB CONNECT
+    path warm (DNS/TLS/Turso handshake), not just the web process — otherwise the first
+    game-list query after an idle spell pays the reconnect. Doubles as a real DB health
+    signal. Opens + closes a fresh connection (get_db_conn is not pooled)."""
+    conn = get_db_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT 1")
+        cur.fetchone()
+        return True
+    finally:
+        conn.close()
+
+
 @router.get("/health")
 async def health():
-    return {"status": "ok", "service": "spender", "version": "1.0"}
+    # Warm the DB path too, off the event loop; a DB hiccup must never fail the health
+    # check (it gates the keep-alive + the frontend's reachability probe).
+    db_ok = False
+    try:
+        db_ok = await asyncio.to_thread(_db_ping)
+    except Exception:
+        pass
+    # `commit`/`started_at` let CI verify the deploy actually landed (core/build_info).
+    return {"status": "ok", "service": "spender", "version": "1.1", "db": db_ok,
+            **build_info()}
 
 
-# ─── Types ─────────────────────────────────────────────────────────────────
-
-GEM_COLORS = ["white", "blue", "green", "red", "black"]
-
-# Multiplayer: human lobbies seat 2-4 players (AI games stay 2-player). Standard
-# Splendor scales the gem bank by player count; gold is always 5, nobles = players+1.
-MAX_PLAYERS = 4
-_BANK_PER_COLOR = {2: 4, 3: 5, 4: 7}
-
-
-def empty_gems() -> dict[str, int]:
-    return {c: 0 for c in GEM_COLORS + ["gold"]}
-
-
-def _bank_for(n_players: int) -> dict[str, int]:
-    """Starting gem bank for an n-player game (standard Splendor counts)."""
-    per = _BANK_PER_COLOR.get(n_players, 4)
-    bank = {c: per for c in GEM_COLORS}
-    bank["gold"] = 5
-    return bank
-
-
-# ─── Card / Noble data ──────────────────────────────────────────────────────
-
-LEVEL1: list[tuple] = [
-    (0,"black",{"white":1,"blue":1,"green":1,"red":1}),(0,"black",{"green":2,"red":1}),
-    (0,"black",{"white":2,"green":2}),(0,"black",{"green":1,"red":3,"black":1}),
-    (0,"black",{"green":3}),(0,"black",{"white":1,"blue":2,"green":1,"red":1}),
-    (0,"black",{"white":2,"blue":2,"red":1}),(1,"black",{"blue":4}),
-    (0,"blue",{"white":1,"black":2}),(0,"blue",{"white":1,"green":1,"red":2,"black":1}),
-    (0,"blue",{"white":1,"green":1,"red":1,"black":1}),(0,"blue",{"blue":1,"green":3,"red":1}),
-    (0,"blue",{"black":3}),(0,"blue",{"white":1,"green":2,"red":2}),
-    (0,"blue",{"green":2,"black":2}),(1,"blue",{"red":4}),
-    (0,"green",{"white":2,"blue":1}),(0,"green",{"blue":2,"red":2}),
-    (0,"green",{"white":1,"blue":3,"green":1}),(0,"green",{"white":1,"blue":1,"red":1,"black":1}),
-    (0,"green",{"white":1,"blue":1,"red":1,"black":2}),(0,"green",{"blue":1,"red":2,"black":2}),
-    (0,"green",{"red":3}),(1,"green",{"black":4}),
-    (0,"red",{"white":3}),(0,"red",{"white":1,"red":1,"black":3}),
-    (0,"red",{"blue":2,"green":1}),(0,"red",{"white":2,"green":1,"black":2}),
-    (0,"red",{"white":2,"blue":1,"green":1,"black":1}),(0,"red",{"white":1,"blue":1,"green":1,"black":1}),
-    (0,"red",{"white":2,"red":2}),(1,"red",{"white":4}),
-    (0,"white",{"blue":2,"green":2,"black":1}),(0,"white",{"red":2,"black":1}),
-    (0,"white",{"blue":1,"green":1,"red":1,"black":1}),(0,"white",{"blue":3}),
-    (0,"white",{"blue":2,"black":2}),(0,"white",{"blue":1,"green":2,"red":1,"black":1}),
-    (0,"white",{"white":3,"blue":1,"black":1}),(1,"white",{"green":4}),
-]
-
-LEVEL2: list[tuple] = [
-    (1,"black",{"white":3,"blue":2,"green":2}),(1,"black",{"white":3,"green":3,"black":2}),
-    (2,"black",{"blue":1,"green":4,"red":2}),(2,"black",{"white":5}),
-    (2,"black",{"green":5,"red":3}),(3,"black",{"black":6}),
-    (1,"blue",{"blue":2,"green":2,"red":3}),(1,"blue",{"blue":2,"green":3,"black":3}),
-    (2,"blue",{"white":5,"blue":3}),(2,"blue",{"blue":5}),
-    (2,"blue",{"white":2,"red":1,"black":4}),(3,"blue",{"blue":6}),
-    (1,"green",{"white":3,"green":2,"red":3}),(1,"green",{"white":2,"blue":3,"black":2}),
-    (2,"green",{"white":4,"blue":2,"black":1}),(2,"green",{"green":5}),
-    (2,"green",{"blue":5,"green":3}),(3,"green",{"green":6}),
-    (1,"red",{"blue":3,"red":2,"black":3}),(1,"red",{"white":2,"red":2,"black":3}),
-    (2,"red",{"white":1,"blue":4,"green":2}),(2,"red",{"white":3,"black":5}),
-    (2,"red",{"black":5}),(3,"red",{"red":6}),
-    (1,"white",{"green":3,"red":2,"black":2}),(1,"white",{"white":2,"blue":3,"red":3}),
-    (2,"white",{"green":1,"red":4,"black":2}),(2,"white",{"red":5}),
-    (2,"white",{"red":5,"black":3}),(3,"white",{"white":6}),
-]
-
-LEVEL3: list[tuple] = [
-    (3,"black",{"white":3,"blue":3,"green":5,"red":3}),(4,"black",{"red":7}),
-    (4,"black",{"green":3,"red":6,"black":3}),(5,"black",{"red":7,"black":3}),
-    (3,"blue",{"white":3,"green":3,"red":3,"black":5}),(4,"blue",{"white":7}),
-    (4,"blue",{"white":6,"blue":3,"black":3}),(5,"blue",{"white":7,"blue":3}),
-    (3,"green",{"white":5,"blue":3,"red":3,"black":3}),(4,"green",{"white":3,"blue":6,"green":3}),
-    (4,"green",{"blue":7}),(5,"green",{"blue":7,"green":3}),
-    (3,"red",{"white":3,"blue":5,"green":3,"black":3}),(4,"red",{"green":7}),
-    (4,"red",{"blue":3,"green":6,"red":3}),(5,"red",{"green":7,"red":3}),
-    (3,"white",{"blue":3,"green":3,"red":5,"black":3}),(4,"white",{"black":7}),
-    (4,"white",{"white":3,"red":3,"black":6}),(5,"white",{"white":3,"black":7}),
-]
-
-ALL_NOBLES = [
-    {"id":"n1","points":3,"req":{"red":4,"green":4}},
-    {"id":"n2","points":3,"req":{"blue":4,"green":4}},
-    {"id":"n3","points":3,"req":{"blue":4,"white":4}},
-    {"id":"n4","points":3,"req":{"white":4,"black":4}},
-    {"id":"n5","points":3,"req":{"black":4,"red":4}},
-    {"id":"n6","points":3,"req":{"black":3,"red":3,"green":3}},
-    {"id":"n7","points":3,"req":{"black":3,"red":3,"white":3}},
-    {"id":"n8","points":3,"req":{"black":3,"blue":3,"white":3}},
-    {"id":"n9","points":3,"req":{"green":3,"blue":3,"red":3}},
-    {"id":"n10","points":3,"req":{"green":3,"blue":3,"white":3}},
-]
-
-
-# ─── Game logic ─────────────────────────────────────────────────────────────
-
-def make_card(level: int, data: tuple, idx: int) -> dict:
-    pts, bonus, cost = data
-    return {"id": f"L{level}-{idx}", "level": level, "points": pts, "bonus": bonus, "cost": cost}
-
-
-def build_deck() -> dict:
-    l1 = [make_card(1, d, i) for i, d in enumerate(LEVEL1)]
-    l2 = [make_card(2, d, i) for i, d in enumerate(LEVEL2)]
-    l3 = [make_card(3, d, i) for i, d in enumerate(LEVEL3)]
-    random.shuffle(l1); random.shuffle(l2); random.shuffle(l3)
-    return {"L1": l1, "L2": l2, "L3": l3}
-
-
-def card_catalog() -> dict:
-    """Static id -> {level, points, bonus, cost} map for every card in the deck.
-    The deck is deterministic (ids are LEVEL-list indices like 'L2-7'), so this is
-    constant across games. Used to resolve the id-only move log (the log stores
-    card_id, not the full card) when analysing a game outside the live client."""
-    out: dict = {}
-    for lvl, data in ((1, LEVEL1), (2, LEVEL2), (3, LEVEL3)):
-        for i, d in enumerate(data):
-            c = make_card(lvl, d, i)
-            out[c["id"]] = {"level": c["level"], "points": c["points"],
-                            "bonus": c["bonus"], "cost": c["cost"]}
-    return out
-
-
-def bonuses_from(purchased: list[dict]) -> dict[str, int]:
-    b = empty_gems()
-    for card in purchased:
-        b[card["bonus"]] = b.get(card["bonus"], 0) + 1
-    return b
-
-
-def can_afford(cost: dict, tokens: dict, bonuses: dict) -> bool:
-    gold_needed = 0
-    for c in GEM_COLORS:
-        need = max(0, cost.get(c, 0) - bonuses.get(c, 0))
-        have = tokens.get(c, 0)
-        if have < need:
-            gold_needed += need - have
-    return gold_needed <= tokens.get("gold", 0)
-
-
-def calc_spend(cost: dict, tokens: dict, bonuses: dict) -> dict[str, int]:
-    spend = empty_gems()
-    for c in GEM_COLORS:
-        need = max(0, cost.get(c, 0) - bonuses.get(c, 0))
-        have = min(tokens.get(c, 0), need)
-        spend[c] = have
-        spend["gold"] = spend.get("gold", 0) + (need - have)
-    return spend
+# ─── Card data + cost helpers ───────────────────────────────────────────────
+# The static tables and the pure cost maths live in the leaf module `cards.py`
+# (no FastAPI / DB / AI imports), so the AI serving stack can import them without
+# importing this web module. Re-exported here under their historical names: the
+# offline tooling, the tests, and `ai/serving/*` all still say `main.GEM_COLORS`.
+from games.spender.cards import (          # noqa: F401  (re-exported for callers)
+    GEM_COLORS, MAX_PLAYERS, LEVEL1, LEVEL2, LEVEL3, ALL_NOBLES,
+    empty_gems, make_card, build_deck, card_catalog,
+    bonuses_from, can_afford, calc_spend,
+)
+from games.spender.cards import bank_for as _bank_for   # historical private name
 
 
 # ─── Room manager ────────────────────────────────────────────────────────────
@@ -192,8 +86,10 @@ LOG = logging.getLogger("games.spender")
 logging.basicConfig(level=logging.INFO)
 
 
-def normalize_room(rid: str) -> str:
-    return (rid or "").upper()
+# ── Shared room-server primitives (core/rooms.py) ────────────────────────────
+# Byte-identical in all four games; aliased under the historical names here.
+
+normalize_room = _rooms.normalize_room
 
 
 # ─── Spender DB schema ──────────────────────────
@@ -284,6 +180,19 @@ def _persist_row(room_id, status, ids, names, host, state_json, now, created_at)
         _save_conn = None
 
 
+def _encode_state(state: dict) -> str:
+    """The ONLY write path into `state_json` — compact, then the shared zlib codec."""
+    return _rooms.encode_state(persist.compact_state(state))
+
+
+def _decode_state(blob) -> dict:
+    """The ONLY read path out of `state_json`. Every read must funnel through here: a
+    compacted blob reaching a caller that skipped `expand_state` would hand it bare id
+    STRINGS where it expects card objects. Rows written before compaction carry no
+    marker and pass through untouched."""
+    return persist.expand_state(_rooms.decode_state(blob))
+
+
 def save_game(room_id: str) -> None:
     """Snapshot the room on the calling thread (fast, no I/O) then persist OFF the
     event loop via the single-thread write executor (fire-and-forget)."""
@@ -300,13 +209,14 @@ def save_game(room_id: str) -> None:
         "meta": room.get("meta", {}),
         "ai_variant": room.get("ai_variant"),  # persist so a reconnect/redeploy keeps the
                                                 # right bot AND the admin value overlay
+        "max_players": room.get("max_players"),  # host-chosen seat cap (create modal)
     }
     now = int(time.time())
     seat = lambda lst, i: lst[i] if len(lst) > i else None   # seat value or None (2-4 players)
     ids = [seat(pids, i) for i in range(4)]
     nms = [seat(names, i) for i in range(4)]
     _DB_WRITE_EXEC.submit(_persist_row, room_id, room.get("status", "open"),
-                          ids, nms, room.get("host"), json.dumps(state), now, now)
+                          ids, nms, room.get("host"), _encode_state(state), now, now)
 
 
 def load_game_to_memory(room_id: str) -> bool:
@@ -319,7 +229,7 @@ def load_game_to_memory(room_id: str) -> bool:
     if not row or not row["state_json"]:
         return False
     try:
-        state = json.loads(row["state_json"])
+        state = _decode_state(row["state_json"])
     except Exception:
         return False
     game = state.get("game")
@@ -340,6 +250,7 @@ def load_game_to_memory(room_id: str) -> bool:
         "game": game,
         "meta": state.get("meta", {}),
         "ai_variant": ai_variant,
+        "max_players": state.get("max_players"),
         "sockets": {},
     }
     LOG.info("loaded game %s from DB", room_id)
@@ -347,7 +258,7 @@ def load_game_to_memory(room_id: str) -> bool:
 
 
 def list_open_games() -> list[dict]:
-    maybe_cleanup_games("games")  # throttled (<=1/h): prune stale games during long-awake periods
+    maybe_cleanup_games("games", background=True)  # throttled (<=1/h), non-blocking: prune stale games during long-awake periods
     conn = get_db_conn()
     cur = conn.cursor()
     cur.execute("""SELECT id, player1_id, player1_name, state_json, created_at FROM games
@@ -357,7 +268,7 @@ def list_open_games() -> list[dict]:
     out = []
     for r in rows:
         try:
-            state = json.loads(r["state_json"] or "{}")
+            state = _decode_state(r["state_json"])
         except Exception:
             state = {}
         try:
@@ -365,8 +276,13 @@ def list_open_games() -> list[dict]:
         except Exception:
             wp = 15
         player_count = len(state.get("players") or {}) or 1  # players who've joined the lobby
+        try:
+            mp = int(state.get("max_players") or 0)
+        except (TypeError, ValueError):
+            mp = 0
         out.append({"id": r["id"], "host_id": r["player1_id"], "host_name": r["player1_name"],
-                    "win_points": wp, "player_count": player_count, "max_players": MAX_PLAYERS,
+                    "win_points": wp, "player_count": player_count,
+                    "max_players": mp if 2 <= mp <= MAX_PLAYERS else MAX_PLAYERS,
                     "created_at": r["created_at"]})
     return out
 
@@ -386,7 +302,7 @@ def list_user_games(user_id: str) -> list[dict]:
     result = []
     for r in rows:
         try:
-            state = json.loads(r["state_json"] or "{}")
+            state = _decode_state(r["state_json"])
         except Exception:
             state = {}
         g = state.get("game") or {}
@@ -430,7 +346,7 @@ def list_active_games() -> list[dict]:
     out = []
     for r in rows:
         try:
-            state = json.loads(r["state_json"] or "{}")
+            state = _decode_state(r["state_json"])
         except Exception:
             state = {}
         g = state.get("game") or {}
@@ -450,7 +366,7 @@ def list_active_games() -> list[dict]:
     return out
 
 
-def list_user_history(user_id: str, limit: int = 20) -> list[dict]:
+def list_user_history(user_id: str, limit: int = _rooms.HISTORY_LIMIT) -> list[dict]:
     """Finished games (status='over') the user played in, most-recent first, with
     final scores, winner(s) and opponents — for the lobby 'History' section. Works
     for vs-AI and human games (2-4 players). Session-gated (logged-in users)."""
@@ -466,7 +382,7 @@ def list_user_history(user_id: str, limit: int = 20) -> list[dict]:
     out = []
     for r in rows:
         try:
-            state = json.loads(r["state_json"] or "{}")
+            state = _decode_state(r["state_json"])
         except Exception:
             continue
         g = state.get("game") or {}
@@ -506,23 +422,14 @@ def delete_open_game(game_id: str, user_id: str) -> bool:
     _Cursor wrapper (sqlite3 / libsql) doesn't expose rowcount, and libsql's
     rowcount semantics are unreliable -- so we SELECT-then-DELETE, which is
     correct on both backends."""
-    conn = get_db_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT 1 FROM games WHERE id=? AND player1_id=? AND status='open'",
-                (game_id, user_id))
-    existed = cur.fetchone() is not None
-    if existed:
-        conn.execute("DELETE FROM games WHERE id=? AND player1_id=? AND status='open'",
-                     (game_id, user_id))
-        conn.commit()
-    conn.close()
-    return existed
+    return _rooms.delete_open_game("games", "player1_id", game_id, user_id)
 
 
 init_db()
-# Retention: drop stale games on boot (guest 24h / registered 30d, by last
-# activity). Also runs throttled off lobby browsing (list_open_games) so it
-# happens during long-awake periods too, not only on cold-start.
+# Retention: drop stale games on boot (guest 24h / registered 30d / open
+# lobbies 48h, by last activity). Also runs throttled off lobby browsing
+# (list_open_games) so it happens during long-awake periods too, not only
+# on cold-start.
 cleanup_stale_games("games")
 
 
@@ -616,12 +523,26 @@ CLIENT_AI_TIMEOUT = 15.0  # seconds a VISIBLE tab may take before the server com
                           # with no WASM (never armed) or a genuine focused crash — both rare.
 CLIENT_AI_SIMS = 4000     # suggested search budget for the client (≫ Render's sims-starved ~380/move)
 
+# A bot never plays its move sooner than this after its turn begins — an instant reply (a fast
+# heuristic variant, or the cheap rollout fallback) feels robotic. A FLOOR, not an added delay:
+# real think time counts toward it, so the strong searches (and the client-WASM path, always
+# seconds) are unaffected.
+_MIN_BOT_THINK = 0.7
+
+
+async def _floor_bot_move(t0: float) -> None:
+    """Sleep so the AI's move isn't broadcast before _MIN_BOT_THINK from the turn's start.
+    A no-op once that long has elapsed (the strong/searched paths already exceed it)."""
+    remaining = _MIN_BOT_THINK - (time.monotonic() - t0)
+    if remaining > 0:
+        await asyncio.sleep(remaining)
+
 
 def _compact_state_dict(game: dict) -> dict:
     """Serialize the AI-perspective compact engine State (from_game_dict) to the JSON shape the WASM
     `choose_move` expects. For a vs-AI game this is the AI's full view; the client only ever uses it on
     the AI's turn, and a curious human seeing the AI's own reserves only weakens their own opponent."""
-    from games.spender.ai.az import engine as _aze
+    from games.spender.ai.serving import engine as _aze
     s = _aze.from_game_dict(game)
     return {
         "bank": list(s.bank),
@@ -645,12 +566,18 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
     room = ROOMS.get(room_id, {})
     game_view = _redact_blind_reserves(room.get("game"), viewer_pid)
     _STRIP = ("setup", "s_searched", "_s_eval_running", "ai_server_fallbacks")
-    if isinstance(game_view, dict) and any(k in game_view for k in _STRIP):
+    if isinstance(game_view, dict):
+        # Shallow-copy so the live/redacted dict is untouched (about to be JSON-serialized).
         # `setup` is static replay metadata (the dealt deck order) — persisted by save_game
         # and served by the admin /full dump, but kept OFF the wire. `s_searched`/`_s_eval_running`
         # are S searched-eval overlay metadata (surfaced separately as ai_position_eval_searched).
-        # Shallow-copy so the live/redacted dict is untouched (about to be JSON-serialized).
         game_view = {k: v for k, v in game_view.items() if k not in _STRIP}
+        # `decks` is the ORDERED future-draw pile (the engine .pop()s the end to refill the board),
+        # so shipping the card list would leak every future draw. The client needs only the per-level
+        # COUNT (game.decks[lk].length), so send same-length null lists — no card identity on the wire.
+        _decks = game_view.get("decks")
+        if isinstance(_decks, dict):
+            game_view["decks"] = {lk: [None] * len(v) for lk, v in _decks.items()}
     state = {
         "room_id": room_id,
         "players": room.get("players", {}),
@@ -704,26 +631,23 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
     return state
 
 
-def _deal_board(decks: dict) -> dict:
-    return {lk: [decks[lk].pop() if decks[lk] else None for _ in range(4)] for lk in ["L1", "L2", "L3"]}
-
-
-def _capture_setup(g: dict) -> None:
-    """Snapshot the dealt initial board / deck-order / nobles (ids only) so a finished game can
-    be replayed move-by-move offline (games/spender/ai/az/replay.py). The deck is shuffled in
-    place and popped during play with no seed stored, so without this the per-turn 12-card board
-    (the biggest input to the S evaluator) is unrecoverable. Captured ONCE right after the board
-    and nobles are dealt, before any move. ids only -> compact; resolve via card_catalog()."""
-    g["setup"] = {
-        "board": {lk: [c["id"] if c else None for c in g["board"][lk]] for lk in g["board"]},
-        "decks": {lk: [c["id"] for c in g["decks"][lk]] for lk in g["decks"]},
-        "nobles": [n["id"] for n in g["nobles"]],
-    }
-
-
-def _check_nobles(game: dict, pid: str) -> list:
-    bonuses = bonuses_from(game["players"][pid]["purchased"])
-    return [n for n in game["nobles"] if all(bonuses.get(c, 0) >= v for c, v in n["req"].items())]
+# ─── Rules ──────────────────────────────────────────────────────────────────
+# The rules live in `engine.py` — the single source of truth for how a move changes
+# the game, shared by this handler, the tests, and the replay tooling. These aliases
+# keep the historical private names working for the offline tooling and the AI code
+# that already imports them from this module.
+from games.spender.engine import (          # noqa: F401  (re-exported for callers)
+    deal_board as _deal_board,
+    capture_setup as _capture_setup,
+    check_nobles as _check_nobles,
+    advance_turn as _advance_turn,
+    calc_points as _calc_points,
+    resolve_winner as _resolve_winner,
+    win_points as _win_points,
+    finish_turn as _finish_turn,
+    check_winner as _check_winner,
+    log_move as _log_move,
+)
 
 
 def _ai_pick_noble(claimable: list, game: dict, ai_pid: str) -> dict:
@@ -737,68 +661,6 @@ def _ai_pick_noble(claimable: list, game: dict, ai_pid: str) -> dict:
     def opp_deficit(n: dict) -> int:
         return sum(max(0, need - opp_bonuses.get(c, 0)) for c, need in n["req"].items())
     return min(claimable, key=opp_deficit)
-
-
-def _advance_turn(game: dict) -> str:
-    order = game["order"]
-    return order[(order.index(game["turn"]) + 1) % len(order)]
-
-
-def _calc_points(ps: dict) -> int:
-    return sum(c["points"] for c in ps["purchased"]) + sum(n["points"] for n in ps["nobles"])
-
-
-def _resolve_winner(game: dict) -> None:
-    """End the game: pick winner(s) via tiebreakers — most pts → fewest purchased → shared."""
-    def score_key(pid):
-        ps = game["players"][pid]
-        return (_calc_points(ps), -len(ps["purchased"]))
-
-    scores = {pid: score_key(pid) for pid in game["order"]}
-    best = max(scores.values())
-    winners = [pid for pid, s in scores.items() if s == best]
-    game["phase"] = "over"
-    game["winner"] = winners[0] if len(winners) == 1 else winners
-
-
-def _win_points(game: dict) -> int:
-    """Points needed to trigger the final round. Defaults to 15 (Classic); 21 for the Long mode.
-    Read per-game so the value lives in the game dict (persisted by save/load; old saves -> 15)."""
-    return int(game.get("win_points", 15))
-
-
-def _finish_turn(game: dict, pid: str) -> None:
-    """Advance turn after pid's action; start final-round countdown if pid hit the win threshold; end game when round completes."""
-    if _calc_points(game["players"][pid]) >= _win_points(game) and "final_round_trigger" not in game:
-        game["final_round_trigger"] = pid
-
-    new_turn = _advance_turn(game)
-    game["turn"] = new_turn
-
-    if "final_round_trigger" in game:
-        trigger_idx = game["order"].index(game["final_round_trigger"])
-        if game["order"].index(new_turn) <= trigger_idx:
-            _resolve_winner(game)
-
-
-def _check_winner(game: dict) -> str | None:
-    wp = _win_points(game)
-    for pid in game["order"]:
-        if _calc_points(game["players"][pid]) >= wp:
-            return pid
-    return None
-
-
-def _log_move(game: dict, pid: str, mv_type: str, **details) -> None:
-    """Prepend a move record to game['moves'] (newest first). Entries are COMPACT — a
-    buy/reserve stores only `card_id` (resolve via card_catalog()/build_deck()), not the
-    full card dict — so the whole game is cheap to keep and ship over the wire. The 500
-    cap is a safety bound (a real game is well under it). Read by the end-game Review
-    screen and the admin GET /games/{id}/full analysis endpoint."""
-    entry: dict = {"pid": pid, "type": mv_type}
-    entry.update({k: v for k, v in details.items() if v is not None})
-    game.setdefault("moves", []).insert(0, entry)
-    game["moves"] = game["moves"][:500]
 
 
 # ─── AI tunable weights ─────────────────────────────────────────────────────
@@ -844,10 +706,11 @@ WEIGHTS: dict[str, float] = dict(DEFAULT_WEIGHTS)
 
 # AI data files (weight sets + value model) live in the ai/ subpackage.
 _AI_DIR = os.path.join(os.path.dirname(__file__), "ai")
+_MODELS_DIR = os.path.join(_AI_DIR, "models")   # weights*.json, az_model.npz, value_model.json
 
 # Path can be overridden for playtesting (e.g. SPENDER_WEIGHTS=weights.candidate.json,
 # or a nonexistent path to force the original defaults).
-WEIGHTS_PATH = os.environ.get("SPENDER_WEIGHTS") or os.path.join(_AI_DIR, "weights.json")
+WEIGHTS_PATH = os.environ.get("SPENDER_WEIGHTS") or os.path.join(_MODELS_DIR, "weights.json")
 
 # Named weight variants available for per-game selection. "A" is the default
 # deployed weights (env-overridable for playtest scripts); the rest load from the
@@ -890,119 +753,40 @@ def load_weights(path: str | None = None) -> dict[str, float]:
     WEIGHT_VARIANTS.clear()
     WEIGHT_VARIANTS["A"] = WEIGHTS
     for name, fname in VARIANT_FILES.items():
-        WEIGHT_VARIANTS[name] = _merge_weights_file(os.path.join(_AI_DIR, fname), WEIGHTS)
+        WEIGHT_VARIANTS[name] = _merge_weights_file(os.path.join(_MODELS_DIR, fname), WEIGHTS)
     return WEIGHTS
 
 
 load_weights()
 
 
-# ─── AlphaZero variant ("Z") ──────────────────────────────────────────────────
-# When an exported az_model.npz is present, an AlphaZero-trained net becomes
-# selectable as AI variant "Z" (PUCT search + numpy inference — no torch in
-# production). Absent → AZ_EVALUATE stays None and nothing changes.
+# ─── Retired variants (Z, H) ─────────────────────────────────────────────────
+# Retired = no lobby offers them. NOT dead: `ai_variant` is persisted, so an old
+# saved game against Z or H must still get a real move on its next AI turn. Their
+# implementations live in ai/serving/legacy_variants.py — still in the SERVING
+# stack (ai/offline/ is never imported by the server), just out of this module.
 
-AZ_MODEL_PATH = os.environ.get("SPENDER_AZ_MODEL") or os.path.join(_AI_DIR, "az_model.npz")
-AZ_EVALUATE = None
-
-
-def load_az_model() -> None:
-    """Load the exported AZ net for variant Z. Safe at import; never raises."""
-    global AZ_EVALUATE
-    AZ_EVALUATE = None
-    if os.environ.get("SPENDER_AZ_MODEL") == "none":
-        return
-    try:
-        if os.path.exists(AZ_MODEL_PATH):
-            from games.spender.ai.az.infer_np import load_evaluator
-            AZ_EVALUATE = load_evaluator(AZ_MODEL_PATH)
-            LOG.info("loaded AZ model from %s (AI variant Z enabled)", AZ_MODEL_PATH)
-    except Exception as e:
-        LOG.warning("could not load AZ model from %s: %s", AZ_MODEL_PATH, e)
-
-
-load_az_model()  # loads ai/az_model.npz → variant Z
+_az_choose_move = _legacy.az_choose_move
+_v4_choose_move = _legacy.v4_choose_move
+_v4_card_values = _legacy.v4_card_values
+load_az_model = _legacy.load_az_model
+AZ_MODEL_PATH = _legacy.AZ_MODEL_PATH
 
 
 def _ai_variant_valid(variant: str) -> bool:
+    """Is `variant` selectable/resumable? Z only when its net actually loaded, so a
+    fresh game can never pick a variant the server can't play."""
     return (variant in WEIGHT_VARIANTS
-            or (variant == "Z" and AZ_EVALUATE is not None)
+            or (variant == "Z" and _legacy.AZ_EVALUATE is not None)
             or variant in ("H", "H2", "H3", "S", "N", "PV"))  # H/H2/H3 = greedy heuristics; S = H3-eval+PUCT; N = learned-value leaf + PUCT; PV = learned value+POLICY net + PUCT (N/PV client-WASM; server falls back to S)
-
-
-def _az_choose_move(game: dict, ai_pid: str, time_limit: float = 5.0) -> dict:
-    """Variant-Z move selection: time-budgeted PUCT over the fast az engine.
-    Returns an incumbent dict-move; post-move discard/noble sub-decisions are
-    resolved by _run_ai_turn's heuristics, same as the other variants."""
-    from games.spender.ai.az import actions as _aza
-    from games.spender.ai.az import engine as _aze
-    from games.spender.ai.az.mcts import Search
-
-    s = _aze.from_game_dict(game)
-    legal = _aze.legal_actions(s)
-    if len(legal) == 1:
-        return _aza.action_to_move(s, legal[0])
-    search = Search(s, random.Random(), add_noise=False)
-    deadline = time.time() + time_limit
-    while time.time() < deadline:
-        for _ in range(32):  # check the clock every 32 simulations
-            req = search.leaf_batch()
-            if req is None:
-                continue
-            feats, mask = req
-            p, v = AZ_EVALUATE(feats[None, :], mask[None, :])
-            search.apply_evals(p[0], float(v[0]))
-    visits = search.root.N
-    return _aza.action_to_move(s, max(range(len(visits)), key=visits.__getitem__))
-
-
-def _v4_choose_move(game: dict, ai_pid: str) -> dict:
-    """Variant-H move selection: the v4 valuation heuristic — a 1-ply greedy
-    argmax over the shared card-valuation model (no search). Returns an
-    incumbent dict-move; post-move discard/noble sub-decisions are resolved by
-    _run_ai_turn, same as the other variants. Fast (no model file, no MCTS)."""
-    from games.spender.ai.az import actions as _aza
-    from games.spender.ai.az import engine as _aze
-    from games.spender.ai.az import heuristic as _azh
-
-    s = _aze.from_game_dict(game)
-    a = _azh.choose_action(s, s.turn)
-    return _aza.action_to_move(s, a)
-
-
-def _v4_card_values(game: dict, seat_pid: str) -> dict:
-    """The v4 heuristic's card_value for every visible board card + that seat's own
-    reserved cards, from seat_pid's perspective (whoever's turn it is) — a transparency
-    overlay for variant-H games (so a human can see what each card is worth to the player
-    on the move: their own values on their turn, the bot's on its turn). Keyed by card id
-    (CARD_NAME[ci]) so the frontend can show it per card. Cheap; recomputed per
-    broadcast. Wrapped by callers in try/except so it can never break a room update."""
-    from games.spender.ai.az import engine as _aze
-    from games.spender.ai.az import valuation as _azv
-    from games.spender.ai.az import heuristic as _azh
-
-    try:
-        seat = game["order"].index(seat_pid)
-    except (KeyError, ValueError):
-        return {}
-    s = _aze.from_game_dict(game)
-    val = _azv.Valuation(s)
-    out: dict[str, float] = {}
-    for slot in range(12):
-        ci = s.board[slot]
-        if ci >= 0:
-            out[_aze.CARD_NAME[ci]] = round(_azh.card_value(val, s, ci, seat), 1)
-    for ci in s.reserved[seat]:
-        out[_aze.CARD_NAME[ci]] = round(_azh.card_value(val, s, ci, seat), 1)
-    return out
 
 
 def _h2_choose_move(game: dict, ai_pid: str) -> dict:
     """Variant-H2 move selection: the take_value heuristic (heuristic2) — a 1-ply
     greedy choose_action over the take_value model. Same dict-move contract as H/Z."""
-    from games.spender.ai.az import actions as _aza
-    from games.spender.ai.az import engine as _aze
-    from games.spender.ai.az import heuristic2 as _azh2
+    from games.spender.ai.serving import actions as _aza
+    from games.spender.ai.serving import engine as _aze
+    from games.spender.ai.serving import heuristic2 as _azh2
 
     s = _aze.from_game_dict(game)
     a = _azh2.choose_action(s, s.turn)
@@ -1014,9 +798,9 @@ def _h2_card_values(game: dict, seat_pid: str) -> dict:
     cards, the four take_value pieces {t: take, e: engine, p: point, c: cost} from
     seat_pid's seat (whoever's turn it is). Keyed by card id (CARD_NAME[ci]). Wrapped
     by callers in try/except."""
-    from games.spender.ai.az import engine as _aze
-    from games.spender.ai.az import valuation2 as _azv2
-    from games.spender.ai.az import heuristic2 as _azh2
+    from games.spender.ai.serving import engine as _aze
+    from games.spender.ai.serving import valuation2 as _azv2
+    from games.spender.ai.serving import heuristic2 as _azh2
 
     try:
         seat = game["order"].index(seat_pid)
@@ -1044,9 +828,9 @@ def _h3_choose_move(game: dict, ai_pid: str) -> dict:
     """Variant-H3 move selection: heuristic3 — the take_value model paired with
     valuation3's potential/engine. 1-ply greedy choose_action; same dict-move contract
     as H/H2/Z."""
-    from games.spender.ai.az import actions as _aza
-    from games.spender.ai.az import engine as _aze
-    from games.spender.ai.az import heuristic3 as _azh3
+    from games.spender.ai.serving import actions as _aza
+    from games.spender.ai.serving import engine as _aze
+    from games.spender.ai.serving import heuristic3 as _azh3
 
     s = _aze.from_game_dict(game)
     a = _azh3.choose_action(s, s.turn)
@@ -1059,9 +843,9 @@ def _h3_card_values(game: dict, seat_pid: str) -> dict:
     worth as a DESTINATION, distinct from its immediate take value), per visible board card
     + seat_pid's reserved cards, from seat_pid's seat (whoever's turn it is). Keyed by card
     id. Wrapped by callers in try/except."""
-    from games.spender.ai.az import engine as _aze
-    from games.spender.ai.az import valuation3 as _azv3
-    from games.spender.ai.az import heuristic3 as _azh3
+    from games.spender.ai.serving import engine as _aze
+    from games.spender.ai.serving import valuation3 as _azv3
+    from games.spender.ai.serving import heuristic3 as _azh3
 
     try:
         seat = game["order"].index(seat_pid)
@@ -1089,9 +873,9 @@ def _s_card_values(game: dict, seat_pid: str) -> dict:
     """Variant-S transparency overlay: H3's four take components {t,e,p,c} per visible board
     card + seat_pid's reserved cards, from seat_pid's seat (whoever's turn it is). No
     potential term. Keyed by card id."""
-    from games.spender.ai.az import engine as _aze
-    from games.spender.ai.az import valuation3 as _azv3
-    from games.spender.ai.az import heuristic3 as _azh3
+    from games.spender.ai.serving import engine as _aze
+    from games.spender.ai.serving import valuation3 as _azv3
+    from games.spender.ai.serving import heuristic3 as _azh3
 
     try:
         seat = game["order"].index(seat_pid)
@@ -1121,8 +905,8 @@ def _s_position_eval(game: dict, seat_pid: str):
     per-card values for the admin AI-values button. Returns None if the seat can't be resolved.
     Wrapped by callers in try/except. (Uses base 15-point weights even on a 21-point game, mirroring
     _s_card_values; the S21 overrides are transient to the search only.)"""
-    from games.spender.ai.az import engine as _aze
-    from games.spender.ai.az import v_state as _azvs
+    from games.spender.ai.serving import engine as _aze
+    from games.spender.ai.serving import v_state as _azvs
 
     try:
         seat = game["order"].index(seat_pid)
@@ -1138,8 +922,8 @@ def _s_searched_value(game: dict):
     searched counterpart to the static _s_position_eval. EXPENSIVE (~SERVE_TIME) — must run in a
     thread pool, never on the event loop. None for forced/non-PLAY positions. Base 15-pt weights
     (mirrors _s_position_eval)."""
-    from games.spender.ai.az import engine as _aze
-    from games.spender.ai.az import vsearch as _azvs
+    from games.spender.ai.serving import engine as _aze
+    from games.spender.ai.serving import vsearch as _azvs
     s = _aze.from_game_dict(game)
     v = _azvs.searched_value(s, s.turn, time_limit=_azvs.SERVE_TIME)
     return None if v is None else round(v, 3)
@@ -1153,7 +937,7 @@ def _s_searched_value(game: dict):
 # eval"), so the overlay carries just `ai_position_eval` (N's leaf value of the live position).
 # Single source of truth: the net JSON is the SAME file the WASM embeds, so the two never drift.
 _N_MODEL_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(_AI_DIR))), "spender-core", "src", "n_model.json")
+    os.path.dirname(os.path.dirname(os.path.dirname(_AI_DIR))), "rust-cores", "spender-core", "src", "n_model.json")
 _N_MODEL = None  # (w0, b0, w1, b1, mu, sd) lazily loaded numpy arrays, or False if unavailable
 
 
@@ -1184,10 +968,10 @@ def _n_features(s, seat: int) -> list[float]:
     """The 101-dim feature vector for `seat` to move in state `s` — a faithful port of
     spender-core/src/feats.rs::features (same order). Reuses the Python v_state/valuation3 helpers
     the Rust was ported from, so the served features match the net's trained inputs."""
-    from games.spender.ai.az import engine as _aze
-    from games.spender.ai.az import v_state as _vs
-    from games.spender.ai.az import valuation3 as _v3
-    from games.spender.ai.az import heuristic3 as _h3
+    from games.spender.ai.serving import engine as _aze
+    from games.spender.ai.serving import v_state as _vs
+    from games.spender.ai.serving import valuation3 as _v3
+    from games.spender.ai.serving import heuristic3 as _h3
 
     opp = 1 - seat
     val = _v3.Valuation(s, _h3.W_TEMPO, _h3.W_GEM, _h3.W_GOLD)
@@ -1245,7 +1029,7 @@ def _n_position_eval(game: dict, seat_pid: str):
     model = _load_n_model()
     if model is None:
         return None
-    from games.spender.ai.az import engine as _aze
+    from games.spender.ai.serving import engine as _aze
     import numpy as _np
     try:
         seat = game["order"].index(seat_pid)
@@ -1288,13 +1072,13 @@ def _compute_overlay(game: dict, persp: str, variant: str) -> dict:
 # When a game is win_points==21, variant S applies a config tuned for the longer game (weights that
 # the offline 21-point retune found differ from the 15-point S) on top of the per-game win_points the
 # engine/eval already honor (the convex near-win zone, the 21-point turns table). The overrides live
-# in ai/az/vsearch_s21.json as {KEY: VALUE}; an EMPTY/absent file means the retune found no weight
+# in ai/serving/vsearch_s21.json as {KEY: VALUE}; an EMPTY/absent file means the retune found no weight
 # change worth making, so 21-point S == 15-point S (still correct, just not re-weighted).
 _S21_LOCK = threading.Lock()   # serializes S searches while S21 overrides exist (they mutate module globals)
 
 
 def _load_s21_config() -> dict:
-    p = os.path.join(os.path.dirname(__file__), "ai", "az", "vsearch_s21.json")
+    p = os.path.join(os.path.dirname(__file__), "ai", "serving", "vsearch_s21.json")
     try:
         with open(p) as f:
             cfg = json.load(f)
@@ -1308,10 +1092,10 @@ S21_CONFIG = _load_s21_config()
 
 def _s_route_attr(key: str):
     """Module that defines `key` (vsearch / v_state / heuristic3 / valuation3), or None."""
-    from games.spender.ai.az import heuristic3 as _h3
-    from games.spender.ai.az import v_state as _vs
-    from games.spender.ai.az import valuation3 as _v3
-    from games.spender.ai.az import vsearch as _azvs
+    from games.spender.ai.serving import heuristic3 as _h3
+    from games.spender.ai.serving import v_state as _vs
+    from games.spender.ai.serving import valuation3 as _v3
+    from games.spender.ai.serving import vsearch as _azvs
     for mod in (_azvs, _vs, _h3, _v3):
         if hasattr(mod, key):
             return mod
@@ -1325,9 +1109,9 @@ def _s_choose_move(game: dict, ai_pid: str) -> dict:
     lever); wall-clock budgeted. Same dict-move contract as H3/Z. On a win_points==21 game with a
     non-empty S21 config, the tuned overrides are applied under a lock (race-safe vs concurrent
     15-point searches that read the same module globals)."""
-    from games.spender.ai.az import actions as _aza
-    from games.spender.ai.az import engine as _aze
-    from games.spender.ai.az import vsearch as _azvs
+    from games.spender.ai.serving import actions as _aza
+    from games.spender.ai.serving import engine as _aze
+    from games.spender.ai.serving import vsearch as _azvs
 
     s = _aze.from_game_dict(game)
     if not S21_CONFIG:                                    # no overrides exist -> no lock, no swap
@@ -1402,7 +1186,7 @@ def _board_scarcity(game: dict) -> float:
 
 # Override for playtesting: SPENDER_VALUE_MODEL=value_model.candidate.json to try a
 # candidate, or =none (a nonexistent path) to force the rollout MCTS.
-VALUE_MODEL_PATH = os.environ.get("SPENDER_VALUE_MODEL") or os.path.join(_AI_DIR, "value_model.json")
+VALUE_MODEL_PATH = os.environ.get("SPENDER_VALUE_MODEL") or os.path.join(_MODELS_DIR, "value_model.json")
 _VALUE_MODEL: dict | None = None
 USE_VALUE_LEAF: bool = False
 # Human-readable feature order (for the trainer / introspection); MUST match
@@ -1614,7 +1398,6 @@ def _ai_score_card(card: dict, game: dict, ai_pid: str, urgency: float) -> float
         contested_score = (1.0 + pts) * _opp_reach(game, ai_pid, card) * WEIGHTS["contested_weight"]
 
     return (point_score + bonus_score + noble_score + contested_score) * accessibility
-
 
 
 def _opp_winning_buys(game: dict, opp_pid: str) -> list[dict]:
@@ -2347,6 +2130,7 @@ def _run_ai_turn(game: dict, ai_pid: str, mv: dict | None = None, defer_discard:
 
     elif mv["type"] == "reserve":
         card_id = mv.get("card_id")
+        deck_level = mv.get("deck_level")
         card = None
         if card_id:
             for lk in ["L1", "L2", "L3"]:
@@ -2357,12 +2141,20 @@ def _run_ai_turn(game: dict, ai_pid: str, mv: dict | None = None, defer_discard:
                         break
                 if card:
                     break
+        elif deck_level:
+            # Blind deck-top reserve (no card_id): the search picks A_RES_DECK -> deck_level, and
+            # the human path supports it. Without this branch the AI silently passed its turn (no
+            # card, no gold). from_deck=True keeps it hidden from the opponent (Splendor rule).
+            lk = f"L{deck_level}"
+            if game["decks"].get(lk):
+                card = game["decks"][lk].pop()
+                card["from_deck"] = True
         if card:
             ps["reserved"].append(card)
             if game["bank"].get("gold", 0) > 0:
                 game["bank"]["gold"] -= 1
                 ps["tokens"]["gold"] = ps["tokens"].get("gold", 0) + 1
-            _log_move(game, ai_pid, "reserve", card_id=card["id"])
+            _log_move(game, ai_pid, "reserve", card_id=card["id"], from_deck=card.get("from_deck"))
             if _defer_or_finish_discards(game, ai_pid, defer_discard):
                 return  # deferred: the client's net will submit the discard; turn NOT finished
 
@@ -2430,7 +2222,7 @@ def _ai_think(variant: str, game: dict, ai_pid: str) -> dict:
     """Dispatch to the configured variant's move chooser. Runs in a thread-pool executor
     (so the event loop stays free during the compute); raises if the chooser fails — the
     caller guards that and falls back so a failed think can't freeze the AI's turn."""
-    if variant == "Z" and AZ_EVALUATE is not None:
+    if variant == "Z" and _legacy.AZ_EVALUATE is not None:
         return _az_choose_move(game, ai_pid, 5.0)
     if variant == "H":
         return _v4_choose_move(game, ai_pid)
@@ -2450,6 +2242,7 @@ def _ai_think(variant: str, game: dict, ai_pid: str) -> dict:
 async def _schedule_ai_turn(room_id: str) -> None:
     """Broadcast the post-human-move state immediately, then run MCTS in a thread pool
     (non-blocking) and broadcast the AI's move when it finishes."""
+    t0 = time.monotonic()   # turn start — the AI's move is floored to _MIN_BOT_THINK from here
     # If it's the HUMAN's turn in an S game (human-first start / reconnect, where no AI move
     # fires below), kick the searched-eval search. Fully guarded, so a no-op otherwise.
     asyncio.create_task(_schedule_s_searched_eval(room_id))
@@ -2465,9 +2258,19 @@ async def _schedule_ai_turn(room_id: str) -> None:
         ai_pid = g.get("ai_player")
         if not ai_pid or g.get("turn") != ai_pid or g.get("phase") != "playing":
             return
+        pending_discard = g.get("pending_discard_pid") == ai_pid
         client_ai = bool(r.get("client_ai"))
         client_hidden = bool(r.get("client_hidden"))
         wait_ply = len(g.get("moves", []))
+    if pending_discard:
+        # A deferred over-cap discard is pending — this is NOT a play turn. Running the play search
+        # here would mis-handle it: the engine reconstructs a DISCARD phase, so the search returns a
+        # discard action, and _run_ai_turn has no discard branch — it drops the discard and finishes
+        # the turn with >10 tokens while pending_discard_pid sticks forever, wedging every later AI
+        # turn. Re-arm the discard fallback (idempotent + ply-guarded) so the discard resolves via
+        # the client or the heuristic, and don't run the play search.
+        asyncio.create_task(_schedule_ai_discard_fallback(room_id, ai_pid, wait_ply))
+        return
     if client_ai:
         if client_hidden:
             return  # backgrounded tab: NEVER substitute the weaker S move. The client always plays the
@@ -2550,6 +2353,7 @@ async def _schedule_ai_turn(room_id: str) -> None:
         if g.get("phase") == "over":
             r["status"] = "over"
 
+    await _floor_bot_move(t0)   # never show the AI's move before the floor (instant heuristic/fallback)
     save_game(room_id)
     await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
     # It's the human's turn now — kick off a fresh searched-eval search for the human's position
@@ -2613,20 +2417,43 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
     if len(room_id) > 64 or len(pid) > 64:
         await websocket.close(code=1008)
         return
+    # Abuse throttles (core.rooms): cap connects per IP and messages per socket.
+    # Before the room shell is allocated below, so a flood can't grow ROOMS at all.
+    if await _rooms.reject_if_connecting_too_fast(websocket):
+        return
+    _msg_throttle = _rooms.MessageThrottle()
     LOG.info("ws connect room=%s player=%s", room_id, pid)
+    # The `player` path segment is CLIENT-SUPPLIED and NOT trusted: every pid in a room
+    # is broadcast in the public players map, so anyone who can see a game could open a
+    # socket claiming another seat's pid, receive that seat's `viewer_pid`-redacted view
+    # (its blind reserves), and move on its turn — the move handler only checks whose
+    # turn it is. `authed` flips true only through a handshake that PROVES ownership;
+    # every mutating action is gated on it. Mirrors Where Wolf?/Duel/CoC.
+    authed = False
 
     async with ROOM_LOCK:
         if room_id not in ROOMS:
             load_game_to_memory(room_id)
         r = ROOMS.setdefault(room_id, {"players": {}, "sockets": {}, "status": "open", "game": None, "host": None})
-        r["sockets"][pid] = websocket
         r.setdefault("meta", {})
+        # The socket is REGISTERED BY THE HANDSHAKE (create/join/reconnect/
+        # auth_reconnect), never here. Registering it at connect time — before any
+        # proof of identity — was a full seat takeover: `broadcast_room` rebuilds
+        # room state PER RECIPIENT keyed on the socket's pid, so merely opening a
+        # socket claiming a victim's pid and sending NOTHING returned that seat's
+        # own view — its blind reserves AND its `reconnect_tokens` entry. Replaying
+        # that token as `{"action":"reconnect"}` then defeats the identity binding
+        # entirely. It also displaced the victim's live socket, dropping them.
 
     try:
-        await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
-
+        # No broadcast here either: an unregistered socket has nothing to receive,
+        # and the other seats have nothing to learn from a stranger connecting. Each
+        # handshake replies with the room state itself (created/joined/reconnected).
         while True:
             text = await websocket.receive_text()
+            if not _msg_throttle.allow():
+                await websocket.close(code=1008)
+                return
             try:
                 msg = json.loads(text)
             except json.JSONDecodeError as e:
@@ -2644,38 +2471,59 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                 if vs_ai and not _ai_variant_valid(ai_variant):
                     ai_variant = "A"
                 win_points = 21 if msg.get("win_points") == 21 else 15   # Classic 15 / Long 21
+                try:  # host-chosen seat cap for friend lobbies (2-4; default = the global max)
+                    mp = int(msg.get("max_players") or 0)
+                except (TypeError, ValueError):
+                    mp = 0
+                max_players = mp if 2 <= mp <= MAX_PLAYERS else MAX_PLAYERS
                 async with ROOM_LOCK:
                     r = ROOMS.setdefault(room_id, {"players": {}, "sockets": {}, "status": "open", "game": None, "host": None})
-                    r["players"][pid] = name
-                    r["host"] = pid
-                    r["status"] = "open"
-                    bank = _bank_for(2)  # placeholder for the waiting room; rescaled at start to the seated count
-                    r["game"] = {
-                        "bank": bank, "decks": build_deck(), "board": None, "nobles": None,
-                        "players": {}, "turn": None, "order": [], "phase": "waiting", "winner": None,
-                        "moves": [], "win_points": win_points,
-                    }
-                    r["meta"][pid] = {"token": gen_token(6)}
-                    r["game"]["players"][pid] = {"tokens": empty_gems(), "purchased": [], "reserved": [], "nobles": []}
-                    if vs_ai:
-                        ai_pid = "ai"
-                        r["players"][ai_pid] = f"AI ({ai_variant})"
-                        r["ai_variant"] = ai_variant
-                        g = r["game"]
-                        g["players"][ai_pid] = {"tokens": empty_gems(), "purchased": [], "reserved": [], "nobles": []}
-                        g["ai_player"] = ai_pid
-                        order = [pid, ai_pid]
-                        random.shuffle(order)
-                        g["order"] = order
-                        g["turn"] = order[0]
-                        g["phase"] = "playing"
-                        g["board"] = _deal_board(g["decks"])
-                        nobles_pool = list(ALL_NOBLES)
-                        random.shuffle(nobles_pool)
-                        g["nobles"] = nobles_pool[:3]
-                        _capture_setup(g)   # snapshot dealt state for offline replay/eval
-                        r["status"] = "playing"
+                    # Don't clobber a game that already exists here. The connect handler above has
+                    # already loaded any persisted game into ROOMS, so a non-None game means this
+                    # room code is taken (a legit create always targets a fresh client-generated
+                    # code). Without this guard a crafted `create` on someone else's room code would
+                    # wipe their in-progress game in memory AND DB. CoC/WW/Duel reject the same way.
+                    already_exists = r.get("game") is not None
+                    if not already_exists:
+                        r["players"][pid] = name
+                        # Register the socket HERE: the creator minted this seat, so
+                        # this is the first point ownership is proven. (Connect no
+                        # longer registers it — see ws_room_player.)
+                        r["sockets"][pid] = websocket
+                        r["host"] = pid
+                        r["status"] = "open"
+                        r["max_players"] = max_players
+                        bank = _bank_for(2)  # placeholder for the waiting room; rescaled at start to the seated count
+                        r["game"] = {
+                            "bank": bank, "decks": build_deck(), "board": None, "nobles": None,
+                            "players": {}, "turn": None, "order": [], "phase": "waiting", "winner": None,
+                            "moves": [], "win_points": win_points,
+                        }
+                        r["meta"][pid] = {"token": gen_token(6)}
+                        r["game"]["players"][pid] = {"tokens": empty_gems(), "purchased": [], "reserved": [], "nobles": []}
+                        if vs_ai:
+                            ai_pid = "ai"
+                            r["players"][ai_pid] = f"AI ({ai_variant})"
+                            r["ai_variant"] = ai_variant
+                            g = r["game"]
+                            g["players"][ai_pid] = {"tokens": empty_gems(), "purchased": [], "reserved": [], "nobles": []}
+                            g["ai_player"] = ai_pid
+                            order = [pid, ai_pid]
+                            random.shuffle(order)
+                            g["order"] = order
+                            g["turn"] = order[0]
+                            g["phase"] = "playing"
+                            g["board"] = _deal_board(g["decks"])
+                            nobles_pool = list(ALL_NOBLES)
+                            random.shuffle(nobles_pool)
+                            g["nobles"] = nobles_pool[:3]
+                            _capture_setup(g)   # snapshot dealt state for offline replay/eval
+                            r["status"] = "playing"
+                if already_exists:
+                    await websocket.send_text(json.dumps({"type": "error", "message": "room already exists"}))
+                    continue
                 save_game(room_id)
+                authed = True   # the creator minted this seat -> owns it
                 await websocket.send_text(json.dumps({"type": "created", "room_id": room_id, "room": mk_room_state(room_id, viewer_pid=pid)}))
                 if vs_ai:
                     asyncio.create_task(_schedule_ai_turn(room_id))
@@ -2689,6 +2537,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                         await websocket.send_text(json.dumps({"type": "error", "message": "invalid token"}))
                         continue
                     r["sockets"][pid] = websocket
+                authed = True   # per-seat room token proves ownership
                 LOG.info("player %s reconnected to room %s", pid, room_id)
                 await websocket.send_text(json.dumps({"type": "reconnected", "room": mk_room_state(room_id, viewer_pid=pid)}))
                 await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
@@ -2697,6 +2546,12 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
             # ── join ────────────────────────────────────────────────────────
             elif action == "join":
                 name = str(msg.get("name") or pid).strip()[:24] or "Player"
+                # A logged-in user re-entering a seat they ALREADY hold (new device /
+                # cleared storage -> no per-seat room token) proves ownership with their
+                # session token: pid == their account id, which an attacker can't forge.
+                # Resolved before the lock (a DB read).
+                _sess = msg.get("session_token")
+                _session_uid = (get_user_by_session(_sess) or {}).get("id") if _sess else None
                 async with ROOM_LOCK:
                     if room_id not in ROOMS:
                         await websocket.send_text(json.dumps({"type": "error", "message": "room not found"}))
@@ -2708,7 +2563,17 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     if not r.get("host") or r.get("game") is None:
                         await websocket.send_text(json.dumps({"type": "error", "message": "this game is no longer available"}))
                         continue
-                    if pid not in r["players"]:
+                    if pid in r["players"]:
+                        # Re-entry to an EXISTING seat. Identity MUST be proven, or the
+                        # "joined" reply below hands a stranger this seat's private view
+                        # and its socket. `join` carries no room token (that's
+                        # `reconnect`), so a matching session is the only proof.
+                        if _session_uid != pid:
+                            await websocket.send_text(json.dumps(
+                                {"type": "error",
+                                 "message": "seat already taken — reconnect to rejoin"}))
+                            continue
+                    else:
                         # New player joining: only OPEN, non-AI human lobbies, up to MAX_PLAYERS.
                         if r.get("ai_variant"):
                             await websocket.send_text(json.dumps({"type": "error", "message": "can't join an AI game"}))
@@ -2716,7 +2581,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                         if r.get("status") != "open":
                             await websocket.send_text(json.dumps({"type": "error", "message": "game already started"}))
                             continue
-                        if len(r["players"]) >= MAX_PLAYERS:
+                        if len(r["players"]) >= int(r.get("max_players") or MAX_PLAYERS):
                             await websocket.send_text(json.dumps({"type": "error", "message": "room full"}))
                             continue
                     r["players"][pid] = name
@@ -2726,6 +2591,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                         r["meta"][pid] = {"token": gen_token(6)}
                     if r.get("game") and pid not in r["game"]["players"]:
                         r["game"]["players"][pid] = {"tokens": empty_gems(), "purchased": [], "reserved": [], "nobles": []}
+                authed = True
                 save_game(room_id)
                 await websocket.send_text(json.dumps({"type": "joined", "room_id": room_id, "room": mk_room_state(room_id, viewer_pid=pid)}))
                 await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
@@ -2746,12 +2612,18 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     r["sockets"][pid] = websocket
                     r["meta"].setdefault(pid, {})["user_id"] = info.get("user_id")
                 mark_reconnect_token_used(token)
+                authed = True   # server-issued reconnect token, scoped to (room_id, pid)
                 await websocket.send_text(json.dumps({"type": "reconnected", "room": mk_room_state(room_id, viewer_pid=pid)}))
                 await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
                 asyncio.create_task(_schedule_ai_turn(room_id))
 
             # ── start ───────────────────────────────────────────────────────
             elif action == "start":
+                # Privileged: only a socket that has PROVEN it owns `pid` may act as it.
+                if not authed:
+                    await websocket.send_text(json.dumps(
+                        {"type": "error", "message": "not authenticated for this seat"}))
+                    continue
                 _err: str | None = None
                 async with ROOM_LOCK:
                     r = ROOMS.get(room_id)
@@ -2781,6 +2653,11 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
 
             # ── move ────────────────────────────────────────────────────────
             elif action == "move":
+                # Privileged: only a socket that has PROVEN it owns `pid` may act as it.
+                if not authed:
+                    await websocket.send_text(json.dumps(
+                        {"type": "error", "message": "not authenticated for this seat"}))
+                    continue
                 mv = msg.get("move") or {}
                 _err = None
                 _did_change = False
@@ -2789,6 +2666,10 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
 
                 async with ROOM_LOCK:
                     r = ROOMS.get(room_id)
+                    # Room-level gates stay here (they are about the ROOM, not the rules);
+                    # everything from "is this a legal move" onward is engine.apply_move,
+                    # the same code the rules tests drive. See engine.py's docstring for
+                    # why that split matters.
                     if not r:
                         _err = "game not started"
                     elif r.get("status") == "over":
@@ -2797,197 +2678,12 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                         _err = "game not started"
                     else:
                         g = r["game"]
-                        if g.get("phase") == "over":
-                            _err = "game is over"
-                        elif g.get("turn") != pid:
-                            _err = "not your turn"
-                        else:
-                            ps = g["players"][pid]
-                            move_type = mv.get("type")
-
-                            if g.get("pending_noble_pid") == pid and move_type != "pick_noble":
-                                _err = "must choose a noble first"
-                            elif g.get("pending_discard_pid") == pid and move_type not in ("discard", "undo_discard"):
-                                _err = "must discard down to 10 gems first"
-                            elif move_type == "take_gems":
-                                colors = mv.get("colors", [])
-                                if not colors or len(colors) > 3:
-                                    _err = "take 1-3 gems"
-                                else:
-                                    freq: dict[str, int] = {}
-                                    for c in colors:
-                                        freq[c] = freq.get(c, 0) + 1
-                                    doubles = [c for c, n in freq.items() if n == 2]
-                                    if any(n > 2 for n in freq.values()) or len(doubles) > 1:
-                                        _err = "invalid gem selection"
-                                    elif doubles and (len(colors) != 2 or len(freq) != 1):
-                                        _err = "double take must be exactly 2 of one color"
-                                    elif doubles and g["bank"].get(doubles[0], 0) < 4:
-                                        _err = "need >= 4 in bank for double take"
-                                    else:
-                                        for c in colors:
-                                            if g["bank"].get(c, 0) <= 0:
-                                                _err = f"no {c} in bank"
-                                                break
-                                        else:
-                                            _pre = copy.deepcopy(g)  # for undo if this overfills
-                                            for c in colors:
-                                                g["bank"][c] -= 1
-                                                ps["tokens"][c] = ps["tokens"].get(c, 0) + 1
-                                            _log_move(g, pid, "take_gems", colors=colors)
-                                            _did_change = True
-                                            if sum(ps["tokens"].values()) > 10:
-                                                _discard_pid = pid
-                                                g["pending_discard_pid"] = pid
-                                                g["pre_discard_snapshot"] = _pre
-                                            else:
-                                                g.pop("pending_discard_pid", None)
-                                                _finish_turn(g, pid)
-                                                _post_turn(g, r)
-
-                            elif move_type == "discard":
-                                color = mv.get("color")
-                                if not color or ps["tokens"].get(color, 0) <= 0:
-                                    _err = "can't discard that"
-                                else:
-                                    ps["tokens"][color] -= 1
-                                    g["bank"][color] = g["bank"].get(color, 0) + 1
-                                    # Log on commit; an undo_discard restores the pre-action
-                                    # snapshot (taken before the take/reserve was logged), which
-                                    # drops these discard entries too — so the log stays faithful.
-                                    _log_move(g, pid, "discard", color=color)
-                                    _did_change = True
-                                    if sum(ps["tokens"].values()) > 10:
-                                        _discard_pid = pid
-                                        g["pending_discard_pid"] = pid
-                                    else:
-                                        g.pop("pending_discard_pid", None)
-                                        g.pop("pre_discard_snapshot", None)
-                                        _finish_turn(g, pid)
-                                        _post_turn(g, r)
-
-                            elif move_type == "undo_discard":
-                                # Revert the whole over-filling action (take/reserve) and any
-                                # discards made since, restoring the pre-action snapshot.
-                                snap = g.get("pre_discard_snapshot")
-                                if g.get("pending_discard_pid") != pid or not snap:
-                                    _err = "nothing to undo"
-                                else:
-                                    r["game"] = copy.deepcopy(snap)  # snapshot has no pending/snapshot keys
-                                    g = r["game"]
-                                    _did_change = True
-
-                            elif move_type == "buy":
-                                card_id = mv.get("card_id")
-                                card: dict | None = None
-                                source: tuple | None = None
-                                for lk in ["L1", "L2", "L3"]:
-                                    for i, c in enumerate(g["board"][lk]):
-                                        if c and c["id"] == card_id:
-                                            card, source = c, ("board", lk, i)
-                                            break
-                                    if card:
-                                        break
-                                if not card:
-                                    for i, c in enumerate(ps["reserved"]):
-                                        if c["id"] == card_id:
-                                            card, source = c, ("reserved", i)
-                                            break
-                                if not card:
-                                    _err = "card not found"
-                                else:
-                                    bonuses = bonuses_from(ps["purchased"])
-                                    if not can_afford(card["cost"], ps["tokens"], bonuses):
-                                        _err = "can't afford"
-                                    else:
-                                        spend = calc_spend(card["cost"], ps["tokens"], bonuses)
-                                        for c, n in spend.items():
-                                            ps["tokens"][c] = ps["tokens"].get(c, 0) - n
-                                            g["bank"][c] = g["bank"].get(c, 0) + n
-                                        ps["purchased"].append(card)
-                                        if source[0] == "board":  # type: ignore[index]
-                                            lk, idx = source[1], source[2]  # type: ignore[misc]
-                                            g["board"][lk][idx] = g["decks"][lk].pop() if g["decks"][lk] else None
-                                        else:
-                                            ps["reserved"].pop(source[1])  # type: ignore[index]
-                                        _log_move(g, pid, "buy", card_id=card["id"])
-                                        claimable = _check_nobles(g, pid)
-                                        if len(claimable) > 1:
-                                            g["pending_noble_choice"] = [n["id"] for n in claimable]
-                                            g["pending_noble_pid"] = pid
-                                            _noble_choice_pid = pid
-                                        elif claimable:
-                                            n = claimable[0]
-                                            ps["nobles"].append(n)
-                                            g["nobles"] = [x for x in g["nobles"] if x["id"] != n["id"]]
-                                            _log_move(g, pid, "noble", pts=n["points"], noble_id=n["id"])
-                                            _finish_turn(g, pid)
-                                            _post_turn(g, r)
-                                        else:
-                                            _finish_turn(g, pid)
-                                            _post_turn(g, r)
-                                        _did_change = True
-
-                            elif move_type == "reserve":
-                                if len(ps["reserved"]) >= 3:
-                                    _err = "already have 3 reserved"
-                                else:
-                                    _pre = copy.deepcopy(g)  # for undo if this overfills
-                                    card_id = mv.get("card_id")
-                                    deck_level = mv.get("deck_level")
-                                    card = None
-                                    if card_id:
-                                        for lk in ["L1", "L2", "L3"]:
-                                            for i, c in enumerate(g["board"][lk]):
-                                                if c and c["id"] == card_id:
-                                                    card = c
-                                                    g["board"][lk][i] = g["decks"][lk].pop() if g["decks"][lk] else None
-                                                    break
-                                            if card:
-                                                break
-                                    elif deck_level:
-                                        lk = f"L{deck_level}"
-                                        if g["decks"][lk]:
-                                            card = g["decks"][lk].pop()
-                                            # blind deck-top reserve — hidden from the opponent (Splendor rule)
-                                            card["from_deck"] = True
-                                    if not card:
-                                        _err = "card not found"
-                                    else:
-                                        ps["reserved"].append(card)
-                                        if g["bank"].get("gold", 0) > 0:
-                                            g["bank"]["gold"] -= 1
-                                            ps["tokens"]["gold"] = ps["tokens"].get("gold", 0) + 1
-                                        _log_move(g, pid, "reserve", card_id=card["id"], from_deck=card.get("from_deck"))
-                                        _did_change = True
-                                        if sum(ps["tokens"].values()) > 10:
-                                            _discard_pid = pid
-                                            g["pending_discard_pid"] = pid
-                                            g["pre_discard_snapshot"] = _pre
-                                        else:
-                                            g.pop("pending_discard_pid", None)
-                                            _finish_turn(g, pid)
-                                            _post_turn(g, r)
-                            elif move_type == "pick_noble":
-                                noble_id = mv.get("noble_id")
-                                pending = g.get("pending_noble_choice") or []
-                                if g.get("pending_noble_pid") != pid or noble_id not in pending:
-                                    _err = "no noble choice pending"
-                                else:
-                                    noble = next((n for n in g["nobles"] if n["id"] == noble_id), None)
-                                    if not noble:
-                                        _err = "noble not found"
-                                    else:
-                                        ps["nobles"].append(noble)
-                                        g["nobles"] = [x for x in g["nobles"] if x["id"] != noble_id]
-                                        _log_move(g, pid, "noble", pts=noble["points"], noble_id=noble_id)
-                                        g.pop("pending_noble_choice", None)
-                                        g.pop("pending_noble_pid", None)
-                                        _finish_turn(g, pid)
-                                        _post_turn(g, r)
-                                        _did_change = True
-                            else:
-                                _err = "unknown move type"
+                        ok, _err, _fx = engine.apply_move(g, pid, mv)
+                        if ok:
+                            _did_change = True
+                            _discard_pid = _fx["discard_pid"]
+                            _noble_choice_pid = _fx["noble_choice_pid"]
+                            _post_turn(g, r)
 
                 if _err:
                     await websocket.send_text(json.dumps({"type": "error", "message": _err}))
@@ -3006,6 +2702,11 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
 
             # ── client_ai_ready (the browser can run the WASM variant-S search) ──
             elif action == "client_ai_ready":
+                # Privileged: only a socket that has PROVEN it owns `pid` may act as it.
+                if not authed:
+                    await websocket.send_text(json.dumps(
+                        {"type": "error", "message": "not authenticated for this seat"}))
+                    continue
                 async with ROOM_LOCK:
                     r = ROOMS.get(room_id)
                     if r is not None:
@@ -3019,6 +2720,11 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
             # wait for the client's full-strength N move (delivered when the tab next gets CPU, usually on
             # refocus) — we never substitute the weaker S move for N.
             elif action == "client_ai_hidden":
+                # Privileged: only a socket that has PROVEN it owns `pid` may act as it.
+                if not authed:
+                    await websocket.send_text(json.dumps(
+                        {"type": "error", "message": "not authenticated for this seat"}))
+                    continue
                 _hidden = bool(msg.get("hidden"))
                 async with ROOM_LOCK:
                     r = ROOMS.get(room_id)
@@ -3027,6 +2733,11 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
 
             # ── ai_move (client-computed AI move in a vs-S game) ──────────────
             elif action == "ai_move":
+                # Privileged: only a socket that has PROVEN it owns `pid` may act as it.
+                if not authed:
+                    await websocket.send_text(json.dumps(
+                        {"type": "error", "message": "not authenticated for this seat"}))
+                    continue
                 mv = msg.get("move") or {}
                 _err = None
                 _did_change = False
@@ -3055,8 +2766,8 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                             # `discard` validates; on a normal turn only the PLAY moves do.
                             legal = False
                             try:
-                                from games.spender.ai.az import actions as _aza
-                                from games.spender.ai.az import engine as _aze
+                                from games.spender.ai.serving import actions as _aza
+                                from games.spender.ai.serving import engine as _aze
                                 s = _aze.from_game_dict(g)
                                 act = _aza.move_to_action(s, mv)
                                 legal = act in _aze.legal_actions(s)
@@ -3117,6 +2828,11 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
 
             # ── abandon ─────────────────────────────────────────────────────
             elif action == "abandon":
+                # Privileged: only a socket that has PROVEN it owns `pid` may act as it.
+                if not authed:
+                    await websocket.send_text(json.dumps(
+                        {"type": "error", "message": "not authenticated for this seat"}))
+                    continue
                 _err = None
                 _did_change = False
                 async with ROOM_LOCK:
@@ -3144,6 +2860,11 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
 
             # ── ping (a player tapped another's box → a chime for the tapped one) ──
             elif action == "ping":
+                # Privileged: only a socket that has PROVEN it owns `pid` may act as it.
+                if not authed:
+                    await websocket.send_text(json.dumps(
+                        {"type": "error", "message": "not authenticated for this seat"}))
+                    continue
                 target = msg.get("target")
                 async with ROOM_LOCK:
                     rr = ROOMS.get(room_id)
@@ -3161,17 +2882,20 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
         LOG.info("ws disconnected room=%s player=%s", room_id, pid)
     finally:
         async with ROOM_LOCK:
-            r = ROOMS.get(room_id)
-            if r:
-                # Only clean up if our socket hasn't been replaced by a reconnect.
-                # If it has, the new socket is already registered; removing it would
-                # delete the room and cause "game not started" on the next move.
-                if r["sockets"].get(pid) is websocket:
-                    r["sockets"].pop(pid, None)
-                    if not r["sockets"]:
-                        ROOMS.pop(room_id, None)
-                    else:
-                        asyncio.create_task(broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)}))
+            # Stale-socket guard shared with the other three games (core/rooms.py):
+            # only act if OUR socket is still the registered one, else a reconnect
+            # race (WS1 dropping after WS2 registered) would delete a live room.
+            # Spender's policy differs deliberately — it drops ANY empty room, not
+            # just never-started lobbies — and it tells the survivors someone left.
+            # `was_ours` must be read BEFORE the release: the survivors are told
+            # someone left only when THIS socket was the live one and the room
+            # outlived it. A stale socket (already superseded by a reconnect) must
+            # stay completely silent — it didn't leave, it was replaced.
+            was_ours = ROOMS.get(room_id, {}).get("sockets", {}).get(pid) is websocket
+            dropped = _rooms.release_socket(ROOMS, room_id, pid, websocket,
+                                            drop_empty_open_only=False)
+            if was_ours and not dropped and ROOMS.get(room_id, {}).get("sockets"):
+                asyncio.create_task(broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)}))
 
 
 # ─── HTTP endpoints ───────────────────────────────────────────────────────────
@@ -3190,12 +2914,16 @@ def bearer_token(authorization: str | None = Header(default=None),
 
 
 def _client_ip(request: Request) -> str:
-    """Best-effort client IP for rate-limiting. Render terminates TLS at a proxy,
-    so the real client is the first hop in X-Forwarded-For; fall back to the socket
-    peer for local/dev."""
+    """Best-effort client IP for rate-limiting. Render's proxy APPENDS the real peer IP to any
+    client-supplied X-Forwarded-For, so the LAST hop is the trustworthy one. Trusting the leftmost
+    (as before) is the classic XFF bug: a client rotating a spoofed `X-Forwarded-For` per request
+    lands under a fresh limiter key every time, defeating the per-IP login/register throttles.
+    Fall back to the socket peer for local/dev."""
     xff = request.headers.get("x-forwarded-for")
     if xff:
-        return xff.split(",")[0].strip()
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if parts:
+            return parts[-1]
     return request.client.host if request.client else "unknown"
 
 
@@ -3338,7 +3066,7 @@ async def get_game_full(game_id: str, token: str | None = Depends(bearer_token))
         if not row or not row["state_json"]:
             return {"ok": False, "message": "game not found"}
         try:
-            state = json.loads(row["state_json"])
+            state = _decode_state(row["state_json"])
         except Exception:
             return {"ok": False, "message": "corrupt game state"}
         if not state.get("game"):
@@ -3356,8 +3084,14 @@ def _review_view(game: dict, viewer_pid: str) -> dict:
     the reviewer's perspective (a finished/over snapshot reveals everything — see
     _redact_blind_reserves) and the static `setup` blob stripped (client never uses it)."""
     g = _redact_blind_reserves(game, viewer_pid) or game
-    if isinstance(g, dict) and "setup" in g:
+    if isinstance(g, dict):
+        # Copy + strip `setup` (client never uses it) and null the ordered draw piles. Review
+        # isn't gated on game-over, so a participant could otherwise read `decks` on their OWN
+        # in-progress game — the same future-draw leak mk_room_state closes for the live wire.
         g = {k: v for k, v in g.items() if k != "setup"}
+        _d = g.get("decks")
+        if isinstance(_d, dict):
+            g["decks"] = {lk: [None] * len(v) for lk, v in _d.items()}
     return g
 
 
@@ -3369,7 +3103,7 @@ def _build_review_snapshots(game: dict, viewer_pid: str, ai_variant: str | None 
     AI game, each PLAYING snapshot also carries the static AI-values overlay (from the
     mover's seat) so the admin Vals button works while rewinding."""
     try:
-        from games.spender.ai.az import replay
+        from games.spender.ai.serving import replay
     except Exception:
         return None
     try:
@@ -3424,7 +3158,7 @@ async def get_game_review(game_id: str, token: str | None = Depends(bearer_token
         if not row or not row["state_json"]:
             return {"ok": False, "message": "game not found"}
         try:
-            state = json.loads(row["state_json"])
+            state = _decode_state(row["state_json"])
         except Exception:
             return {"ok": False, "message": "corrupt game state"}
         if not state.get("game"):

@@ -22,8 +22,8 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass
 
-from games.spender.ai.az import engine as E
-from games.spender.ai.az import heuristic3 as H3
+from games.spender.ai.serving import engine as E
+from games.spender.ai.serving import heuristic3 as H3
 # vsearch (variant S) pulls in numpy + the whole AZ stack; import it LAZILY inside
 # s_opponent so an H3-only search stays lightweight (memory-safe on a loaded box).
 
@@ -53,7 +53,7 @@ def state_key(s: E.State) -> int:
 
 def s_opponent(sims: int = 200, seed_base: int = 0xC0FFEE):
     """Variant S as a deterministic, position-seeded opponent oracle."""
-    from games.spender.ai.az import vsearch    # lazy: only the S path needs numpy/AZ
+    from games.spender.ai.serving import vsearch    # lazy: only the S path needs numpy/AZ
     def opp(s: E.State) -> int:
         vsearch._RNG.seed(seed_base ^ state_key(s))
         return vsearch.choose_action(s, s.turn, sims=sims)

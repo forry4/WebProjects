@@ -1,0 +1,25 @@
+.card-crowns{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;letter-spacing:.5px;color:var(--gold);margin:3px 3px 0 auto;white-space:nowrap;line-height:1}
+.card-header .card-crowns+.card-bonus{margin-left:4px}
+.card-bonus-wild{border:none}
+/* Double bonus = two discs OVERLAPPING by ~40% of their width, so you read "two gems"
+   at a glance. The trailing disc sits on top; the leading one keeps its rim visible
+   through the overlap. (Was a single disc ringed by a box-shadow, which just looked
+   like one gem directly on top of another.) */
+.card-bonus-pair{display:flex;align-items:center;margin-left:auto;flex:0 0 auto}
+.card-bonus-pair .card-bonus{margin-left:0}
+/* Overlap = 40% of the DISC's width. A % margin would resolve against the container's
+   width (which is shrink-to-fit here), so each size context sets the px itself; this is
+   the 20px base. Spender never renders a pair (no bonus_count on its cards), so only
+   Duel's contexts override it. */
+.card-bonus-pair .card-bonus+.card-bonus{margin-left:-8px}
+.card-ability{position:absolute;top:32px;right:6px;font-size:.7rem;color:var(--text);background:rgba(0,0,0,.35);border:1px solid var(--border);border-radius:4px;padding:0 3px;line-height:1.35;pointer-events:none;display:flex;align-items:center;gap:1px}
+/* The take-a-gem ability's target, as a real gem CIRCLE in that gem's colour (em-sized,
+   so it tracks the ability font as the card scales). */
+.card-ability-gem{display:inline-block;width:.82em;height:.82em;border-radius:50%;border:1px solid rgba(255,255,255,.35);flex:0 0 auto}
+.card-cost .cost-col{display:flex;flex-direction:column;gap:3px}
+.card-cost.card-cost-2col{flex-direction:row;align-items:flex-end;gap:8px}
+.card.card-small{width:var(--card-w-small,62px);min-height:var(--card-h-small,86px);padding:5px 4px 4px}
+.card.card-small .card-points{font-size:.9rem}
+.card.card-small .card-bonus{width:14px;height:14px}
+.card.card-small .card-bonus-pair .card-bonus+.card-bonus{margin-left:-5.6px}
+.card.card-small .card-back-level{font-size:1rem}

@@ -1,0 +1,183 @@
+"""At-rest compaction for the CoC `state_json` blob.
+
+This is a PURE PERSISTENCE BOUNDARY: `compact_state` runs on the way into the DB and
+`expand_state` on the way back out. The live game dict, the wire (`mk_room_state` /
+the WebSocket broadcast), the engine, the bot and the Rust parity fixtures all keep
+seeing full tile objects — nothing outside this module knows the stored shape. That is
+deliberate: the tile `id` is load-bearing in both directions (engine moves address a
+tile by `tile_id`, and the frontend's flyer animation tracks a tile across locations by
+its id), so compacting the LIVE dict would have been a wire break for a disk win.
+
+Measured on 5 played-out 2p games, against the shared zlib layer in `core.rooms`:
+
+    baseline                          84,230 raw   20,729 stored
+    tiles dict-encoded                62,560 raw   11,171 stored   -46%
+    + engine: undo drops the log      44,275 raw   10,769 stored   -48%
+    + rng_state packed                37,538 raw    9,517 stored   -54%
+
+Two findings worth keeping, because both are counter-intuitive:
+
+* **Measure after zlib, not before.** `rng_state` looks like 8% of the raw dict but
+  22% of the COMPRESSED one — it is 625 words of Mersenne state, i.e. incompressible
+  noise, where everything around it compresses ~8x.
+
+* **Transform BOTH copies of a key or none.** The game and its `turn_undo` snapshot
+  hold near-identical `rng_state`s, and zlib was already collapsing the second one to
+  almost nothing. Packing only the live copy destroyed that dedup and made the blob
+  BIGGER than not packing at all (-37% -> -17% in the A/B). Anything applied here must
+  be applied to the snapshot too.
+
+A third, learned the hard way from the TEST rather than the codec:
+
+* **"Measure after zlib" is a rule for CHOOSING what to compact, NOT a number to
+  assert on tightly.** A stored ratio has the compressor in its denominator: these
+  exact blobs read 0.660 at zlib level 1 and 0.755 at level 6, and Python 3.14 ships
+  **zlib-ng** rather than stock zlib, so a guard set 0.005 below the observed value
+  passed on CI and failed on every dev box. The numbers in the table above are real
+  and worth keeping; a regression guard built on them needs either a deterministic
+  axis (raw size) or a bound well clear of that ~0.1 swing. See
+  `tests/test_persist.py::test_compaction_actually_shrinks_the_blob`.
+"""
+from __future__ import annotations
+
+from core import rooms as _rooms
+
+_VERSION = 1
+_MARK = "_c"            # compaction version marker; absent => a legacy row, expand is a no-op
+
+# Tiles carry an id of `<prefix><n>` minted by `tiles._mk`, one prefix per kind.
+_PREFIX = {"hex": "h", "goods": "g"}
+
+
+# ── tiles ────────────────────────────────────────────────────────────────────
+# Every tile is one of a few dozen distinct SHAPES (type/color/building/animal/
+# count/effect_id/black/starting) plus a unique id, so the shape goes in a table once
+# and each tile stores `[id_number, shape_index]` — ~85 bytes of JSON down to ~8.
+
+def _enc_tile(t, shapes: dict, order: list):
+    if not isinstance(t, dict):
+        return t
+    tid, pre = t.get("id"), _PREFIX.get(t.get("kind"))
+    if pre is None or not isinstance(tid, str) or not tid[len(pre):].isdigit() \
+            or not tid.startswith(pre):
+        return t                                  # unrecognized -> verbatim, still lossless
+    rest = [(k, v) for k, v in t.items() if k != "id"]
+    try:
+        key = tuple(sorted(rest))
+    except TypeError:                             # unhashable extra -> verbatim
+        return t
+    idx = shapes.get(key)
+    if idx is None:
+        idx = shapes[key] = len(order)
+        order.append(dict(rest))
+    return [int(tid[len(pre):]), idx]
+
+
+def _dec_tile(v, shapes: list):
+    if not (isinstance(v, list) and len(v) == 2 and isinstance(v[1], int)):
+        return v
+    num, idx = v
+    if not 0 <= idx < len(shapes):
+        return v
+    shape = shapes[idx]
+    pre = _PREFIX.get(shape.get("kind"))
+    if pre is None:
+        return v
+    return {"id": f"{pre}{num}", **shape}
+
+
+# The tile locations, spelled out rather than discovered by a generic walk: a walk
+# that guessed at "looks like a tile" would also have to run over `rng_state`'s list
+# of ints and `track`'s lists of pids, and a false positive there is a corrupt save.
+# `tests/test_persist.py` asserts this list still covers every tile in a played game —
+# it is what caught `moves[].tile` below, which a by-eye reading of `new_game` misses.
+_TILE_LISTS = ("supply", "black_supply", "goods_supply", "black_depot", "goods_queue")
+
+# Log records embed the tile an action was performed on (`take_hex`/`place_tile`/
+# `buy_black`/`discard_storage`/`building_take` all log `tile=`). It is the only
+# tile-valued log field, and always a single tile.
+_MOVE_TILE_KEY = "tile"
+
+
+def _map_tiles(game: dict, fn) -> dict:
+    """Return a copy of `game` with `fn` applied to every tile. Never mutates the
+    input — `state["game"]` is the LIVE game dict of a running room."""
+    g = dict(game)
+    for k in _TILE_LISTS:
+        if isinstance(g.get(k), list):
+            g[k] = [fn(t) for t in g[k]]
+    if isinstance(g.get("depots"), dict):
+        depots = {}
+        for d, v in g["depots"].items():
+            if isinstance(v, dict):
+                v = dict(v)
+                for kk in ("hexes", "goods"):
+                    if isinstance(v.get(kk), list):
+                        v[kk] = [fn(t) for t in v[kk]]
+            depots[d] = v
+        g["depots"] = depots
+    if isinstance(g.get("moves"), list):
+        g["moves"] = [{**m, _MOVE_TILE_KEY: fn(m[_MOVE_TILE_KEY])}
+                      if isinstance(m, dict) and m.get(_MOVE_TILE_KEY) is not None else m
+                      for m in g["moves"]]
+    if isinstance(g.get("players"), dict):
+        players = {}
+        for pid, p in g["players"].items():
+            if isinstance(p, dict):
+                p = dict(p)
+                if isinstance(p.get("storage"), list):
+                    p["storage"] = [fn(t) for t in p["storage"]]
+                if isinstance(p.get("duchy"), dict):
+                    p["duchy"] = {sid: (fn(t) if t is not None else None)
+                                  for sid, t in p["duchy"].items()}
+            players[pid] = p
+        g["players"] = players
+    return g
+
+
+# ── rng_state ────────────────────────────────────────────────────────────────
+# Packing lives in `core.rooms` — Duel and Dontminion pack theirs the same way, and a
+# per-game copy is exactly how the wire-redaction bug got fixed three times and stayed
+# broken. Read the rule in that module before touching this: pack EVERY copy in the
+# blob (here, the `turn_undo` snapshot too) or the dedup breaks and the row grows.
+_pack_rng = _rooms.pack_rng
+_unpack_rng = _rooms.unpack_rng
+
+
+# ── public API ───────────────────────────────────────────────────────────────
+def _apply(game: dict, tile_fn, rng_fn) -> dict:
+    g = _map_tiles(game, tile_fn)
+    if "rng_state" in g:
+        g["rng_state"] = rng_fn(g["rng_state"])
+    snap = g.get("turn_undo")
+    if isinstance(snap, dict):                    # snapshots never nest, so one level
+        g["turn_undo"] = _apply(snap, tile_fn, rng_fn)
+    return g
+
+
+def compact_state(state: dict) -> dict:
+    """Shrink a save blob. Returns a new dict; `state` and its game are untouched."""
+    game = state.get("game")
+    if not isinstance(game, dict):
+        return state
+    shapes: dict = {}
+    order: list = []
+    g = _apply(game, lambda t: _enc_tile(t, shapes, order), _pack_rng)
+    g["_tile_shapes"] = order
+    return {**state, "game": g, _MARK: _VERSION}
+
+
+def expand_state(state: dict) -> dict:
+    """Inverse of `compact_state`. A blob written before this existed carries no
+    marker and is returned unchanged, so old prod rows load with no migration."""
+    if not isinstance(state, dict) or not state.get(_MARK):
+        return state
+    game = state.get("game")
+    if not isinstance(game, dict):
+        return {k: v for k, v in state.items() if k != _MARK}
+    shapes = game.get("_tile_shapes") or []
+    g = _apply(game, lambda v: _dec_tile(v, shapes), _unpack_rng)
+    g.pop("_tile_shapes", None)
+    if isinstance(g.get("turn_undo"), dict):
+        g["turn_undo"].pop("_tile_shapes", None)
+    return {**{k: v for k, v in state.items() if k != _MARK}, "game": g}

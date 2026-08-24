@@ -770,6 +770,34 @@ def test_ai_run_turn_defers_discard_for_client():
     assert g2["turn"] == "p2"
 
 
+def test_ai_deck_reserve_reserves_and_takes_gold():
+    """_run_ai_turn must handle a BLIND deck reserve (deck_level, no card_id): the search can pick
+    A_RES_DECK, and before the fix that move fell through every branch and the AI silently passed
+    its turn (no card, no gold). Regression guard."""
+    g = make_game_state("p1", "p2")
+    l2_before = len(g["decks"]["L2"])
+    top = g["decks"]["L2"][-1]                         # the deck-top card that will be popped
+    main._run_ai_turn(g, "p1", {"type": "reserve", "deck_level": 2})
+    ps = g["players"]["p1"]
+    assert [c["id"] for c in ps["reserved"]] == [top["id"]]  # the deck top was reserved
+    assert ps["reserved"][0]["from_deck"] is True           # blind -> hidden from the opponent
+    assert ps["tokens"]["gold"] == 1                        # gold taken with the reserve
+    assert len(g["decks"]["L2"]) == l2_before - 1           # deck shrank by one
+    assert g["turn"] == "p2"                               # turn advanced, not silently passed
+
+
+def test_client_ip_trusts_last_xff_hop():
+    """_client_ip must use the LAST X-Forwarded-For hop (appended by the trusted proxy), never the
+    client-spoofable leftmost — else rotating the header dodges the per-IP rate limits."""
+    class _Req:
+        def __init__(self, xff=None, peer="9.9.9.9"):
+            self.headers = {"x-forwarded-for": xff} if xff else {}
+            self.client = type("C", (), {"host": peer})()
+    assert main._client_ip(_Req("1.2.3.4, 5.6.7.8")) == "5.6.7.8"  # spoofed first, real appended last
+    assert main._client_ip(_Req("5.6.7.8")) == "5.6.7.8"           # single hop
+    assert main._client_ip(_Req(None)) == "9.9.9.9"                # no header -> socket peer
+
+
 # ─── _sim_rollout ─────────────────────────────────────────────────────────────
 
 def test_sim_rollout_terminates():

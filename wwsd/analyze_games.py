@@ -26,7 +26,7 @@ from collections import Counter
 def load_cards():
     try:
         import re, ast
-        rs = (pathlib.Path(__file__).resolve().parent.parent / "spender-core/src/cards.rs").read_text()
+        rs = (pathlib.Path(__file__).resolve().parent.parent / "rust-cores/spender-core/src/cards.rs").read_text()
         arr = lambda n: ast.literal_eval(re.search(n + r"[^=]*=\s*(\[.*?\]);", rs, re.S).group(1))
         return dict(COST=arr(r"const COST:"), BONUS=arr(r"const BONUS:"), PTS=arr(r"const PTS:"))
     except Exception:
@@ -156,7 +156,7 @@ def decode_cases(comp, cards, n):
     """Decode the N hardest LOSS positions (bot most over-confident) into readable Splendor states —
     the concrete spec for what the winning racer does that N misjudges."""
     if not cards:
-        print("\n(cases need spender-core/src/cards.rs for card tables — skipped)"); return
+        print("\n(cases need rust-cores/spender-core/src/cards.rs for card tables — skipped)"); return
     COST, BONUS, PTS = cards["COST"], cards["BONUS"], cards["PTS"]
     # gather (value, game, ply-dump) for loss positions where the bot was over-confident
     cand = []

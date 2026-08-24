@@ -1,0 +1,144 @@
+/* ─── Loading ───────────────────────────────────────────────────────────── */
+.loading-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:16px;padding:32px;text-align:center}
+.loading-logo{font-family:'Cinzel','Cinzel Fallback',serif;font-size:3rem;font-weight:700;color:var(--gold);letter-spacing:.06em}
+.loading-sub{color:var(--text-dim);font-style:italic;font-size:.95rem}
+.loading-bar-wrap{width:220px;height:5px;background:var(--surface2);border-radius:3px;overflow:hidden;border:1px solid var(--border)}
+.loading-bar{height:100%;background:var(--gold);border-radius:3px;transition:width .4s ease}
+.loading-hint{color:var(--text-muted);font-size:.78rem;font-style:italic}
+
+/* ─── Auth ──────────────────────────────────────────────────────────────── */
+.auth-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:32px 20px;background:var(--bg)}
+.auth-logo{font-family:'Cinzel','Cinzel Fallback',serif;font-size:3rem;font-weight:700;color:var(--gold);letter-spacing:.06em;margin-bottom:4px}
+.auth-tagline{color:var(--text-dim);font-style:italic;font-size:1.05rem;margin-bottom:32px}
+.auth-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px 28px 24px;width:100%;max-width:400px}
+.auth-tabs{display:flex;border-bottom:1px solid var(--border);margin-bottom:22px}
+.auth-tab{flex:1;padding:10px 0;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--text-dim);cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.78rem;letter-spacing:.1em;text-transform:uppercase;margin-bottom:-1px;transition:all .15s}
+.auth-tab.active{color:var(--gold);border-bottom-color:var(--gold)}
+.auth-tab:hover:not(.active){color:var(--text)}
+.auth-field{width:100%;padding:11px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:1rem;letter-spacing:normal;outline:none;margin-bottom:10px}
+.auth-field:focus{border-color:var(--gold)}
+.auth-error{font-size:.82rem;color:var(--red-gem);padding:6px 0 2px;text-align:center}
+.guest-name-row{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+.guest-name-row .auth-field{margin-bottom:0;flex:1}
+
+/* ─── Common ────────────────────────────────────────────────────────────── */
+.conn-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;flex-shrink:0}
+.conn-dot.connected{background:var(--green-gem)}.conn-dot.disconnected{background:var(--red-gem)}
+
+/* ─── Home (Forrest Games menu) ─────────────────────────────────────────── */
+.home{max-width:900px;margin:0 auto;padding:calc(env(safe-area-inset-top,0px) + 24px) 20px 48px;min-height:100vh}
+.home-header{display:flex;justify-content:flex-end;align-items:center;min-height:34px}
+.home-hero{text-align:center;margin:40px 0 48px}
+.home-logo{font-family:'Cinzel','Cinzel Fallback',serif;font-size:clamp(2.4rem,8vw,3.6rem);font-weight:700;color:var(--gold);letter-spacing:.06em;line-height:1.1}
+.home-tagline{color:var(--text-dim);font-style:italic;font-size:1.1rem;margin-top:10px}
+.home-games{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:18px}
+/* Each card carries its game's --accent (set inline from GAMES): tints the emblem,
+   title, left spine, and hover glow so the four games read as distinct. */
+.home-game-card{--accent:var(--gold);position:relative;display:flex;gap:16px;align-items:flex-start;text-align:left;font-family:inherit;color:inherit;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:22px 22px 22px 21px;cursor:pointer;overflow:hidden;transition:border-color .18s,transform .18s,background .18s,box-shadow .18s}
+.home-game-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent);opacity:.5;transition:opacity .18s}
+.home-game-card:hover{border-color:var(--accent);transform:translateY(-3px);background:var(--surface2);box-shadow:0 12px 28px -14px color-mix(in srgb,var(--accent) 70%,transparent)}
+.home-game-card:hover::before{opacity:1}
+.home-game-card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.home-game-card.soon{opacity:.9}
+.home-game-emblem{flex:0 0 auto;width:42px;height:42px;margin-top:2px;color:var(--accent);opacity:.92}
+.home-game-emblem svg{width:100%;height:100%;display:block}
+.home-game-text{min-width:0;flex:1}
+.home-game-name{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.32rem;font-weight:600;color:var(--accent);letter-spacing:.03em;margin-bottom:7px;line-height:1.15}
+.home-game-desc{color:var(--text-dim);font-size:.95rem;line-height:1.45;font-style:italic;margin-bottom:13px}
+.home-game-players{display:inline-flex;align-items:center;gap:6px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.6rem;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dim);border:1px solid var(--border);padding:3px 9px;border-radius:10px;background:var(--surface2)}
+.home-game-players::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.85;flex:0 0 auto}
+
+/* ─── Browser ───────────────────────────────────────────────────────────── */
+.browser{max-width:none;margin:0;padding:28px 24px 48px}
+/* The lobby header bar is the shared LobbyHeader (.lby-header, shared/lobby.jsx). The
+   .browser-user* rail classes below are still used by the Home menu header. */
+.browser-user{flex:1 1 0;display:flex;align-items:center;justify-content:flex-end;gap:10px;min-width:0}
+.browser-username{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.8rem;color:var(--text-dim);letter-spacing:.06em;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.browser-guest-badge{font-size:.65rem;letter-spacing:.1em;color:var(--text-muted);border:1px solid var(--border);padding:2px 7px;border-radius:10px;font-family:'Cinzel','Cinzel Fallback',serif;text-transform:uppercase}
+.btn-outline.active{background:var(--gold);color:#0f0e0c}
+/* Section headers, card rows, empty states, badges, the card list and the column
+   grid are ALL the shared lobby kit now (shared/lobby.jsx + .lby-* in its CSS).
+   Spender carried a parallel vocabulary — .section-hd/.game-card*/.empty-state/
+   .your-turn-badge — because the kit was extracted FROM here for the other four
+   games and this one was never moved onto it. Four of the ten rules were
+   byte-identical and five differed by a pixel; only the card hover, the muted
+   note and the section-header baseline actually changed. */
+.browser-section{margin-bottom:32px}
+/* Open Games: current lobby size (e.g. 1/4) next to the host name. */
+.lobby-size{margin-left:8px;font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:.82rem;font-weight:600;letter-spacing:0;color:var(--gold)}
+/* Active Games: one player per line (override the shared title's nowrap/ellipsis). */
+.lby-card-title.matchup{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.35}
+/* The three-column grid, its breakpoints, the internal column scroll and the phone
+   tab bar are the shared `.lby-cols` / `.lby-list` / `.lby-tabs`. That grid pins BOTH
+   axes at every tier, which is what this lobby always needed anyway: the DOM order
+   here is Open, History, Active, so column-only placement wrapped Active to row 2 and
+   it read as "pushed down" below the tall History. `.lobby-grid` survives only to
+   carry the bottom margin. */
+.lobby-grid{margin-bottom:32px}
+.lobby-grid>.browser-section{margin-bottom:0}
+/* Fixed square size + centered content so swapping the ↻ glyph for the spinner
+   (which carries a margin for its 'Loading…' use) doesn't resize the button and
+   shift the centered button row. */
+
+/* ─── Waiting ───────────────────────────────────────────────────────────── */
+.waiting-screen{max-width:480px;margin:0 auto;padding:48px 20px 24px;text-align:center}
+.waiting-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.1rem;color:var(--gold);margin-bottom:6px;letter-spacing:.1em}
+.waiting-sub{color:var(--text-dim);font-size:.85rem;margin-bottom:24px}
+.room-code-box{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2.2rem;letter-spacing:.3em;color:var(--gold-light);text-align:center;padding:18px;background:var(--surface2);border-radius:var(--radius);margin-bottom:20px;border:1px solid var(--border);cursor:pointer;transition:border-color .15s}
+.room-code-box:hover{border-color:var(--gold)}
+.player-list{list-style:none;margin:0 0 20px}
+.player-list li{display:flex;align-items:center;gap:8px;padding:9px 14px;background:var(--surface2);border-radius:var(--radius);margin-bottom:6px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;letter-spacing:.05em}
+.player-list li.me{border:1px solid var(--gold);color:var(--gold)}
+.copy-hint{font-size:.75rem;color:var(--text-muted);font-style:italic;margin-bottom:12px}
+
+/* ─── Game layout ───────────────────────────────────────────────────────── */
+/* overflow-x:clip (not hidden) keeps stray horizontal overflow contained WITHOUT
+   making .game a scroll container — hidden made it one, which broke the sticky
+   action bar's offset (it was measured against .game, not the viewport). */
+.game{display:grid;grid-template-columns:1fr 272px;gap:12px;padding:10px;flex:1;min-height:0;width:100%;max-width:100%;overflow-x:clip}
+@media(max-width:900px){.game{grid-template-columns:1fr}}
+/* min-width:0 stops a grid track's implicit min-width:auto from growing past the
+   viewport when a child (e.g. the horizontally-scrolling card rows) is wide —
+   the overflow is what made mobile Safari fit-to-content and render zoomed out. */
+.game-main{display:flex;flex-direction:column;gap:10px;min-width:0}
+.game-sidebar{display:flex;flex-direction:column;gap:10px;min-width:0}
+@media(max-width:900px){
+  .game-sidebar{order:-1}
+  /* Tablet + phone: the nobles and an actions box (the win-points Target + the
+     Take/Buy/✕ controls) sit side by side as TWO SEPARATE boxes — the nobles box
+     hugs only the nobles, the actions box fills the space to its right. They stack
+     (wrap) if the row gets too narrow. The outer .nobles-panel goes transparent so
+     it's just a flex row holding the two boxes. (Selectors are deliberately
+     higher-specificity so they beat the unconditional .panel / .board-actions
+     base rules that appear LATER in the stylesheet — esp. .board-actions{display:none},
+     which otherwise hid the box on mobile entirely.) */
+  .nobles-panel.panel{display:flex;flex-wrap:wrap;align-items:stretch;gap:8px;background:none;border:none;border-radius:0;padding:0}
+  .nobles-panel .panel-title{display:none}
+  .nobles-panel .nobles-row{flex:0 0 auto;align-content:center;gap:6px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:8px}
+  /* justify-content:flex-start pins the Target to the TOP so it doesn't shift up
+     when the Take/Buy/✕ buttons appear below it. */
+  .nobles-panel .board-actions{flex:1 1 auto;min-width:118px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:8px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:8px;position:relative}
+  .board-actions .target-label{font-size:1rem}
+  .board-actions-btns{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:flex-end}
+  .board-actions-btns:empty{display:none}
+  /* Drop the admin "Vals" toggle here (mobile/tablet): beside the nobles there's only room
+     for the Take/Buy/✕ controls, and Vals + a "Take N" button wrapped the row to a 2nd line.
+     Desktop keeps it — its toggle lives in the separate .actions-panel-btns. */
+  .board-actions-btns .ai-vals-toggle{display:none}
+  .board-actions .btn{padding:9px 14px}
+}
+
+/* ─── Local vs AI hub (the /offline screen) ─────────────────────────────── */
+.offline-hub{display:flex;flex-direction:column;gap:14px;max-width:560px;margin:0 auto;width:100%}
+.offline-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px}
+.offline-h{font-family:Cinzel,serif;color:var(--gold-light);font-size:1rem;margin:0 0 8px}
+.offline-note{display:block;color:var(--text-dim);font-size:13px;line-height:1.45;margin:0 0 10px}
+.offline-note.ok{color:#7fb069}
+.offline-note.err{color:#e08a55}
+.offline-save-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--border)}
+.offline-save-row:first-of-type{border-top:none}
+.offline-save-info{font-size:14px;color:var(--text-dim)}
+.offline-save-info b{color:var(--text)}
+.offline-save-time{color:var(--text-muted)}
+.offline-save-btns{display:flex;gap:6px;flex-shrink:0}
+.offline-select{width:100%;max-width:280px}

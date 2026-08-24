@@ -124,16 +124,33 @@ LIVESTOCK_KINDS = [(a, c) for a in ANIMALS for c in (2, 3, 4)]  # 12 kinds
 # two hex TYPES listed for it — a fixed layout, NOT random draws. Livestock is the
 # green tile. The specific building/monastery/animal still comes from
 # the shuffled supply (so it varies by seed); only the types are fixed.
+# Each numbered depot has FOUR ordered hex-tile spaces (the 4-player board); a
+# game fills the first `num_players` of them each phase (2p→2, 3p→3, 4p→4). The
+# first two match the original 2-player layout, so 2-player games are unchanged.
+# Space types drawn by `_draw_type` from the shuffled supply (specific tile varies
+# by seed). At 4p this drains the 124-colored / 40-black base supply almost exactly
+# over 5 phases (ship 20, building 40, monastery 20, livestock 20, mine 10, castle 10).
 DEPOT_PLAN = {
-    1: ("ship", "building"),
-    2: ("castle", "monastery"),
-    3: ("livestock", "building"),    # livestock + building
-    4: ("ship", "building"),
-    5: ("mine", "monastery"),
-    6: ("livestock", "building"),    # livestock + building
+    1: ("ship", "building", "monastery", "livestock"),
+    2: ("castle", "monastery", "building", "building"),
+    3: ("livestock", "building", "ship", "monastery"),
+    4: ("ship", "building", "livestock", "mine"),
+    5: ("mine", "monastery", "building", "building"),
+    6: ("livestock", "building", "castle", "ship"),   # space 3 castle: 3p B/D → mine (see engine)
 }
-DEPOT_FILL_2P = 2     # hex tiles per numbered depot at phase start (see DEPOT_PLAN)
-BLACK_FILL_2P = 4     # hex tiles in the central black depot at phase start
+DEPOT_FILL_2P = 2     # legacy 2-player fill (see depot_fill / black_fill below)
+BLACK_FILL_2P = 4     # legacy 2-player black-depot fill
+
+
+def depot_fill(num_players: int) -> int:
+    """Hex tiles per numbered depot at phase start = one per active space (2/3/4)."""
+    return num_players
+
+
+def black_fill(num_players: int) -> int:
+    """Central black-depot fill at phase start: 4/6/8 for 2/3/4 players.
+    (The black supply is exactly 40 = 8 x 5 phases, sized for the 4-player game.)"""
+    return 2 * num_players
 GOODS_PER_PHASE = 5   # goods tiles distributed (one per round) each phase
 START_SILVER = 1
 # Starting workers are assigned by seat in engine.new_game (start player 1,

@@ -1,32 +1,133 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import CastlesOfCrimson from "../castles_of_crimson/CastlesOfCrimson.jsx";
-import WhereWolf from "../wherewolf/WhereWolf.jsx";
-import Books from "../../books/Books.jsx";
+import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
+
+// The other games are CODE-SPLIT. Statically importing them put all four games plus
+// Books into one ~600KB chunk that every visitor downloaded just to see the home
+// menu — Vite warned about the chunk size on every build. Each is a self-contained
+// default-export component mounted at exactly one branch below, so lazy() is a
+// clean fit: its chunk is fetched when you actually open that game.
+//
+// STALE TAB AFTER A DEPLOY — the failure mode code-splitting introduces, and the
+// reason for the wrapper below. Chunk filenames carry a content hash, and GitHub
+// Pages does not keep the old ones. A tab left open across a deploy still holds the
+// PREVIOUS index chunk, so opening a game asks for e.g. SpenderDuel-<oldhash>.js,
+// gets a 404, and React surfaces "TypeError: Importing a module script failed" in the
+// error boundary. Before the split this could not happen: everything arrived in one
+// chunk at page load, and a stale tab simply kept running the old build.
+//
+// So: retry once (covers a transient network blip), then reload the page — which
+// fetches a fresh index.html with the CURRENT hashes and lands the user where they
+// were. The sessionStorage guard means a genuinely missing chunk reloads only once
+// and then shows the real error, instead of looping forever.
+// The guard is a TIMESTAMP, not a boolean. A boolean has to be cleared somewhere for a
+// tab that survives two deploys to heal twice — and clearing it on successful load
+// re-arms it immediately after the reload, which loops forever (measured: 284
+// navigations). A cooldown needs no reset: a second deploy minutes later is outside the
+// window and heals, while a chunk that is genuinely gone reloads once and then reports.
+const RELOADED_KEY = "spender_chunk_reloaded_at";
+const RELOAD_COOLDOWN_MS = 30_000;
+const lazyChunk = (name, importer) => lazy(() => importer().catch(() => importer()).catch((err) => {
+	let last = 0;
+	try { last = Number(sessionStorage.getItem(RELOADED_KEY)) || 0; } catch { /* private mode */ }
+	if (Date.now() - last > RELOAD_COOLDOWN_MS) {
+		try { sessionStorage.setItem(RELOADED_KEY, String(Date.now())); } catch {}
+		console.warn(`[chunk] ${name} failed to load (stale build?) — reloading once`);
+		window.location.reload();
+		return new Promise(() => {});   // never settles; the reload takes over
+	}
+	console.error(`[chunk] ${name} still failing after a reload — surfacing the error`);
+	throw err;
+}));
+
+const CastlesOfCrimson = lazyChunk("CastlesOfCrimson", () => import("../castles_of_crimson/CastlesOfCrimson.jsx"));
+const WhereWolf = lazyChunk("WhereWolf", () => import("../wherewolf/WhereWolf.jsx"));
+const SpenderDuel = lazyChunk("SpenderDuel", () => import("../spender_duel/SpenderDuel.jsx"));
+const Dontminion = lazyChunk("Dontminion", () => import("../dontminion/Dontminion.jsx"));
+const Dissonance = lazyChunk("Dissonance", () => import("../dissonance/Dissonance.jsx"));
+const RagTag = lazyChunk("RagTag", () => import("../rag_tag/RagTag.jsx"));
+const Books = lazyChunk("Books", () => import("../../books/Books.jsx"));
+
+// Shown while a game's chunk loads. Deliberately an empty full-height panel in the
+// site's dark background: each game injects its OWN stylesheet when it mounts, so
+// there is no shared CSS to rely on here, and painting nothing avoids a flash of
+// un-themed white and any layout shift when the real screen arrives.
+const GameChunkLoading = () => (
+	<div style={{ minHeight: "100vh", background: "#120c0d" }} />
+);
 import { baseCss } from "../../shared/theme.js";
+import { lobbyCss, LobbyHeader, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
+	useLastDifficulty,
+	createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
+	RulesModal, rulesModalCss,
+	useProgressiveList, LobbySectionHd, LobbyTabs, TurnBadge, LobbyAction } from "../../shared/lobby.jsx";
+import SpenderRules from "./rules.jsx";
+import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
+	splendorPanelCss, splendorCardCss, splendorCardExtraCss, splendorPillCss,
+	splendorLogCss } from "../../shared/splendor.jsx";
+import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
+// Site-shell screens, extracted out of this file (see shared/AuthScreen.jsx).
+import AuthScreen from "../../shared/AuthScreen.jsx";
+import HomeScreen, { SITE_NAME, GAMES } from "../../shared/HomeScreen.jsx";
+// Offline vs-AI: the local game driver (wasm engine + IndexedDB saves) — see offline.js.
+import { OFFLINE_AI_PID, createOfflineGame, loadOfflineGame, deleteOfflineGame,
+	listOfflineGames, offlineRoomData, applyOfflineMove } from "./offline.js";
+// CoC's offline driver: the hub creates its records; the CoC component plays them.
+import { createOfflineCocGame, COC_BOARD_NAMES } from "../castles_of_crimson/offline.js";
+// Duel's offline driver: same split — the hub creates, SpenderDuel plays.
+import { createOfflineDuelGame } from "../spender_duel/offline.js";
+// Dissonance's offline driver: the hub creates the record, the Dissonance
+// component plays it. Its referee is `classic.rs` in the same wasm the search
+// pool uses -- see games/dissonance/offline.js.
+import { createOfflineDissonanceGame } from "../dissonance/offline.js";
+// Dissonance's PAPER SCORECARD, in the offline hub. EAGER, not a lazy chunk,
+// and that is the whole point of it being here: a lazy chunk is only cached
+// once it has been fetched, so a card meant for a table with no signal would
+// be missing exactly when it is wanted. The entry chunk is fetched on every
+// load and cache-first in the service worker, so this rides along for ~6KB.
+// It carries its own stylesheet (bidpad.css + scorecard.css) and needs no
+// room, no board and no network — `catalog` is optional and pricing.js
+// falls back to the shipped classic list.
+import DissonanceScorecard from "../dissonance/scorecard.jsx";
+
+// CSS lives in the sibling .css file(s) imported below, NOT in a JS template
+// literal. `?inline` hands us the stylesheet as a STRING, so it is still injected
+// by this component's own <style> tag only while it is mounted — behaviour is
+// unchanged. What goes away is the footgun: a single stray backtick inside a css
+// template literal silently reparsed the rest of the file as a tagged template and
+// blanked the whole page. A .css file cannot do that, and editors lint it properly.
+import _cssText from "./Spender.css?inline";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_BASE = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const HTTP_BASE = WS_BASE.replace(/^ws/, "http").replace(/\/ws$/, "");
 
 // ─── Site identity ─────────────────────────────────────────────────────────
-const SITE_NAME = "Forrest Games";
 // Registry of games shown on the home menu. Add future games here — each tile
 // routes to its own `screen`. `status: "ready"` is playable; "soon" shows a
-// Coming Soon placeholder. Spender's lobby is the existing "browser" screen.
-const GAMES = [
-	{ id: "spender", name: "Spender", tagline: "A gem merchant's game of prestige", status: "ready", screen: "browser" },
-	{ id: "coc", name: "Castles of Crimson", tagline: "A realm of conquest and intrigue", status: "ready", screen: "coc" },
-	{ id: "wherewolf", name: "Where Wolf?", tagline: "A village of secrets and lies", status: "ready", screen: "werewolf" },
-];
+// Coming Soon placeholder. Spender's lobby is its "browser" spenderScreen.
+
+// URL path segment 1 ↔ shell screen (shared/router.js). Always translate through these
+// tables — GAMES[].id ≠ path for wherewolf; Spender is one site-level screen now.
+// The shell owns segment 1; each sub-game owns its own segment 2 (room id). The Spender
+// Spender's own waiting/game map to "spender" (or "puzzles" while puzzling) in applyPopRoute.
+const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", books: "books", puzzles: "puzzles", offline: "offline" };
+const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", books: "books", puzzles: "puzzles", offline: "offline" };
+
+// Per-game emblem — inline SVG tinted via currentColor (=the card's --accent), so no
+// raster asset / CDN (keeps the self-hosted, no-CLS constraint). Small motifs that read
+// the game: cut gem / castle gate / crescent moon / crown.
 
 // ─── Constants ─────────────────────────────────────────────────────────────
-const GEM_COLORS = ["white", "blue", "green", "red", "black"];
-const GEM_LABELS = { white: "Diamond", blue: "Sapphire", green: "Emerald", red: "Ruby", black: "Onyx", gold: "Gold" };
-const GEM_HEX = { white: "#ddd4be", blue: "#4257ff", green: "#3f9c2e", red: "#dc4040", black: "#15151a", gold: "#f5c842" };
+// GEM_COLORS / GEM_LABELS / GEM_HEX now come from shared/splendor.jsx (imported
+// above) so Spender and Spender Duel can't drift apart on the palette.
 // Frontend-only display names for the AI variants (wire codes stay H2/H3/S).
 const AI_PERSONAS = { H2: "Henry", H3: "Herald", S: "Steve", N: "Nina" };
 const AI_TIERS = { H2: "easy", H3: "medium", S: "hard", N: "expert" };
+// The variants the create modal OFFERS, weakest first — the pill row is built
+// from this, and it is what a remembered last-played variant is validated
+// against (a retired code must not restore as a live selection).
+const AI_VARIANTS = ["H2", "H3", "S", "N"];
 const aiPersona = (v) => AI_PERSONAS[v] || `AI ${v}`;         // variant code -> persona name (retired codes -> "AI <code>")
+const aiTierLabel = (v) => (AI_TIERS[v] || "").replace(/^./, (c) => c.toUpperCase());  // "expert" -> "Expert"
 const displayName = (name) => {                                // backend "AI (H2)" -> "Henry (AI)"; humans unchanged
 	const m = typeof name === "string" && name.match(/^AI \((.+)\)$/);
 	return m ? aiPersona(m[1]) + " (AI)" : name;                // tag AI names so a same-named human isn't confused for the bot
@@ -94,216 +195,8 @@ function totalPoints(purchased, nobles) {
 }
 
 // ─── Styles ────────────────────────────────────────────────────────────────
-const css = baseCss + `
-
-/* ─── Loading ───────────────────────────────────────────────────────────── */
-.loading-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:16px;padding:32px;text-align:center}
-.loading-logo{font-family:'Cinzel','Cinzel Fallback',serif;font-size:3rem;font-weight:700;color:var(--gold);letter-spacing:.06em}
-.loading-sub{color:var(--text-dim);font-style:italic;font-size:.95rem}
-.loading-bar-wrap{width:220px;height:5px;background:var(--surface2);border-radius:3px;overflow:hidden;border:1px solid var(--border)}
-.loading-bar{height:100%;background:var(--gold);border-radius:3px;transition:width .4s ease}
-.loading-hint{color:var(--text-muted);font-size:.78rem;font-style:italic}
-
-/* ─── Auth ──────────────────────────────────────────────────────────────── */
-.auth-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:32px 20px;background:var(--bg)}
-.auth-logo{font-family:'Cinzel','Cinzel Fallback',serif;font-size:3rem;font-weight:700;color:var(--gold);letter-spacing:.06em;margin-bottom:4px}
-.auth-tagline{color:var(--text-dim);font-style:italic;font-size:1.05rem;margin-bottom:32px}
-.auth-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px 28px 24px;width:100%;max-width:400px}
-.auth-tabs{display:flex;border-bottom:1px solid var(--border);margin-bottom:22px}
-.auth-tab{flex:1;padding:10px 0;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--text-dim);cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.78rem;letter-spacing:.1em;text-transform:uppercase;margin-bottom:-1px;transition:all .15s}
-.auth-tab.active{color:var(--gold);border-bottom-color:var(--gold)}
-.auth-tab:hover:not(.active){color:var(--text)}
-.auth-field{width:100%;padding:11px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:1rem;letter-spacing:normal;outline:none;margin-bottom:10px}
-.auth-field:focus{border-color:var(--gold)}
-.auth-error{font-size:.82rem;color:var(--red-gem);padding:6px 0 2px;text-align:center}
-.guest-name-row{display:flex;gap:8px;align-items:center;margin-bottom:10px}
-.guest-name-row .auth-field{margin-bottom:0;flex:1}
-
-/* ─── Common ────────────────────────────────────────────────────────────── */
-.conn-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;flex-shrink:0}
-.conn-dot.connected{background:var(--green-gem)}.conn-dot.disconnected{background:var(--red-gem)}
-
-/* ─── Home (Forrest Games menu) ─────────────────────────────────────────── */
-.home{max-width:900px;margin:0 auto;padding:calc(env(safe-area-inset-top,0px) + 24px) 20px 48px;min-height:100vh}
-.home-header{display:flex;justify-content:flex-end;align-items:center;min-height:34px}
-.home-hero{text-align:center;margin:40px 0 48px}
-.home-logo{font-family:'Cinzel','Cinzel Fallback',serif;font-size:clamp(2.4rem,8vw,3.6rem);font-weight:700;color:var(--gold);letter-spacing:.06em;line-height:1.1}
-.home-tagline{color:var(--text-dim);font-style:italic;font-size:1.1rem;margin-top:10px}
-.home-games{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:18px}
-.home-game-card{position:relative;text-align:left;font-family:inherit;color:inherit;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:26px 22px 24px;cursor:pointer;transition:border-color .15s,transform .15s,background .15s}
-.home-game-card:hover{border-color:var(--gold);transform:translateY(-2px);background:var(--surface2)}
-.home-game-card.soon{opacity:.9}
-.home-game-name{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.32rem;font-weight:600;color:var(--gold);letter-spacing:.03em;margin-bottom:8px}
-.home-game-desc{color:var(--text-dim);font-size:.95rem;line-height:1.45;font-style:italic}
-.home-game-badge{position:absolute;top:14px;right:14px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.6rem;letter-spacing:.12em;text-transform:uppercase;padding:3px 9px;border-radius:10px}
-.home-game-badge.ready{color:var(--green-gem);border:1px solid rgba(84,194,61,.5)}
-.home-game-badge.soon{color:var(--text-muted);border:1px solid var(--border)}
-
-/* ─── Browser ───────────────────────────────────────────────────────────── */
-.browser{max-width:1400px;margin:0 auto;padding:28px 20px 48px}
-/* Full-width top banner (flush to the screen edges) — lives OUTSIDE the centered
-   .browser content so its bottom border spans the whole screen. Three sections:
-   back button far left, game name centered, user far right (left/right flex:1 so the
-   title is truly centered). */
-.browser-header{display:flex;align-items:center;gap:12px;padding:12px 24px;padding-top:calc(env(safe-area-inset-top,0px) + 12px);border-bottom:1px solid var(--border);background:var(--surface)}
-.browser-head-left{flex:1 1 0;display:flex;align-items:center;justify-content:flex-start;gap:8px;min-width:0}
-.browser-title{flex:0 0 auto;text-align:center;font-family:'Cinzel','Cinzel Fallback',serif;font-size:2rem;font-weight:700;color:var(--gold);letter-spacing:.04em}
-.browser-user{flex:1 1 0;display:flex;align-items:center;justify-content:flex-end;gap:10px;min-width:0}
-.browser-username{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.8rem;color:var(--text-dim);letter-spacing:.06em;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.browser-guest-badge{font-size:.65rem;letter-spacing:.1em;color:var(--text-muted);border:1px solid var(--border);padding:2px 7px;border-radius:10px;font-family:'Cinzel','Cinzel Fallback',serif;text-transform:uppercase}
-.browser-create{margin-bottom:36px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center}
-/* Keep the length toggle and the Create Game button on the same line (they never
-   wrap apart); the refresh button may wrap below them on narrow phones. */
-.create-controls{display:inline-flex;align-items:center;gap:10px;flex-wrap:nowrap;max-width:100%}
-/* game-length toggle: selected state changes ONLY background+color (fixed border/padding)
-   so selecting never changes the element's size / shifts the layout */
-.length-toggle{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;flex-shrink:0}
-.len-btn{padding:9px 14px;background:transparent;border:none;color:var(--text-dim);font-family:'Cinzel','Cinzel Fallback',serif;font-size:.8rem;letter-spacing:.03em;cursor:pointer;transition:background .12s,color .12s;white-space:nowrap}
-.len-btn+.len-btn{border-left:1px solid var(--border)}
-.len-btn.sel{background:var(--gold);color:#1c1710}
-.btn-outline.active{background:var(--gold);color:#0f0e0c}
-.ai-picker-wrap{position:relative;display:inline-flex}
-/* Create-game dropdown: vs Friend on top, then the AI opponents, stacked as a menu. */
-.ai-picker{position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);z-index:30;display:flex;flex-direction:column;gap:6px;align-items:stretch;min-width:200px;max-width:min(92vw,300px);padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:0 10px 28px rgba(0,0,0,.5)}
-.ai-picker .btn{white-space:nowrap}
-.ai-picker-label{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;letter-spacing:.06em;color:var(--text-dim);text-transform:uppercase;text-align:center;margin-top:4px;padding-top:8px;border-top:1px solid var(--border)}
-.browser-section{margin-bottom:32px}
-.section-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
-.section-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;letter-spacing:.18em;color:var(--gold);text-transform:uppercase}
-.game-cards{display:flex;flex-direction:column;gap:8px}
-.game-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 16px;display:flex;align-items:center;gap:14px;transition:border-color .15s}
-.game-card:hover{border-color:rgba(201,168,76,.4)}
-.game-card-info{flex:1;min-width:0}
-.game-card-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.88rem;letter-spacing:.04em;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.game-card-meta{font-size:.78rem;color:var(--text-dim)}
-.game-card-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
-/* Open Games: current lobby size (e.g. 1/4) next to the host name. */
-.lobby-size{margin-left:8px;font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:.82rem;font-weight:600;letter-spacing:0;color:var(--gold)}
-/* Active Games: one player per line (override the base nowrap/ellipsis). */
-.game-card-title.matchup{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.35}
-/* Lobby: Open Games + History side by side (stack on narrow screens). */
-/* Lobby: left column = Open + Active stacked, right column = History on its own (so its
-   length never pushes Active Games down). The widened .browser uses the empty side space
-   WITHOUT thinning the games columns. grid-template-rows:min-content auto keeps Active
-   directly under Open even when History (spanning both rows) is much longer. Stacks <1200px. */
-/* Lobby: three adjacent columns — Open Games | Active Games | History — each its own
-   column so none pushes another down. The widened .browser uses the empty side space.
-   Collapses to 2 columns (Open|Active, History spanning below) under 1280px, then 1
-   column under 780px. */
-.lobby-grid{display:grid;grid-template-columns:1fr 1fr 340px;gap:24px 28px;align-items:start;margin-bottom:32px}
-.lobby-grid>.browser-section{min-width:0;margin-bottom:0}
-/* Explicit grid-row on EVERY item is REQUIRED (do not remove): the DOM order is
-   Open, History, Active, so with column-only placement the sparse auto-flow cursor
-   (past col 3 after History) wraps Active down to row 2 — looking "pushed down" below
-   the tall History. Pinning rows makes placement ignore DOM order. */
-.lobby-grid>.open-section{grid-column:1;grid-row:1}
-.lobby-grid>.active-section{grid-column:2;grid-row:1}
-.lobby-grid>.history-section{grid-column:3;grid-row:1}
-/* Mobile-only tabbed lobby: a segmented bar that picks one section to show in the
-   single-column layout (see the max-width:780px block). Hidden on desktop, where all
-   three sections show side by side. */
-.lobby-tabs{display:none;gap:6px;margin-bottom:18px;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:4px}
-.lobby-tab{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:7px;background:transparent;border:none;color:var(--text-dim);cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;letter-spacing:.04em;padding:9px 4px;border-radius:9px;transition:background .15s,color .15s}
-.lobby-tab.sel{background:var(--gold);color:#0f0e0c;font-weight:700}
-.lobby-tab-count{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:rgba(0,0,0,.18);color:inherit;font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:.72rem;font-weight:600;letter-spacing:0}
-.lobby-tab:not(.sel) .lobby-tab-count{background:var(--surface);color:var(--text-muted)}
-/* Each column's card list behaves like the in-game move log: capped to the viewport
-   and scrolls INTERNALLY instead of growing the page (the long History list otherwise
-   made the page very tall). Desktop 3-col only — tablet/phone stack and scroll the
-   page normally. scrollbar-gutter:stable reserves the scrollbar's space so a column
-   doesn't shift when its list starts/stops scrolling. */
-@media(min-width:1281px){
-  .lobby-grid .game-cards{max-height:calc(100vh - 230px);overflow-y:auto;scrollbar-gutter:stable}
-  .lobby-grid .game-cards::-webkit-scrollbar{width:6px}
-  .lobby-grid .game-cards::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
-}
-@media(max-width:1280px){
-  .lobby-grid{grid-template-columns:1fr 1fr}
-  .lobby-grid>.open-section{grid-column:1;grid-row:1}
-  .lobby-grid>.active-section{grid-column:2;grid-row:1}
-  .lobby-grid>.history-section{grid-column:1 / span 2;grid-row:2}
-}
-@media(max-width:780px){
-  /* Single column, one section at a time selected by the tab bar above. */
-  .lobby-tabs{display:flex}
-  .lobby-grid{grid-template-columns:1fr;gap:0}
-  .lobby-grid>.browser-section{grid-column:1;grid-row:auto;margin-bottom:0}
-  /* Show only the active tab's section. */
-  .lobby-grid.tab-open>.active-section,
-  .lobby-grid.tab-open>.history-section,
-  .lobby-grid.tab-active>.open-section,
-  .lobby-grid.tab-active>.history-section,
-  .lobby-grid.tab-history>.open-section,
-  .lobby-grid.tab-history>.active-section{display:none}
-  /* The tab already labels the section — drop the big redundant heading, keep the
-     muted context line on its own. */
-  .lobby-grid .section-hd .section-title{display:none}
-  .lobby-grid .section-hd{margin-bottom:10px}
-}
-/* History cards: Won/Lost badge + the final scores (winner brighter), wraps freely. */
-.history-card .game-card-title{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;white-space:normal;overflow:visible}
-.hist-result{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.6rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:2px 8px;border-radius:10px;flex-shrink:0}
-.hist-result.won{background:rgba(63,156,46,.18);color:var(--green-gem)}
-.hist-result.lost{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border)}
-.hist-scores{color:var(--text-dim);font-size:.84rem;font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;letter-spacing:0}
-.hist-score-num{color:var(--text);font-weight:600}
-.your-turn-badge{background:var(--gold);color:#0f0e0c;padding:3px 10px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.63rem;letter-spacing:.12em;font-weight:700;text-transform:uppercase;white-space:nowrap}
-.playing-badge{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border);padding:3px 10px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.63rem;letter-spacing:.1em;text-transform:uppercase;white-space:nowrap}
-.empty-state{text-align:center;padding:28px 16px;color:var(--text-dim);font-style:italic;font-size:.9rem;background:var(--surface2);border-radius:var(--radius);border:1px dashed var(--border)}
-.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
-@keyframes spin{to{transform:rotate(360deg)}}
-/* Fixed square size + centered content so swapping the ↻ glyph for the spinner
-   (which carries a margin for its 'Loading…' use) doesn't resize the button and
-   shift the centered button row. */
-.refresh-btn{background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:.9rem;padding:0;width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;transition:color .15s;flex-shrink:0}
-.refresh-btn:hover{color:var(--gold)}
-.refresh-btn .spinner{margin:0}
-
-/* ─── Waiting ───────────────────────────────────────────────────────────── */
-.waiting-screen{max-width:480px;margin:0 auto;padding:48px 20px 24px;text-align:center}
-.waiting-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.1rem;color:var(--gold);margin-bottom:6px;letter-spacing:.1em}
-.waiting-sub{color:var(--text-dim);font-size:.85rem;margin-bottom:24px}
-.room-code-box{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2.2rem;letter-spacing:.3em;color:var(--gold-light);text-align:center;padding:18px;background:var(--surface2);border-radius:var(--radius);margin-bottom:20px;border:1px solid var(--border);cursor:pointer;transition:border-color .15s}
-.room-code-box:hover{border-color:var(--gold)}
-.player-list{list-style:none;margin:0 0 20px}
-.player-list li{display:flex;align-items:center;gap:8px;padding:9px 14px;background:var(--surface2);border-radius:var(--radius);margin-bottom:6px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;letter-spacing:.05em}
-.player-list li.me{border:1px solid var(--gold);color:var(--gold)}
-.copy-hint{font-size:.75rem;color:var(--text-muted);font-style:italic;margin-bottom:12px}
-
-/* ─── Game layout ───────────────────────────────────────────────────────── */
-/* overflow-x:clip (not hidden) keeps stray horizontal overflow contained WITHOUT
-   making .game a scroll container — hidden made it one, which broke the sticky
-   action bar's offset (it was measured against .game, not the viewport). */
-.game{display:grid;grid-template-columns:1fr 272px;gap:12px;padding:10px;flex:1;min-height:0;width:100%;max-width:100%;overflow-x:clip}
-@media(max-width:900px){.game{grid-template-columns:1fr}}
-/* min-width:0 stops a grid track's implicit min-width:auto from growing past the
-   viewport when a child (e.g. the horizontally-scrolling card rows) is wide —
-   the overflow is what made mobile Safari fit-to-content and render zoomed out. */
-.game-main{display:flex;flex-direction:column;gap:10px;min-width:0}
-.game-sidebar{display:flex;flex-direction:column;gap:10px;min-width:0}
-@media(max-width:900px){
-  .game-sidebar{order:-1}
-  /* Tablet + phone: the nobles and an actions box (the win-points Target + the
-     Take/Buy/✕ controls) sit side by side as TWO SEPARATE boxes — the nobles box
-     hugs only the nobles, the actions box fills the space to its right. They stack
-     (wrap) if the row gets too narrow. The outer .nobles-panel goes transparent so
-     it's just a flex row holding the two boxes. (Selectors are deliberately
-     higher-specificity so they beat the unconditional .panel / .board-actions
-     base rules that appear LATER in the stylesheet — esp. .board-actions{display:none},
-     which otherwise hid the box on mobile entirely.) */
-  .nobles-panel.panel{display:flex;flex-wrap:wrap;align-items:stretch;gap:8px;background:none;border:none;border-radius:0;padding:0}
-  .nobles-panel .panel-title{display:none}
-  .nobles-panel .nobles-row{flex:0 0 auto;align-content:center;gap:6px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:8px}
-  /* justify-content:flex-start pins the Target to the TOP so it doesn't shift up
-     when the Take/Buy/✕ buttons appear below it. */
-  .nobles-panel .board-actions{flex:1 1 auto;min-width:118px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:8px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:8px;position:relative}
-  .board-actions .target-label{font-size:1rem}
-  .board-actions-btns{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:flex-end}
-  .board-actions-btns:empty{display:none}
-  .board-actions .btn{padding:9px 14px}
-}
-.panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px}
-.panel-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;letter-spacing:.14em;color:var(--gold);margin-bottom:10px;text-transform:uppercase}
+const css = baseCss + lobbyCss + _cssText
+	+ splendorPanelCss + `
 
 /* ─── Bank ──────────────────────────────────────────────────────────────── */
 .bank-gems{display:flex;gap:8px;flex-wrap:wrap}
@@ -312,67 +205,8 @@ const css = baseCss + `
    nobles) is hidden because the controls live in the action bar. Mobile below. */
 .levels{display:flex;flex-direction:column;gap:10px}
 .board-actions{display:none}
-.gem-stack{display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;transition:transform .12s;user-select:none}
-.gem-stack:hover .gem-token{transform:scale(1.08)}
-.gem-stack.selected .gem-token{box-shadow:0 0 0 2px var(--gold-light),0 0 12px rgba(232,201,106,.3)}
-.gem-stack.disabled{opacity:.35;cursor:not-allowed}
-.gem-stack.reserve-ready .gem-token{box-shadow:0 0 0 2px var(--gold-light),0 0 14px rgba(232,201,106,.6);animation:reserve-pulse 1.1s ease-in-out infinite}
-@keyframes reserve-pulse{0%,100%{box-shadow:0 0 0 2px var(--gold-light),0 0 8px rgba(232,201,106,.45)}50%{box-shadow:0 0 0 2px var(--gold-light),0 0 18px rgba(232,201,106,.85)}}
-.gem-token{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:.95rem;border:2px solid rgba(255,255,255,.12);transition:all .12s}
-.gem-count{font-size:.75rem;color:var(--text-dim);font-family:'Cinzel','Cinzel Fallback',serif}
-
-/* ─── Cards ─────────────────────────────────────────────────────────────── */
-/* overflow-x:auto clips both axes, which would cut off the hover lift / top border
-   and the selection outline of the first & last items (flush at the clip edges).
-   Padding on all sides + matching -margin gives clip-room without moving the row. */
-.level-row{display:flex;gap:8px;align-items:flex-start;flex-wrap:nowrap;overflow-x:auto;padding:6px 4px 4px;margin:-6px -4px 0}
-.level-row::-webkit-scrollbar{height:4px}.level-row::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
-.deck-pile{width:var(--card-w,88px);min-height:var(--card-h,120px);border-radius:var(--radius);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;color:var(--text-dim);cursor:pointer;flex-shrink:0;background:var(--surface2);transition:all .12s;flex-direction:column;gap:4px}
-.deck-pile:hover{border-color:var(--gold);color:var(--gold)}
-.deck-pile.selected{border-color:var(--gold-light);color:var(--gold-light);box-shadow:0 0 0 2px var(--gold-light)}
-.deck-pile.disabled{cursor:not-allowed;opacity:.5}
-.deck-remaining{font-size:1.3rem;font-weight:700;color:var(--text);font-family:'Cinzel','Cinzel Fallback',serif}
-.card{width:var(--card-w,88px);min-height:var(--card-h,120px);border-radius:var(--radius);background:var(--surface2);border:1px solid var(--border);padding:8px 6px 6px;display:flex;flex-direction:column;cursor:pointer;transition:all .15s;flex-shrink:0;position:relative}
-.card-slot{width:var(--card-w,88px);flex-shrink:0}
-/* Each cell in a level row (deck pile / card / empty slot) shares the row width
-   equally but never exceeds --card-w (88px default; bigger on desktop). A full
-   level (deck + 4 cards) always fits the column width — no horizontal scroll or
-   clipped card — at every size. */
-.level-row>*{flex:1 1 0;min-width:0;max-width:var(--card-w,88px)}
-.ai-val{position:absolute;bottom:5px;right:5px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;font-weight:600;color:#e8c86a;background:rgba(0,0,0,.4);border-radius:4px;padding:0 4px;line-height:1.4;pointer-events:none}
-.ai-vals{position:absolute;bottom:3px;right:3px;display:grid;grid-template-columns:auto auto;gap:0 5px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.5rem;font-weight:600;color:#e8c86a;background:rgba(0,0,0,.5);border-radius:4px;padding:2px 4px;line-height:1.4;pointer-events:none}
-.ai-vals b{color:#9a8fb0;font-weight:700;margin-right:1px}
-/* "mine" = overlay computed for the player on the move (your turn) — tinted green to
-   distinguish from the AI's own values (gold), since the overlay flips with the turn. */
-.ai-vals.mine,.ai-val.mine{color:#8fdca0;box-shadow:0 0 0 1px rgba(143,220,160,.55)}
-/* The "Show AI values" toggle sits at the far LEFT of the actions box (Take/Buy stay
-   to its right); same gold styling as the action buttons via .btn.btn-gold. */
-.ai-vals-toggle{margin-right:auto}
-/* S's whole-position eval chip, shown beside the toggle when the overlay is on (S games only). */
-.ai-pos-eval{display:inline-flex;align-items:center;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;font-weight:600;color:#e8c86a;background:rgba(0,0,0,.4);border:1px solid rgba(201,168,76,.4);border-radius:5px;padding:1px 7px;white-space:nowrap}
-.ai-pos-eval.mine{color:#8fdca0;border-color:rgba(143,220,160,.5)}
-.ai-pos-eval b{color:#9a8fb0;font-weight:700;margin-right:3px}
-.ai-pos-eval-srch{margin-left:7px;padding-left:7px;border-left:1px solid rgba(201,168,76,.3)}
-/* Pinned to the top-right of the actions box (absolute) so it never displaces the
-   Target / buttons / hint. The box is position:relative (.actions-panel / .board-actions). */
-.ai-pos-eval-row{position:absolute;top:7px;right:9px;display:flex;z-index:2}
-.card:hover{border-color:rgba(201,168,76,.5);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4)}
-.card.selected{border-color:var(--gold-light);box-shadow:0 0 0 2px var(--gold-light)}
-.card.affordable{border-color:var(--green-gem)}
-.card.affordable-gold{border-color:var(--gold-light)}
-.card.disabled{cursor:not-allowed;opacity:.6}
-.card-back{cursor:default;align-items:center;justify-content:center;gap:8px;border-style:dashed;background:repeating-linear-gradient(45deg,var(--surface2),var(--surface2) 6px,var(--surface) 6px,var(--surface) 12px)}
-.card-back:hover{transform:none;border-color:var(--border);box-shadow:none}
-.card-back-level{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:1.3rem;color:var(--text-dim)}
-.card-back-label{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.55rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase}
-.card-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px}
-.card-points{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:1.1rem;color:var(--gold);min-width:16px}
-.card-points.zero{color:transparent}
-.card-bonus{width:20px;height:20px;border-radius:50%;flex-shrink:0;border:1.5px solid rgba(255,255,255,.25)}
-.card-cost{display:flex;flex-direction:column;gap:3px;margin-top:auto}
-.cost-row{display:flex;align-items:center;gap:4px}
-.cost-gem{width:10px;height:10px;border-radius:50%;flex-shrink:0;border:1px solid rgba(255,255,255,.25)}
-.cost-num{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;color:var(--text-dim)}
+`
+	+ splendorCardCss + splendorCardExtraCss + `
 
 /* ─── Nobles ────────────────────────────────────────────────────────────── */
 .nobles-row{display:flex;gap:8px;flex-wrap:wrap}
@@ -404,10 +238,10 @@ const css = baseCss + `
 
 /* ─── Player panels ─────────────────────────────────────────────────────── */
 .players-area{display:flex;flex-direction:column;gap:8px}
-.player-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px;transition:border-color .2s}
+.player-panel{background:linear-gradient(180deg,rgba(255,255,255,.03),transparent 46%),var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 2px 10px -4px rgba(0,0,0,.5);transition:border-color .2s}
 /* the active player's box gets a clean gold rounded border (the only highlight);
    your own box is identified by the active dot + "(you)" label, no extra accent. */
-.player-panel.active-turn{border-color:var(--gold);background:var(--surface3)}
+.player-panel.active-turn{border-color:var(--gold);background:linear-gradient(180deg,rgba(255,255,255,.04),transparent 46%),var(--surface3);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(201,168,76,.28),0 3px 16px -4px rgba(201,168,76,.22),0 2px 10px -4px rgba(0,0,0,.5)}
 /* an opponent's box is tappable to ping them — signal it (your own box has no click). */
 .player-panel.pingable{cursor:pointer}
 .player-panel.pingable:active{border-color:var(--gold)}
@@ -417,13 +251,8 @@ const css = baseCss + `
 .active-dot{width:6px;height:6px;border-radius:50%;background:var(--gold);flex-shrink:0;animation:pulse 1.5s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .player-score{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.1rem;font-weight:700;color:var(--gold)}
-.player-tokens{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px}
-.token-pill{display:flex;align-items:center;gap:3px;padding:2px 7px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;font-weight:700}
-.player-bonuses{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;margin-bottom:6px}
-.bonus-pill{display:flex;align-items:center;gap:3px;padding:2px 7px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;font-weight:700;border:1px solid}
-.reserved-label{font-size:.62rem;color:var(--text-dim);font-family:'Cinzel','Cinzel Fallback',serif;letter-spacing:.06em;margin-bottom:4px;text-transform:uppercase}
-.reserved-row{display:flex;gap:4px;flex-wrap:wrap}
-.gem-total{display:inline-block;font-size:.66rem;color:var(--text);font-family:'Cinzel','Cinzel Fallback',serif;font-weight:600;letter-spacing:.03em;margin-top:3px;background:var(--surface3);border:1.5px solid #7a6e58;padding:1px 8px;border-radius:8px;box-shadow:0 0 0 1px rgba(0,0,0,.5)}
+`
+	+ splendorPillCss + `
 /* Compact mobile player summary + log caret — hidden on desktop (shown only in
    the max-width:600px block below), so the laptop layout is unchanged. */
 .player-summary{display:none;flex-wrap:wrap;gap:5px;align-items:center;margin-top:8px}
@@ -445,28 +274,8 @@ const css = baseCss + `
 .score-row{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.05rem;padding:10px 28px;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border)}
 .score-row.winner{border-color:var(--gold);color:var(--gold)}
 
-/* ─── Move log ──────────────────────────────────────────────────────────── */
-.move-log{display:flex;flex-direction:column;gap:0;max-height:200px;overflow-y:auto;overflow-x:hidden}
-.log-empty{color:var(--text-muted);font-style:italic;font-size:.85rem;padding:4px 0}
-.move-log::-webkit-scrollbar{width:3px}.move-log::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
-.log-entry{display:flex;gap:6px;align-items:baseline;font-size:.76rem;color:var(--text-dim);padding:4px 0;line-height:1.4;animation:log-in .2s ease}
-.log-entry+.log-entry{border-top:1px solid rgba(58,52,42,.4)}
-.log-entry:first-child{color:var(--text)}
-.log-turn{flex:0 0 auto;min-width:1.6em;text-align:right;color:var(--text-muted);font-variant-numeric:tabular-nums;font-size:.92em}
-.log-entry.clickable{cursor:pointer}
-.log-entry.clickable:hover{background:rgba(201,168,76,.08);border-radius:4px}
-/* Review: the turn currently shown on the board is highlighted in the log. */
-.log-entry.log-selected{background:rgba(201,168,76,.2);border-radius:4px;box-shadow:inset 2px 0 0 var(--gold)}
-/* "X won the game" marker at the top of a finished game's log. */
-.log-entry.log-win .log-action{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.74rem;letter-spacing:.04em;color:var(--gold-light);font-weight:600}
-/* "Game started" anchor at the bottom of the log (jumps to the initial board). */
-.log-entry.log-start .log-action{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;letter-spacing:.04em;color:var(--text-dim)}
-/* Review controls in the action bar: Prev / where / Next / Latest. */
-.replay-nav{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.replay-where{font-size:.78rem;color:var(--text-dim);white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}
-.replay-move{color:var(--text-muted)}
-.log-name{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;color:var(--gold-light);flex-shrink:0}
-.log-action{flex:1}
+`
+	+ splendorLogCss + `
 @keyframes log-in{from{opacity:0;transform:translateX(6px)}to{opacity:1;transform:none}}
 
 /* ─── Card animations ───────────────────────────────────────────────────── */
@@ -481,11 +290,13 @@ const css = baseCss + `
    A fixed overlay layer of gem dots animated between the bank and a player box;
    per-flyer --dx/--dy/--s0/--s1 set the trip + start/end scale. */
 .fly-layer{position:fixed;inset:0;pointer-events:none;z-index:90}
-.fly-gem{position:fixed;border-radius:50%;border:2px solid rgba(255,255,255,.3);box-shadow:0 2px 10px rgba(0,0,0,.55);animation:fly .42s ease both;will-change:transform,opacity}
+.fly-gem{position:fixed;animation:flyGem .55s cubic-bezier(.3,.7,.4,1) both;will-change:transform,opacity}
 .fly-card{position:fixed;border-radius:8px;background:var(--surface2);border:2px solid var(--border);box-shadow:0 6px 20px rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:space-between;padding:6px 8px;overflow:hidden;transform-origin:center;animation:fly .5s ease both;will-change:transform,opacity}
 .fly-card-pt{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;color:var(--gold);font-size:1.3rem;line-height:1}
 .fly-card-dot{width:18px;height:18px;border-radius:50%;border:1px solid rgba(255,255,255,.3);flex-shrink:0}
 @keyframes fly{from{transform:translate(0,0) scale(var(--s0));opacity:1}to{transform:translate(var(--dx),var(--dy)) scale(var(--s1));opacity:.5}}
+/* Gems fly the real gradient GemToken (like Duel): slower Duel easing + a deeper fade. */
+@keyframes flyGem{from{transform:translate(0,0) scale(var(--s0));opacity:1}to{transform:translate(var(--dx),var(--dy)) scale(var(--s1));opacity:.15}}
 
 /* ─── AI thinking dots ──────────────────────────────────────────────────── */
 .ai-thinking{display:inline-flex;align-items:center;gap:5px;font-size:.78rem;color:var(--text-muted);font-style:italic}
@@ -502,16 +313,8 @@ const css = baseCss + `
 .modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px;max-width:400px;width:90%}
 .modal h3{font-family:'Cinzel','Cinzel Fallback',serif;color:var(--gold);margin-bottom:8px}
 .modal p{color:var(--text-dim);font-size:.9rem;margin-bottom:16px}
-/* ─── How-to-play (Rules) modal ─────────────────────────────────────────── */
-.rules-modal{max-width:520px;display:flex;flex-direction:column;max-height:86vh}
-.rules-body{overflow-y:auto;scrollbar-gutter:stable;padding-right:6px;margin:4px 0 14px}
-.rules-body p{margin-bottom:12px;line-height:1.5}
-.rules-lead{color:var(--text)}
-.rules-note{color:var(--text-muted);font-size:.82rem;font-style:italic;margin-bottom:0}
-.rules-body h4{font-family:'Cinzel','Cinzel Fallback',serif;color:var(--gold);font-size:.92rem;margin:14px 0 6px}
-.rules-body ul{margin:0 0 12px;padding-left:20px}
-.rules-body li{color:var(--text-dim);font-size:.88rem;line-height:1.5;margin-bottom:5px}
-.rules-body b{color:var(--text)}
+/* The how-to-play modal is the SHARED kit now (rulesModalCss / .rl-*) — Spender's
+   own .rules-modal/.rules-body vocabulary was retired with it. */
 .discard-gems{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-bottom:16px}
 .discard-btn{padding:8px 16px;border-radius:var(--radius);border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;transition:all .12s;display:flex;align-items:center;gap:6px}
 .discard-btn:hover{border-color:var(--gold);color:var(--gold)}
@@ -520,7 +323,6 @@ const css = baseCss + `
 /* ─── Error/status ──────────────────────────────────────────────────────── */
 .error-msg{font-size:.88rem;color:var(--red-gem);text-align:center;padding:6px 0}
 .status-msg{font-size:.85rem;color:var(--text-dim);font-style:italic;text-align:center;padding:6px 0;display:flex;align-items:center;justify-content:center}
-.small-muted{font-size:.8rem;color:var(--text-muted)}
 .mt-8{margin-top:8px}.mt-12{margin-top:12px}
 
 /* ─── Game nav bar ──────────────────────────────────────────────────────── */
@@ -703,14 +505,9 @@ const css = baseCss + `
 
 @media(max-width:600px){
   .browser{padding:20px 14px 40px}
-  .browser-title{font-size:1.4rem}
-  .browser-header{padding-left:14px;padding-right:14px}
-  /* Compact the toggle + Create Game so the pair fits side by side on phones. */
-  .create-controls{gap:8px}
-  .create-controls .len-btn{padding:8px 10px;font-size:.74rem}
-  .create-controls .ai-picker-wrap>.btn{padding:10px 14px;font-size:.82rem}
+  .lby-header{padding-left:14px;padding-right:14px}
   .game{padding:6px}
-  .game-card{padding:10px 12px}
+  .lby-card{padding:10px 12px}
 
   /* ── Board-first compact mobile game layout ──────────────────────────────
      The board leads (bank -> cards -> nobles+actions); players, then the move
@@ -797,67 +594,14 @@ const css = baseCss + `
   .diff-easy{color:#7fc08a;border-color:#3f6a48}
   .diff-tricky{color:#d8b25a;border-color:#6a5a2f}
   .diff-hard{color:#e0696b;border-color:#6a3536}
-`;
+` + gameMenuCss + createModalCss + lobbyCreateRowCss + rulesModalCss;
 
 // ─── Sub-components ───────────────────────────────────────────────────────
 
-function GemToken({ color, size = 42 }) {
-	return (
-		<div className="gem-token" style={{
-			background: GEM_HEX[color], width: size, height: size,
-			color: color === "white" || color === "gold" ? "#333" : "#fff",
-		}}>
-			{color === "gold" ? "★" : color[0].toUpperCase()}
-		</div>
-	);
-}
-
-function CardView({ card, selected, affordable, needsGold, disabled, onClick, aiValue, valsMine, dataPos }) {
-	// The AI-values overlay is computed for whoever's turn it is, so label whose values these are.
-	const who = valsMine ? "Your values" : "AI's values";
-	// An opponent's blind deck-top reserve is hidden info — show a face-down back, not the card.
-	if (card.hidden) {
-		return (
-			<div className="card card-back">
-				<span className="card-back-level">{["I", "II", "III"][(card.level || 1) - 1]}</span>
-				<span className="card-back-label">Reserved</span>
-			</div>
-		);
-	}
-	return (
-		<div data-pos={dataPos}
-			className={`card${selected ? " selected" : ""}${affordable ? (needsGold ? " affordable-gold" : " affordable") : ""}${disabled ? " disabled" : ""}`}
-			onClick={disabled ? undefined : onClick}
-		>
-			<div className="card-header">
-				<span className={`card-points${card.points === 0 ? " zero" : ""}`}>{card.points || ""}</span>
-				<div className="card-bonus" style={{ background: GEM_HEX[card.bonus] }} />
-			</div>
-			<div className="card-cost">
-				{Object.entries(card.cost).map(([c, n]) => n > 0 && (
-					<div key={c} className="cost-row">
-						<div className="cost-gem" style={{ background: GEM_HEX[c] }} />
-						<span className="cost-num">{n}</span>
-					</div>
-				))}
-			</div>
-			{aiValue != null && (typeof aiValue === "object" ? (
-				<div className={`ai-vals${valsMine ? " mine" : ""}`} title={`${who} — ${aiValue._s
-					? "S"
-					: aiValue.pot != null
-					? "H3"
-					: "H2"} — take / engine / point / cost`}>
-					<span><b>T</b>{aiValue.t}</span>
-					<span><b>E</b>{aiValue.e}</span>
-					<span><b>P</b>{aiValue.p}</span>
-					<span><b>C</b>{aiValue.c}</span>
-				</div>
-			) : (
-				<span className={`ai-val${valsMine ? " mine" : ""}`} title={`${who} (variant H)`}>{aiValue}</span>
-			))}
-		</div>
-	);
-}
+// GemToken and CardView live in shared/splendor.jsx (imported above) — Spender Duel
+// renders the same gems and jewel cards from that one source, instead of the
+// lookalikes it used to carry. CardView's Duel-only props (crowns, pearls, wild
+// bonus, ability glyph) are optional; Spender passes none and renders as before.
 
 function NobleView({ noble, claimedBy, dimmed }) {
 	// A claimed noble is faded; its claimer name is absolutely pinned to the bottom
@@ -909,6 +653,12 @@ function useWebSocket(onMessage, { onOpen, onClose } = {}) {
 			try { onOpenRef.current?.({ event: ev, send }); } catch {}
 		};
 		ws.onclose = () => {
+			// Stale-socket guard (the frontend analog of the backend's): if a newer connect() has
+			// already replaced this socket, do nothing. Without it, a socket closed BY connect()
+			// (e.g. the visibility handler firing while a reconnect is mid-handshake) fires this
+			// onclose AFTER wsRef points at the new socket, schedules a reconnect, and that reconnect
+			// then closes the healthy new socket — a self-sustaining ~2s disconnect/reconnect loop.
+			if (wsRef.current !== ws) return;
 			try { onCloseRef.current?.(); } catch {}
 			// auto-reconnect unless the user intentionally disconnected
 			if (!intentionalRef.current && urlRef.current) {
@@ -961,7 +711,22 @@ export default function SpenderApp() {
 	});
 
 	// ── Screen & room state ────────────────────────────────────────────────
+	// SITE-LEVEL mode only: loading | auth | home | spender | coc | werewolf | duel |
+	// books | puzzles. `screen` used to ALSO carry Spender's own browser/waiting/game,
+	// conflating "which part of the site am I in" with "which Spender screen" — which is
+	// what made the shell impossible to lift out of this file. Spender's own screen now
+	// lives in `spenderScreen` and is only meaningful while screen === "spender".
 	const [screen, setScreen] = useState("loading");
+	const [spenderScreen, setSpenderScreen] = useState("browser");   // browser | waiting | game
+	// a room connect is in flight (create / join / continue / deep-link) — while it
+	// is AND we're still on the lobby, show the spinner instead of the lobby, so a
+	// reconnect doesn't flash the lobby then snap into the game (matches CoC).
+	const [connecting, setConnecting] = useState(false);
+
+	// Enter one of Spender's own screens. Always sets BOTH, so the two can never drift
+	// (a bare setSpenderScreen while the site is on, say, /coc would render nothing).
+	// NOTE: a puzzle also runs on "game" — with puzzling=true and no socket.
+	const goSpender = (sub) => { setScreen("spender"); setSpenderScreen(sub); };
 	const [loadingProgress, setLoadingProgress] = useState(0);
 	const [showLoading, setShowLoading] = useState(false);
 	// Bumped when the tab is foregrounded while still stuck on the loading screen, to
@@ -971,6 +736,10 @@ export default function SpenderApp() {
 	const [modalCard, setModalCard] = useState(null);
 	const [roomId, setRoomId] = useState("");
 	const [roomData, setRoomData] = useState(null);
+	// A Spender room id arriving from the URL (deep link / popstate Forward) — consumed by
+	// the deep-entry effect once the browser (lobby) screen is up. Plain /spender never
+	// sets it, preserving the deliberate no-auto-resume-on-mount design.
+	const [deepRoom, setDeepRoom] = useState(null);
 	// ── Game review / replay (read-only rewind of a finished game) ──
 	const [reviewing, setReviewing] = useState(false);            // viewing a finished game's board + log
 	const [replaySnapshots, setReplaySnapshots] = useState(null); // [{turn,mover,move,game}], or null = no turn-by-turn
@@ -992,6 +761,24 @@ export default function SpenderApp() {
 	const [puzHideOverlay, setPuzHideOverlay] = useState(false); // Return -> view the board, hide the result overlay
 	const [puzFailMove, setPuzFailMove] = useState(null);          // the wrong move the player just tried
 	const [pinged, setPinged] = useState(false);                  // a ping arrived while the tab was hidden (drives the "waiting for you" tab alert)
+	// ── Offline vs-AI mode (local wasm engine, no socket, IndexedDB saves) ──
+	const [offline, setOffline] = useState(false);       // an offline SPENDER game drives the game screen (like puzzling)
+	const [offlineRecord, setOfflineRecord] = useState(null);   // the saved-game record (offline.js shape)
+	const [offlineGames, setOfflineGames] = useState(null);     // hub list (null = loading)
+	const [offlineGameSel, setOfflineGameSel] = useState("spender"); // hub New Game: which game
+	const [offlineVariant, setOfflineVariant] = useState("N");  // Spender tier — only the
+	const [offlineWin, setOfflineWin] = useState(15);           //   client-WASM tiers exist offline
+	const [offlineCocTier, setOfflineCocTier] = useState("expert"); // CoC tier (hard|expert)
+	const [offlineCocMyBoard, setOfflineCocMyBoard] = useState("1");  // CoC board picks
+	const [offlineCocOppBoard, setOfflineCocOppBoard] = useState("1");
+	const [offlineDuelTier, setOfflineDuelTier] = useState("expert"); // Duel tier (hard|expert)
+	// A CoC/Duel offline game in play: the shell mounts that game's component with this
+	// record (they own their whole screen, unlike Spender whose game screen lives here).
+	const [offlinePlay, setOfflinePlay] = useState(null);
+	// Per-game download state: {spender|coc|duel: null | {done,total} | "ok" | "err"}
+	const [precacheState, setPrecacheState] = useState({});
+	// Dissonance's paper scorecard, opened from the hub (see the import).
+	const [offlineCard, setOfflineCard] = useState(false);
 
 	// ── Derived game state (must be before useEffect hooks that use `game`) ──
 	const liveGame = roomData?.game;
@@ -1082,19 +869,22 @@ export default function SpenderApp() {
 	});
 
 	// ── Auth form state ────────────────────────────────────────────────────
-	const [authTab, setAuthTab] = useState("login");
-	const [authName, setAuthName] = useState("");
-	const [authPassword, setAuthPassword] = useState("");
-	const [guestName, setGuestName] = useState("");
-	const [authError, setAuthError] = useState("");
-	const [authLoading, setAuthLoading] = useState(false);
 
 	// ── Browser state ──────────────────────────────────────────────────────
-	const [openGames, setOpenGames] = useState([]);
-	const [activeGames, setActiveGames] = useState([]);   // ALL in-progress games (yours + others')
-	const [historyGames, setHistoryGames] = useState([]); // your FINISHED games (vs AI or humans)
+	const [openGames, setOpenGames] = useState(() => readLobbyCache("spender", myId, "open", []));
+	const [activeGames, setActiveGames] = useState(() => readLobbyCache("spender", myId, "active", []));   // ALL in-progress games (yours + others')
+	const [historyGames, setHistoryGames] = useState(() => readLobbyCache("spender", myId, "history", [])); // your FINISHED games (vs AI or humans)
+	// History reveals 10 at a time as the reader reaches the end of the list, up
+	// to the 50 the backend sends — see useProgressiveList.
+	const [historyShown, historyMore] = useProgressiveList(historyGames);
 	const [browserLoading, setBrowserLoading] = useState(false);
-	const [showCreateMenu, setShowCreateMenu] = useState(false);
+	const [showCreateModal, setShowCreateModal] = useState(false);  // the New Game options modal
+	const [createOpp, setCreateOpp] = useState("ai");        // "friend" | "ai"
+	// AI difficulty (wire code) — defaults to the last variant this player
+	// actually started a game against, falling back to Nina for a first game.
+	const [createVariant, setCreateVariant, rememberVariant] =
+		useLastDifficulty("spender", myId, AI_VARIANTS, "N");
+	const [createSeats, setCreateSeats] = useState(2);       // friend-lobby seat cap (2-4)
 	const [showRules, setShowRules] = useState(false);  // lobby "How to Play" modal
 	const [winPoints, setWinPoints] = useState(15);   // 15 = Classic, 21 = Long mode
 	const [lobbyTab, setLobbyTab] = useState("open");  // mobile-only: which lobby section is shown (open|active|history)
@@ -1115,17 +905,20 @@ export default function SpenderApp() {
 					.then(r => r.json()).catch(() => ({ games: [] }))
 				: Promise.resolve({ games: [] });
 			const [open, active, hist] = await Promise.all([openP, activeP, histP]);
-			setOpenGames(open.games || []);
-			setActiveGames(active.games || []);
-			setHistoryGames(hist.games || []);
+			const og = open.games || [], ag = active.games || [], hg = hist.games || [];
+			setOpenGames(og); setActiveGames(ag); setHistoryGames(hg);
+			writeLobbyCache("spender", myId, "open", og);
+			writeLobbyCache("spender", myId, "active", ag);
+			writeLobbyCache("spender", myId, "history", hg);
 		} catch {
 			setOpenGames([]); setActiveGames([]); setHistoryGames([]);
 		}
 		setBrowserLoading(false);
-	}, []);
+	}, [myId]);
 
 	// ── handleMessage ──────────────────────────────────────────────────────
 	const handleMessage = useCallback((msg) => {
+		setConnecting(false);        // any authoritative reply ends the connect loader
 		const room = msg.room;
 		if (room?.reconnect_tokens?.[myId]) {
 			const rid = room.room_id || roomId;
@@ -1138,21 +931,29 @@ export default function SpenderApp() {
 		// A finished game ("over") still belongs on the game screen so the
 		// winner/review UI shows — only a not-yet-started game goes to "waiting".
 		const inGame = (s) => s === "playing" || s === "over";
+		// Entering a room (server-confirmed, never at click time) gives it its URL —
+		// /spender/<RID>. waiting and game share the one room URL (status picks the
+		// internal screen); pushPath's dedup makes deep-link/repeat messages no-ops.
+		if (msg.type === "created" || msg.type === "joined" || msg.type === "reconnected") {
+			const rid = room?.room_id || roomId;
+			if (rid) pushPath(buildPath("spender", rid));
+			urlAttemptRef.current = null;
+		}
 		if (msg.type === "created") {
 			setRoomData(msg.room);
-			if (inGame(msg.room?.status)) setScreen("game");
-			else setScreen("waiting");
+			if (inGame(msg.room?.status)) goSpender("game");
+			else goSpender("waiting");
 		} else if (msg.type === "joined") {
 			setRoomData(msg.room);
-			if (inGame(msg.room?.status)) setScreen("game");
-			else setScreen("waiting");
+			if (inGame(msg.room?.status)) goSpender("game");
+			else goSpender("waiting");
 		} else if (msg.type === "reconnected") {
 			setRoomData(msg.room);
-			if (inGame(msg.room.status)) setScreen("game");
-			else setScreen("waiting");
+			if (inGame(msg.room.status)) goSpender("game");
+			else goSpender("waiting");
 		} else if (msg.type === "room_update") {
 			setRoomData(msg.room);
-			if (inGame(msg.room.status) && screen !== "game") setScreen("game");
+			if (inGame(msg.room.status) && spenderScreen !== "game") goSpender("game");
 		} else if (msg.type === "ping") {
 			// Another player tapped your player box (or you tapped theirs) → chime.
 			playPing();
@@ -1170,6 +971,21 @@ export default function SpenderApp() {
 				&& (msg.message.includes("no longer available") || msg.message === "room not found");
 			if (msg.message === "invalid token" || gone) {
 				try { localStorage.removeItem("spender_roomId"); } catch {}
+			}
+			// URL-driven attempt (deep link / popstate Forward) failed. A stale token gets
+			// ONE retry as a plain join (the invite-link case: token orphaned but the room
+			// is open); anything else falls back to the lobby and the dead room URL is
+			// replaced with /spender so a reload doesn't re-attempt it.
+			const ua = urlAttemptRef.current;
+			if (ua) {
+				if (msg.message === "invalid token" && !ua.retried) {
+					ua.retried = true;
+					try { localStorage.removeItem(`spender_token_${ua.rid}_${myId}`); } catch {}
+					handleContinue(ua.rid);   // token now gone → plain join
+					return;
+				}
+				urlAttemptRef.current = null;
+				replacePath(buildPath("spender"));
 			}
 			if (gone && authUser) fetchGames(authUser);
 			setToast(msg.message);
@@ -1196,16 +1012,13 @@ export default function SpenderApp() {
 		onClose: () => {},
 	});
 
-	// ── Mount: auto-reconnect to saved room ────────────────────────────────
+	// ── Mount: do NOT auto-resume a saved game ─────────────────────────────
+	// Auto-reconnecting on load snapped you from the home/lobby straight into the game
+	// (the async "reconnected"/"room_update" forced goSpender("game")) — jarring. Resume
+	// is now EXPLICIT via the lobby's Resume/Continue buttons (handleContinue connects +
+	// enters). Keep only the disconnect cleanup so an explicit connection tears down on
+	// unmount.
 	useEffect(() => {
-		try {
-			const savedRoomId = localStorage.getItem("spender_roomId");
-			const savedToken = savedRoomId ? localStorage.getItem(`spender_token_${savedRoomId}_${myId}`) : null;
-			if (savedRoomId && savedToken) {
-				setRoomId(savedRoomId);
-				connect(`${WS_BASE}/${savedRoomId}/${myId}`);
-			}
-		} catch {}
 		return () => disconnect();
 	}, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1214,6 +1027,8 @@ export default function SpenderApp() {
 	roomIdRef.current = roomId;
 	const screenRef = useRef(screen);
 	screenRef.current = screen;
+	const spenderScreenRef = useRef(spenderScreen);
+	spenderScreenRef.current = spenderScreen;
 	const reviewingRef = useRef(reviewing);
 	reviewingRef.current = reviewing;
 	// A puzzle drives the "game" screen with roomId set to the puzzle id but NO socket
@@ -1222,6 +1037,36 @@ export default function SpenderApp() {
 	// server reply replaces roomData and wipes the puzzle board.
 	const puzzlingRef = useRef(puzzling);
 	puzzlingRef.current = puzzling;
+	// An offline game also drives the "game" screen with NO socket (roomId = the local save
+	// id) — same reasons as puzzlingRef: the visibility reconnect must never open a WS to a
+	// room named after a local save, and popstate must treat it as its own site-level mode.
+	const offlineRef = useRef(offline);
+	offlineRef.current = offline;
+	const offlineRecordRef = useRef(offlineRecord);
+	offlineRecordRef.current = offlineRecord;
+	const offlinePlayRef = useRef(offlinePlay);
+	offlinePlayRef.current = offlinePlay;
+	// Fresh-closure mirror for the AI-dispatch effect's offline fork (the effect's deps are
+	// tuned for the online path; a ref keeps the fork from widening them).
+	const submitOfflineAiMoveRef = useRef(null);
+
+	// ── URL routing (shared/router.js) ─────────────────────────────────────
+	// Segment 1 (game mode) is owned HERE; each sub-game owns its own segment 2 (room id).
+	const initialRouteRef = useRef(parsePath());   // parsed once at first render; landAt consumes it
+	const pendingRouteRef = useRef(null);          // deep link stashed across the auth screen
+	const applyPopRouteRef = useRef(() => {});     // fresh-closure mirror for the mount-once popstate effect
+	// A URL-driven room attempt in flight ({rid, retried}): its failure falls back to the
+	// lobby (replacePath /spender + toast) instead of leaving a dead room URL; a stale
+	// reconnect token is retried ONCE as a plain join (invite-link case).
+	const urlAttemptRef = useRef(null);
+	useEffect(() => subscribe((route) => {
+		// Back/Forward. While still booting, just retarget the landing; while on auth,
+		// retarget the post-login destination. Otherwise apply the route now.
+		if (screenRef.current === "loading") { initialRouteRef.current = route; return; }
+		if (screenRef.current === "auth") { pendingRouteRef.current = route.game && route.game !== "home" ? route : null; return; }
+		applyPopRouteRef.current(route);
+	}), []); // eslint-disable-line react-hooks/exhaustive-deps
+
 	useEffect(() => {
 		const handleVisibility = () => {
 			// Only auto-reconnect when actively on the game screen — otherwise tabbing
@@ -1229,9 +1074,10 @@ export default function SpenderApp() {
 			// reviewing a finished game or playing a puzzle (neither has a live socket —
 			// a reconnect would be spurious and, in a puzzle, clobbers the board).
 			if (document.visibilityState === "visible"
-				&& screenRef.current === "game"
+				&& screenRef.current === "spender" && spenderScreenRef.current === "game"
 				&& !reviewingRef.current
 				&& !puzzlingRef.current
+				&& !offlineRef.current
 				&& roomIdRef.current
 				&& getReadyState() !== WebSocket.OPEN) {
 				connect(`${WS_BASE}/${roomIdRef.current}/${myId}`);
@@ -1266,8 +1112,13 @@ export default function SpenderApp() {
 
 	useEffect(() => {
 		if (!["S", "N"].includes(roomData?.ai_variant) || wasmPoolRef.current || typeof Worker === "undefined") return;
-		const url = `${import.meta.env.BASE_URL}wasm/s-worker.js`;
-		const cores = Math.max(1, Math.min(navigator.hardwareConcurrency || 4, 4));
+		const url = `${import.meta.env.BASE_URL}wasm/spender-worker.js`;
+		// Reserve one core for the browser's main/compositor/raster threads: the WASM search is CPU-bound,
+		// and a pool that pegs EVERY core starves the compositor → the GPU-composited flying-gem/card
+		// animations stutter while the AI thinks. Sims are capped in AGGREGATE (perWorkerSims scales to the
+		// pool size), so one fewer worker keeps total sims ~unchanged — this only bites on low-core machines
+		// where the contention actually exists (6-/8-core boxes still get the full 4).
+		const cores = Math.max(1, Math.min((navigator.hardwareConcurrency || 4) - 1, 4));
 		const makeWorker = () => {
 			let w;
 			try { w = new Worker(url, { type: "module" }); } catch { return null; }
@@ -1370,7 +1221,10 @@ export default function SpenderApp() {
 				if (mv && !mv.error) {
 					const ms = Math.round(performance.now() - t0);
 					console.info(`[client-AI] ${contrib} workers, ${sims} sims in ${ms}ms ->`, mv);
-					send({ action: "ai_move", move: mv });
+					// Offline: the move is applied locally by the driver instead of submitted —
+					// the browser IS the server here. Same search, same move, different sink.
+					if (offlineRef.current) submitOfflineAiMoveRef.current?.(mv);
+					else send({ action: "ai_move", move: mv });
 				}
 			} catch {}
 		})();
@@ -1411,13 +1265,36 @@ export default function SpenderApp() {
 		return () => { document.removeEventListener("visibilitychange", evaluate); stop(); };
 	}, [humanGame, myTurn, pinged]);
 
+	// ── Turn chime ──────────────────────────────────────────────────────────
+	const prevMyTurnRef = useRef(false);
+	// Play a short sound the moment it becomes your turn in a human-vs-human game
+	// (focused or not). Fires only on the not-your-turn → your-turn transition, so
+	// it never repeats while you're already on the clock. Never for vs-AI, puzzles,
+	// or review (humanGame gates those out). The AudioContext is already unlocked by
+	// your own in-game clicks; best-effort otherwise (playPing swallows failures).
 	useEffect(() => {
-		if (screen === "browser" && authUser) fetchGames(authUser);
+		const wasMyTurn = prevMyTurnRef.current;
+		prevMyTurnRef.current = myTurn;
+		if (humanGame && myTurn && !wasMyTurn) playPing();
+	}, [humanGame, myTurn]);
+
+	useEffect(() => {
+		if (screen === "spender" && spenderScreen === "browser" && authUser) fetchGames(authUser);
 	}, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
 
 	useEffect(() => {
 		if (toast) { const t = setTimeout(() => setToast(""), 2500); return () => clearTimeout(t); }
 	}, [toast]);
+
+	// a connect that never answers must not leave the spinner up forever
+	useEffect(() => {
+		if (!connecting) return;
+		const t = setTimeout(() => {
+			setConnecting(false);
+			setToast("Still connecting — the server may be waking up. Try again in a moment.");
+		}, 15000);
+		return () => clearTimeout(t);
+	}, [connecting]);
 
 	// Hold on the final board for 2s after the game ends before revealing the
 	// win/loss screen, so the player sees the move that ended it. Resets whenever
@@ -1441,7 +1318,7 @@ export default function SpenderApp() {
 		const vp = document.querySelector('meta[name="viewport"]');
 		if (!vp) return;
 		const base = "width=device-width, initial-scale=1.0";
-		if (screen === "game") vp.setAttribute("content", base + ", maximum-scale=1.0, user-scalable=no");
+		if (screen === "spender" && spenderScreen === "game") vp.setAttribute("content", base + ", maximum-scale=1.0, user-scalable=no");
 		return () => vp.setAttribute("content", base);
 	}, [screen]);
 
@@ -1509,7 +1386,7 @@ export default function SpenderApp() {
 							setLoadingProgress(1);
 							const dest = await resolveDest();
 							await waitFonts();
-							setTimeout(() => { if (!cancelled) setScreen(dest); }, 350);
+							setTimeout(() => { if (!cancelled) landAt(dest); }, 350);
 							return;
 						}
 					} catch {}
@@ -1533,11 +1410,24 @@ export default function SpenderApp() {
 						document.fonts.load('600 1rem Cinzel'),
 						document.fonts.load('400 1rem Cinzel'),
 						document.fonts.load('400 1rem "Crimson Pro"'),
+						// the ITALIC face is a separate file and a separate
+						// display:optional decision — leaving it out of the gate
+						// (and out of index.html's preloads) is what made every
+						// italic on the site render in the heavier Georgia
+						// fallback until a reload warmed the cache
+						document.fonts.load('italic 400 1rem "Crimson Pro"'),
 					]),
 					new Promise(r => setTimeout(r, 1500)),
 				]);
 			} catch {}
 		};
+		// OFFLINE route: the whole point of /offline is working with NO backend, so it must
+		// never gate on the ping (the polling loop below has no give-up branch). Land straight
+		// on the hub — identity is local (guest myId / cached login) and needs no network.
+		if (initialRouteRef.current?.game === "offline") {
+			(async () => { await waitFonts(); if (!cancelled) landAt("home"); })();
+			return () => { cancelled = true; };
+		}
 		// Fast path: if backend responds within 250ms, skip the loading screen entirely
 		(async () => {
 			try {
@@ -1545,7 +1435,7 @@ export default function SpenderApp() {
 				const t = setTimeout(() => ctrl.abort(), 250);
 				const res = await fetch(`${HTTP_BASE}/games`, { signal: ctrl.signal });
 				clearTimeout(t);
-				if (res.ok && !cancelled) { const dest = await resolveDest(); await waitFonts(); if (!cancelled) setScreen(dest); return; }
+				if (res.ok && !cancelled) { const dest = await resolveDest(); await waitFonts(); if (!cancelled) landAt(dest); return; }
 			} catch {}
 			if (!cancelled) { setShowLoading(true); startPolling(); }
 		})();
@@ -1581,6 +1471,111 @@ export default function SpenderApp() {
 	const prevBoardRef = useRef(null);
 	const prevMovesLenRef = useRef(0);
 	const flyIdRef = useRef(0);
+	// Run the flight through the Web Animations API with LITERAL pixel values.
+	//
+	// The CSS keyframes interpolate `translate(var(--dx), var(--dy))`. An animation
+	// whose keyframes read custom properties can't reliably be promoted to the
+	// compositor, so it runs on the MAIN thread — where it competes with whatever
+	// else is happening. That never showed while the animation started only after the
+	// server broadcast (nothing else was running). Now that a take animates from the
+	// click, the broadcast re-render plus the AI's WASM worker start-up land right in
+	// the flight, and cost a dropped frame at the landing.
+	//
+	// Literal values let the compositor own it, so main-thread work can't stutter it.
+	// The CSS animation stays as the fallback for browsers without WAAPI.
+	const animatedFlyRef = useRef(new Set());
+	const animateFlyer = (el, f) => {
+		if (!el || typeof el.animate !== "function") return;
+		if (animatedFlyRef.current.has(f.id)) return;   // refs fire on every re-render
+		animatedFlyRef.current.add(f.id);
+		el.style.animation = "none";                    // take over from the CSS keyframes
+		el.animate(
+			[{ transform: `translate(0,0) scale(${f.s0})`, opacity: 1 },
+			 { transform: `translate(${f.dx}px, ${f.dy}px) scale(${f.s1})`,
+			   opacity: f.kind === "card" ? 0.5 : 0.15 }],
+			{ duration: f.kind === "card" ? 500 : 550, delay: f.delay || 0,
+			  easing: "cubic-bezier(.3,.7,.4,1)", fill: "both" });
+	};
+
+	// Set when we pre-animate our OWN take on click (see handleTakeGems). The server
+	// broadcast that follows would otherwise diff the same gems and fly them a second
+	// time. Timestamped so a rejected/never-arriving move can't suppress a later,
+	// legitimate animation forever.
+	const preFlownRef = useRef(0);
+
+	// Spawn flyers for gem moves (+ optionally a bought card). Measures in ONE
+	// requestAnimationFrame — all reads together, no interleaved writes — so it can't
+	// thrash layout. Extracted from the diff effect below so a click can fire it
+	// immediately, before the server has replied.
+	const spawnFlyers = (specs, cardFly) => {
+		if (!specs.length && !cardFly) return () => {};
+		const raf = requestAnimationFrame(() => {
+			const made = [];
+			let total = 0;
+			// Center of the first VISIBLE element matching one of `sels`, in order.
+			//
+			// The ORDER matters, and the middle entry is not decoration. A per-colour
+			// `.token-pill` only exists once you already hold that colour, so when a
+			// take is pre-animated on click the pill for a NEW colour has not rendered
+			// yet. Falling straight through to the box centre put the gems ~108px below
+			// where they actually land, and made all three converge on one point.
+			// `.player-tokens` (the row that will contain the pills) is present with
+			// real dimensions even while empty, and its centre measured within 1px of
+			// the pills' final y — so it is the right fallback.
+			const targetIn = (boxEl, ...sels) => {
+				for (const sel of sels) {
+					const el = sel && boxEl.querySelector(sel);
+					if (el) { const r = el.getBoundingClientRect(); if (r.width > 0) return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
+				}
+				const r = boxEl.getBoundingClientRect();
+				return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+			};
+			for (const s of specs) {
+				const bankEl = document.querySelector(`.gem-stack[data-color="${s.color}"] .gem-token`);
+				const boxEl = document.querySelector(`.player-panel[data-pid="${s.pid}"]`);
+				if (!bankEl || !boxEl) continue;
+				const br = bankEl.getBoundingClientRect();
+				const bank = { x: br.left + br.width / 2, y: br.top + br.height / 2 };
+				// this colour's gem indicator; the gem row while that pill doesn't exist yet
+				const box = targetIn(boxEl, `.token-pill[data-token="${s.color}"]`, ".player-tokens");
+				const size = Math.max(18, Math.round(br.width || 40));
+				const from = s.grow ? box : bank;
+				const to = s.grow ? bank : box;
+				const n = Math.min(s.count, 5);
+				for (let i = 0; i < n && total < 8; i++, total++) {
+					made.push({
+						id: ++flyIdRef.current, kind: "gem", color: s.color, size,
+						x: from.x, y: from.y, dx: to.x - from.x, dy: to.y - from.y,
+						s0: s.grow ? 0.55 : 1, s1: s.grow ? 1 : 0.55, delay: i * 55,
+					});
+				}
+			}
+			// Bought card flies from its board slot to the buyer's box, shrinking.
+			if (cardFly && cardFly.pos) {
+				const slotEl = document.querySelector(`.level-row [data-pos="${cardFly.pos}"]`);
+				const boxEl = document.querySelector(`.player-panel[data-pid="${cardFly.pid}"]`);
+				if (slotEl && boxEl) {
+					const sr = slotEl.getBoundingClientRect();
+					const cx = sr.left + sr.width / 2, cy = sr.top + sr.height / 2;
+					// fly to this card's bonus-color indicator (its card pill); fallback box center
+					const dest = targetIn(boxEl, `.bonus-pill[data-bonus="${cardFly.card.bonus}"]`, ".player-bonuses");
+					made.push({
+						id: ++flyIdRef.current, kind: "card",
+						color: cardFly.card.bonus, points: cardFly.card.points,
+						x: sr.left, y: sr.top, w: Math.round(sr.width), h: Math.round(sr.height),
+						dx: dest.x - cx, dy: dest.y - cy, s0: 1, s1: 0.22, delay: 0,
+					});
+				}
+			}
+			if (!made.length) return;
+			setFlyers(f => [...f, ...made]);
+			const ids = new Set(made.map(m => m.id));
+			const maxDelay = made.reduce((m, x) => Math.max(m, x.delay), 0);
+			setTimeout(() => setFlyers(f => f.filter(x => !ids.has(x.id))), 600 + maxDelay);
+		});
+		return () => cancelAnimationFrame(raf);
+	};
+
 	useEffect(() => {
 		if (reviewing) return;   // no flying gems/cards while rewinding (puzzle steps DO animate)
 		const players = game?.players;
@@ -1636,63 +1631,16 @@ export default function SpenderApp() {
 			}
 		}
 
-		if (!specs.length && !cardFly) return;
+		// We already flew our own take the moment it was clicked; don't fly it twice.
+		// Only bank->you gems for US are dropped — an over-cap discard (you->bank) in
+		// the same broadcast was never pre-animated and must still show.
+		let gemSpecs = specs;
+		if (preFlownRef.current && Date.now() - preFlownRef.current < 5000) {
+			gemSpecs = specs.filter(s => !(s.pid === myId && !s.grow));
+			preFlownRef.current = 0;
+		}
 
-		const raf = requestAnimationFrame(() => {
-			const made = [];
-			let total = 0;
-			// Center of the first VISIBLE element matching `sel` inside the box (its
-			// per-color gem/card indicator); falls back to the box center (e.g. on
-			// mobile where the detail pills are hidden).
-			const targetIn = (boxEl, sel) => {
-				const el = boxEl.querySelector(sel);
-				if (el) { const r = el.getBoundingClientRect(); if (r.width > 0) return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
-				const r = boxEl.getBoundingClientRect();
-				return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-			};
-			for (const s of specs) {
-				const bankEl = document.querySelector(`.gem-stack[data-color="${s.color}"] .gem-token`);
-				const boxEl = document.querySelector(`.player-panel[data-pid="${s.pid}"]`);
-				if (!bankEl || !boxEl) continue;
-				const br = bankEl.getBoundingClientRect();
-				const bank = { x: br.left + br.width / 2, y: br.top + br.height / 2 };
-				const box = targetIn(boxEl, `.token-pill[data-token="${s.color}"]`);  // this color's gem indicator
-				const size = Math.max(18, Math.round(br.width || 40));
-				const from = s.grow ? box : bank;
-				const to = s.grow ? bank : box;
-				const n = Math.min(s.count, 5);
-				for (let i = 0; i < n && total < 8; i++, total++) {
-					made.push({
-						id: ++flyIdRef.current, kind: "gem", color: s.color, size,
-						x: from.x, y: from.y, dx: to.x - from.x, dy: to.y - from.y,
-						s0: s.grow ? 0.35 : 1, s1: s.grow ? 1 : 0.35, delay: i * 55,
-					});
-				}
-			}
-			// Bought card flies from its board slot to the buyer's box, shrinking.
-			if (cardFly && cardFly.pos) {
-				const slotEl = document.querySelector(`.level-row [data-pos="${cardFly.pos}"]`);
-				const boxEl = document.querySelector(`.player-panel[data-pid="${cardFly.pid}"]`);
-				if (slotEl && boxEl) {
-					const sr = slotEl.getBoundingClientRect();
-					const cx = sr.left + sr.width / 2, cy = sr.top + sr.height / 2;
-					// fly to this card's bonus-color indicator (its card pill); fallback box center
-					const dest = targetIn(boxEl, `.bonus-pill[data-bonus="${cardFly.card.bonus}"]`);
-					made.push({
-						id: ++flyIdRef.current, kind: "card",
-						color: cardFly.card.bonus, points: cardFly.card.points,
-						x: sr.left, y: sr.top, w: Math.round(sr.width), h: Math.round(sr.height),
-						dx: dest.x - cx, dy: dest.y - cy, s0: 1, s1: 0.22, delay: 0,
-					});
-				}
-			}
-			if (!made.length) return;
-			setFlyers(f => [...f, ...made]);
-			const ids = new Set(made.map(m => m.id));
-			const maxDelay = made.reduce((m, x) => Math.max(m, x.delay), 0);
-			setTimeout(() => setFlyers(f => f.filter(x => !ids.has(x.id))), 560 + maxDelay);
-		});
-		return () => cancelAnimationFrame(raf);
+		return spawnFlyers(gemSpecs, cardFly);
 	}, [game]); // eslint-disable-line react-hooks/exhaustive-deps
 
 	// ── Move log helpers ──────────────────────────────────────────────────────
@@ -1740,39 +1688,19 @@ export default function SpenderApp() {
 	}
 
 	// ── Auth actions ───────────────────────────────────────────────────────
-	const handleAuth = async () => {
-		if (!authName.trim() || !authPassword.trim()) {
-			setAuthError("Name and password required"); return;
+	// The FORM lives in shared/AuthScreen.jsx; the shell keeps identity. A
+	// registered user's id/token is persisted, a guest's is not (guests keep the
+	// anonymous id they already had, so a game started before signing in stays theirs).
+	const handleAuthenticated = (user) => {
+		if (!user.guest) {
+			try {
+				localStorage.setItem("spender_user", JSON.stringify(user));
+				localStorage.setItem("spender_myId", user.id);
+			} catch {}
+			setMyId(user.id);
 		}
-		setAuthError(""); setAuthLoading(true);
-		try {
-			const endpoint = authTab === "login" ? "/auth/login" : "/auth/register";
-			const res = await fetch(`${HTTP_BASE}${endpoint}`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ name: authName.trim(), password: authPassword.trim() }),
-			});
-			const data = await res.json();
-			if (data.ok) {
-				const user = { id: data.user.id, name: data.user.name, is_admin: !!data.user.is_admin, session_token: data.session_token || null };
-				try { localStorage.setItem("spender_user", JSON.stringify(user)); localStorage.setItem("spender_myId", user.id); } catch {}
-				setAuthUser(user);
-				setMyId(user.id);
-				setScreen("home");
-			} else {
-				setAuthError(data.message || "Something went wrong");
-			}
-		} catch {
-			setAuthError("Could not reach server");
-		}
-		setAuthLoading(false);
-	};
-
-	const handleGuestPlay = () => {
-		const name = guestName.trim() || `Guest${Math.floor(Math.random() * 9000 + 1000)}`;
-		const user = { id: myId, name, guest: true };
 		setAuthUser(user);
-		setScreen("home");
+		consumePendingRoute();
 	};
 
 	const handleLogout = () => {
@@ -1784,6 +1712,7 @@ export default function SpenderApp() {
 		setMyId(newId);
 		try { localStorage.setItem("spender_myId", newId); } catch {}
 		setAuthUser(null);
+		replacePath(buildPath("home"));
 		setScreen("auth");
 		setRoomData(null);
 		setRoomId("");
@@ -1791,20 +1720,23 @@ export default function SpenderApp() {
 	};
 
 	// ── Room / game actions ────────────────────────────────────────────────
-	const handleCreate = (vsAI = false, aiVariant = "A", wp = 15) => {
+	const handleCreate = (vsAI = false, aiVariant = "A", wp = 15, maxPlayers = 4) => {
+		if (vsAI) rememberVariant(aiVariant);   // this game's variant is the next modal's default
 		const newRoomId = roomCode();
 		setRoomId(newRoomId);
 		try { localStorage.setItem("spender_roomId", newRoomId); } catch {}
 		pendingActionRef.current = vsAI
 			? { action: "create", name: playerName, vs_ai: true, ai_variant: aiVariant, win_points: wp }
-			: { action: "create", name: playerName, win_points: wp };
+			: { action: "create", name: playerName, win_points: wp, max_players: maxPlayers };
+		setConnecting(true);
 		connect(`${WS_BASE}/${newRoomId}/${myId}`);
 	};
 
 	const handleJoinGame = (gameId) => {
 		setRoomId(gameId);
 		try { localStorage.setItem("spender_roomId", gameId); } catch {}
-		pendingActionRef.current = { action: "join", name: playerName };
+		pendingActionRef.current = { action: "join", name: playerName, session_token: authUser?.session_token };
+		setConnecting(true);
 		connect(`${WS_BASE}/${gameId}/${myId}`);
 	};
 
@@ -1834,7 +1766,8 @@ export default function SpenderApp() {
 		try { localStorage.setItem("spender_roomId", gameId); } catch {}
 		pendingActionRef.current = savedToken
 			? { action: "reconnect", token: savedToken }
-			: { action: "join", name: playerName };
+			: { action: "join", name: playerName, session_token: authUser?.session_token };
+		setConnecting(true);
 		connect(`${WS_BASE}/${gameId}/${myId}`);
 	};
 
@@ -1864,7 +1797,7 @@ export default function SpenderApp() {
 					ai_variant: data.ai_variant,
 				});
 				setResultReady(true);
-				setScreen("game");
+				goSpender("game");
 			}
 			setReplaySnapshots(snaps);
 			setReplayTurn(null);
@@ -2033,7 +1966,7 @@ export default function SpenderApp() {
 				game: { ...relabelGame(puz.steps[0].snapshot, heroPid), moves: [] },
 			});
 			setPuzzling(true);
-			setScreen("game");
+			goSpender("game");
 		} catch { setToast("Couldn't reach the server"); }
 	};
 
@@ -2089,11 +2022,18 @@ export default function SpenderApp() {
 		showPuzzleAt(puzzle, puzHeroPid, 0);
 	};
 
-	const exitPuzzle = () => {
+	// State-only puzzle teardown — shared by exitPuzzle (user action, pushes the URL) and
+	// the popstate handler (Back/Forward, which must NEVER write the URL).
+	const resetPuzzleState = () => {
 		setPuzzling(false); setPuzzle(null); setPuzSolved(false); setPuzWrong(false); setPuzFailed(false);
 		setPuzFeedback(""); setRoomData(null); setRoomId("");
 		setPuzHintOpen(false); setPuzAnswerOpen(false);
 		setSelectedGems([]); setSelectedCard(null); setReserveArmed(false);
+	};
+
+	const exitPuzzle = () => {
+		resetPuzzleState();
+		pushPath(buildPath("home"));
 		setScreen("home");
 	};
 
@@ -2112,9 +2052,218 @@ export default function SpenderApp() {
 		startPuzzle(id);
 	};
 
-	const goToMenu = () => {
+	// ── Offline vs-AI mode ─────────────────────────────────────────────────
+	// The game screen renders a synthesized roomData (the puzzle-mode pattern) whose game
+	// dict comes from the LOCAL wasm engine via offline.js; there is no socket at all.
+	// The AI plays through the exact same worker-pool dispatch as online — the synthesized
+	// roomData carries ai_search when it's the AI's turn — with the resulting move routed
+	// into the driver instead of a WS send.
+
+	// Rebuild + publish the synthesized roomData for a record. The state swap drives the
+	// same diff-based animations a server broadcast would.
+	const publishOfflineRoom = async (rec) => {
+		const rd = await offlineRoomData(rec, myId, authUser?.name);
+		setOfflineRecord(rec);
+		setRoomData(rd);
+	};
+
+	const enterOfflineGame = async (rec) => {
+		disconnect();                              // an offline game must never share the screen with a live socket
+		setReviewing(false); setReplaySnapshots(null); setReplayTurn(null);
+		setResultReady(rec.status === "over");     // re-opening a finished save shows the result immediately
+		// reset the animation baselines so the resumed board doesn't spuriously animate
+		prevBankRef.current = null; prevPlayersRef.current = null; prevBoardRef.current = null; prevMovesLenRef.current = 0;
+		setSelectedGems([]); setSelectedCard(null); setReserveArmed(false);
+		aiDispatchPlyRef.current = -1;             // ply counters are per-game; a stale one would eat the first dispatch
+		setRoomId(rec.id);
+		setOffline(true);
+		offlineRef.current = true;                 // the render below may need it before the commit
+		await publishOfflineRoom(rec);
+		goSpender("game");
+	};
+
+	// Enter a saved game by record, routed by which game owns it: Spender plays on this
+	// file's game screen; a CoC/Duel record mounts that game's component instead.
+	const enterOfflineRecord = (rec) => {
+		if (rec.game === "coc" || rec.game === "duel" || rec.game === "dissonance") {
+			disconnect();                    // never share the screen with a live socket
+			setOfflinePlay(rec);
+			offlinePlayRef.current = rec;
+			return Promise.resolve();
+		}
+		return enterOfflineGame(rec);
+	};
+
+	// Enter the hub (list screen). A deep-linked save id resumes that game once loaded;
+	// a dead id just leaves you on the hub (replace the URL so reload doesn't re-try it).
+	const enterOfflineHub = (rid) => {
+		setScreen("offline");
+		setOfflinePlay(null);
+		offlinePlayRef.current = null;
+		setOfflineGames(null);
+		listOfflineGames().then((list) => setOfflineGames(list));
+		if (rid) {
+			loadOfflineGame(rid).then((rec) => {
+				if (rec) enterOfflineRecord(rec);
+				else replacePath(buildPath("offline"));
+			});
+		}
+	};
+
+	const createAndEnterOffline = async () => {
+		try {
+			if (offlineGameSel === "coc") {
+				const rec = await createOfflineCocGame({
+					myBoard: offlineCocMyBoard, oppBoard: offlineCocOppBoard, tier: offlineCocTier,
+				});
+				pushPath(buildPath("offline", rec.id));
+				await enterOfflineRecord(rec);
+				return;
+			}
+			if (offlineGameSel === "duel") {
+				const rec = await createOfflineDuelGame({ tier: offlineDuelTier });
+				pushPath(buildPath("offline", rec.id));
+				await enterOfflineRecord(rec);
+				return;
+			}
+			if (offlineGameSel === "dissonance") {
+				const rec = await createOfflineDissonanceGame({ tier: "hard", myId });
+				pushPath(buildPath("offline", rec.id));
+				await enterOfflineRecord(rec);
+				return;
+			}
+			const rec = await createOfflineGame({ aiVariant: offlineVariant, winPoints: offlineWin });
+			pushPath(buildPath("offline", rec.id));
+			await enterOfflineGame(rec);
+		} catch (e) {
+			setToast(String(e?.message || "Couldn't start an offline game"));
+		}
+	};
+
+	// Exit a CoC/Duel offline game back to the hub (the component's onExit).
+	const exitOfflinePlayToHub = () => {
+		setOfflinePlay(null);
+		offlinePlayRef.current = null;
+		pushPath(buildPath("offline"));
+		enterOfflineHub(null);
+	};
+
+	// Human move sink (the sendMove fork). Illegal is user-visible; the engine failing to
+	// load (cold cache, never downloaded) surfaces as its own message.
+	const submitOfflineMove = async (move) => {
+		const rec = offlineRecordRef.current;
+		if (!rec) return;
+		try {
+			const res = await applyOfflineMove(rec, move, myId, { isAi: false });
+			if (!res.ok) { setToast(res.err); return; }
+			await publishOfflineRoom(res.rec);
+		} catch (e) {
+			setToast(String(e?.message || "Move failed"));
+		}
+	};
+
+	// AI move sink (the worker-pool dispatch fork). A stale/illegal submission is dropped
+	// silently — same policy as the server's ai_move handler (races are normal, not errors).
+	const submitOfflineAiMove = async (move) => {
+		const rec = offlineRecordRef.current;
+		if (!rec) return;
+		try {
+			const res = await applyOfflineMove(rec, move, myId, { isAi: true });
+			if (res.ok) await publishOfflineRoom(res.rec);
+			else console.debug("[offline-AI] dropped:", res.err);
+		} catch (e) {
+			console.debug("[offline-AI] apply failed:", e);
+		}
+	};
+	submitOfflineAiMoveRef.current = submitOfflineAiMove;
+
+	// State-only teardown — shared by user exits (which also write the URL) and the
+	// popstate handler (which must never write it).
+	const resetOfflineState = () => {
+		setOffline(false);
+		offlineRef.current = false;
+		setOfflineRecord(null);
+		setRoomData(null); setRoomId("");
+		setReviewing(false); setReplaySnapshots(null); setReplayTurn(null);
+		setSelectedGems([]); setSelectedCard(null); setReserveArmed(false);
+		setConfirmAbandon(false);
+	};
+
+	const exitOfflineToHub = () => {
+		resetOfflineState();
+		pushPath(buildPath("offline"));
+		enterOfflineHub(null);
+	};
+
+	const handleDeleteOffline = async (id) => {
+		await deleteOfflineGame(id);
+		setOfflineGames(await listOfflineGames());
+	};
+
+	// ── Offline asset precache (the "Download for offline" button) ─────────
+	// Everything else on the page is cached opportunistically by sw.js, but the wasm is
+	// only ever fetched lazily during a live vs-AI game — a cold install has no engine.
+	// This asks the service worker to precache it deliberately (cache:"reload", bypassing
+	// the ~10-min Pages TTL) and streams progress back over a MessageChannel. PER GAME —
+	// nobody pays for engines they don't play (CoC's fetched model bins are ~4x the other
+	// two games combined; Spender + Duel embed their nets in the wasm). Each list carries
+	// the fonts too (tiny, and any single download must make that game FULLY offline).
+	// `warm` covers the localStorage caches the SW can't serve: CoC's board layouts (its
+	// game screen hard-gates on them) and Duel's card catalog. Sizes are the real gzip'd
+	// transfer, rounded up.
+	const OFFLINE_ASSETS = {
+		spender: {
+			label: "Spender", size: "~1 MB",
+			urls: ["wasm/spender-worker.js", "wasm/spender_core.js", "wasm/spender_core_bg.wasm"],
+		},
+		coc: {
+			label: "Castles of Crimson", size: "~5 MB",
+			urls: ["wasm/coc-worker.js", "wasm/coc_core.js", "wasm/coc_core_bg.wasm",
+				"wasm/coc_pv_model.bin", "wasm/coc_pv_model_hard.bin"],
+			warm: () => fetch(`${HTTP_BASE}/coc/boards`).then((r) => r.json())
+				.then((data) => { try { localStorage.setItem("coc_boards_v1", JSON.stringify(data)); } catch {} }),
+		},
+		dissonance: {
+			label: "Dissonance", size: "~350 KB",
+			// The SMALLEST of the four, and the only one whose wasm is both the
+			// AI and the referee: `classic.rs` runs the room offline, so there is
+			// no engine to download beside the search.
+			urls: ["wasm/dissonance-worker.js", "wasm/dissonance.js", "wasm/dissonance_bg.wasm"],
+			warm: () => fetch(`${HTTP_BASE}/dissonance/catalog`).then((r) => r.json())
+				.then((d) => { try { localStorage.setItem("dis_catalog", JSON.stringify(d)); } catch {} }),
+		},
+		duel: {
+			label: "Spender Duel", size: "~1 MB",
+			urls: ["wasm/duel-worker.js", "wasm/duel_core.js", "wasm/duel_core_bg.wasm"],
+			// Same key + shape SpenderDuel.jsx's own catalog cache uses (the full /catalog body).
+			warm: () => fetch(`${HTTP_BASE}/duel/catalog`).then((r) => r.json())
+				.then((d) => { try { if (d.ok) localStorage.setItem("duel_catalog", JSON.stringify(d)); } catch {} }),
+		},
+	};
+	const FONT_URLS = ["fonts/cinzel.latin.woff2", "fonts/crimsonpro.latin.woff2", "fonts/crimsonpro-italic.latin.woff2"];
+	const startPrecache = (gameKey) => {
+		const spec = OFFLINE_ASSETS[gameKey];
+		if (!spec) return;
+		const setGame = (v) => setPrecacheState((s) => ({ ...s, [gameKey]: v }));
+		const urls = [...spec.urls, ...FONT_URLS].map((p) => `${import.meta.env.BASE_URL}${p}`);
+		spec.warm?.().catch(() => {});
+		const ctrl = navigator.serviceWorker?.controller;
+		if (!ctrl) { setGame("err"); return; }
+		const ch = new MessageChannel();
+		ch.port1.onmessage = (e) => {
+			const d = e.data || {};
+			if (d.ok) setGame("ok");
+			else if (d.error) setGame("err");
+			else if (d.total) setGame({ done: d.done, total: d.total });
+		};
+		setGame({ done: 0, total: urls.length });
+		ctrl.postMessage({ type: "PRECACHE_OFFLINE", urls }, [ch.port2]);
+	};
+
+	// State-only exit from a Spender room/review — shared by goToMenu (user action) and
+	// the popstate handler (which must never write the URL itself).
+	const leaveSpenderRoomState = () => {
 		disconnect();
-		setScreen("browser");
 		setRoomData(null);
 		setSelectedGems([]);
 		setSelectedCard(null);
@@ -2122,23 +2271,188 @@ export default function SpenderApp() {
 		setReviewing(false);
 		setReplaySnapshots(null);
 		setReplayTurn(null);
+	};
+
+	const goToMenu = () => {
+		leaveSpenderRoomState();
+		pushPath(buildPath("spender"));   // leave the room URL (dedup no-op when popstate-driven)
+		goSpender("browser");
 		fetchGames(authUser);
 	};
 
+	// ── URL routing helpers (see shared/router.js for the contract) ─────────
+	// nav(): user-initiated navigation — write the URL FIRST, then the screen, so a mode
+	// component always mounts with its URL already correct (sub-games read it at mount).
+	const nav = (screenName) => {
+		pushPath(buildPath(MODE_FOR_SCREEN[screenName] || "home"));
+		setScreen(screenName);
+	};
+
+	// enterRoute(): state-only navigation to a parsed route — used by boot, the post-auth
+	// consume, and popstate. NEVER pushes (the URL is already what it should be); only an
+	// unknown path is normalized (replace, not push).
+	const enterRoute = (route) => {
+		const g = route?.game;
+		if (!g || g === "home") {
+			if (!g) replacePath(buildPath("home"));   // unknown path → "/"
+			setScreen("home");
+			return;
+		}
+		if (g === "puzzles") { enterPuzzles(); return; }   // needs the fetch+pick, not just the screen
+		if (g === "offline") { enterOfflineHub(route.room); return; }   // needs the saved-game list (+ a deep-linked resume)
+		if (g === "spender") {
+			goSpender("browser");
+			if (route.room) setDeepRoom(route.room);   // deep entry once the lobby is up
+			return;
+		}
+		setScreen(SCREEN_FOR_MODE[g]);   // coc/werewolf/duel/books mount and read their own segment 2
+	};
+
+	// landAt(): boot injection — resolveDest still decides auth-vs-in, the initial URL
+	// decides WHERE. A deep link seen while logged out is stashed across the auth screen
+	// (URL left untouched so it survives in the address bar) and consumed after login/guest.
+	const landAt = (dest) => {
+		if (dest === "auth") {
+			const r = initialRouteRef.current;
+			pendingRouteRef.current = r && r.game && r.game !== "home" ? r : null;
+			setScreen("auth");
+			return;
+		}
+		enterRoute(initialRouteRef.current || { game: "home", room: null });
+	};
+
+	const consumePendingRoute = () => {
+		const route = pendingRouteRef.current;
+		pendingRouteRef.current = null;
+		if (route) { enterRoute(route); return; }
+		replacePath(buildPath("home"));
+		setScreen("home");
+	};
+
+	// applyPopRoute(): Back/Forward while on a real screen. Mode-level plus Spender's own
+	// segment 2 — a same-mode pop in a SUB-game belongs to its own subscription. Mirrored
+	// into applyPopRouteRef every render so the mount-once popstate effect never runs a
+	// stale closure.
+	const applyPopRoute = (route) => {
+		const s = screenRef.current;
+		// "in a Spender ROOM" means waiting/game — the lobby (browser) is not a room.
+		const inRoomScreen = s === "spender"
+			&& (spenderScreenRef.current === "waiting" || spenderScreenRef.current === "game");
+		const inSpenderRoom = inRoomScreen && !puzzlingRef.current && !offlineRef.current;
+		// A puzzle or an offline game runs on Spender's game screen but is its own site-level mode.
+		const curMode = inRoomScreen
+			? (puzzlingRef.current ? "puzzles" : offlineRef.current ? "offline" : "spender")
+			: (MODE_FOR_SCREEN[s] || "home");
+		const target = route.game === null ? "home" : route.game;
+		if (target === curMode) {
+			if (target === "offline") {
+				// Offline owns its own segment 2 (the local save id): Back out of a game →
+				// the hub; Forward (or cross-save) into a game → resume it. State-only.
+				// Covers BOTH offline surfaces: Spender (offlineRef, this file's game
+				// screen) and CoC (offlinePlayRef, the mounted component).
+				const rid = route.room;
+				const inGame = offlineRef.current || !!offlinePlayRef.current;
+				const curRid = offlinePlayRef.current ? offlinePlayRef.current.id : roomIdRef.current;
+				if (!rid && inGame) { resetOfflineState(); enterOfflineHub(null); }
+				else if (rid && (!inGame || rid !== curRid)) {
+					resetOfflineState(); enterOfflineHub(rid);
+				}
+				return;
+			}
+			if (target === "spender") {
+				// Spender owns its own segment 2 (rooms live in the shell, unlike sub-games).
+				const rid = route.room;
+				if (rid && (!inSpenderRoom || rid !== roomIdRef.current)) {
+					// Forward into a room (or across rooms): via the lobby + the deep-entry effect.
+					if (inSpenderRoom) leaveSpenderRoomState();
+					goSpender("browser");
+					setDeepRoom(rid);
+				} else if (!rid && (inSpenderRoom || urlAttemptRef.current)) {
+					// Back out of the room → lobby — INCLUDING out of a still-connecting URL
+					// attempt (popping during the join's round trip would otherwise let the
+					// late "joined" push the room URL back). goToMenu disconnects; its push
+					// dedups (URL already /spender).
+					urlAttemptRef.current = null;
+					goToMenu();
+				}
+			}
+			return;   // a sub-game's segment-2 change is handled by its own subscription
+		}
+		// Leaving the current mode: state-only cleanup, then land on the target.
+		if (puzzlingRef.current) resetPuzzleState();
+		else if (offlineRef.current) resetOfflineState();
+		else if (inRoomScreen) leaveSpenderRoomState();
+		if (offlinePlayRef.current) { setOfflinePlay(null); offlinePlayRef.current = null; }
+		enterRoute(route);
+	};
+	applyPopRouteRef.current = applyPopRoute;
+
+	// Deep entry into a Spender room from the URL: once the lobby screen is up, run the
+	// EXISTING resume semantics (saved token → reconnect, else join — exactly the
+	// invite-link behavior). handleContinue's pendingActionRef suppresses the onOpen
+	// auto-reconnect fallback, so a deep link into room B can't cross-wire with a saved
+	// pointer at room A. Runs post-commit, so myId/playerName are settled after auth.
+	useEffect(() => {
+		if (!deepRoom || screen !== "spender" || spenderScreen !== "browser") return;
+		urlAttemptRef.current = { rid: deepRoom, retried: false };
+		handleContinue(deepRoom);
+		setDeepRoom(null);
+	}, [deepRoom, screen]); // eslint-disable-line react-hooks/exhaustive-deps
+
 	const handleAbandon = () => {
+		if (offline) {
+			// No server to record a forfeit against — abandoning a local game just deletes
+			// the save and returns to the hub.
+			const id = offlineRecordRef.current?.id;
+			if (id) deleteOfflineGame(id);
+			exitOfflineToHub();
+			return;
+		}
 		send({ action: "abandon" });
 		setConfirmAbandon(false);
 	};
+
+	// Rules modal — defined once and rendered in BOTH the lobby and the in-game screen
+	// (reached from the options menu), so "How to Play" is available anywhere. Chrome +
+	// scrolling come from the shared kit; the words live in ./rules.jsx.
+	const rulesModalEl = showRules && (
+		<RulesModal title="How to play — Spender" onClose={() => setShowRules(false)}>
+			<SpenderRules />
+		</RulesModal>
+	);
 
 	const handleStart = () => send({ action: "start" });
 
 	const sendMove = (move) => {
 		if (puzzling) { submitPuzzleMove(move); return; }   // puzzle: compare to canonical, don't send
+		if (offline) { submitOfflineMove(move); return; }   // offline: apply through the local engine
 		send({ action: "move", move });
 	};
 
 	const handleTakeGems = () => {
 		if (!myTurn || selectedGems.length === 0) return;
+		// INSTANT ACKNOWLEDGEMENT. The server is authoritative, so the board and our
+		// token counts can only change when its broadcast arrives — measured at ~250ms
+		// median to Render but ranging past 1s, and that VARIANCE is what reads as
+		// jitter far more than the delay itself. Until now a click produced no feedback
+		// at all for that whole window.
+		//
+		// So fly the gems immediately. This changes NO game state — it is purely the
+		// animation, which is why it needs no rollback if the server rejects the move
+		// (it can't, in practice: the UI only enables legal takes). The flight lasts
+		// ~600ms, which happens to cover a typical round trip, so the counts settle
+		// just about as the gems land.
+		//
+		// A puzzle is resolved locally with no socket, so its animation already comes
+		// from the state diff — pre-flying there would double it. Same for offline: the
+		// local apply lands in ~ms, so the diff animation IS the feedback.
+		if (!puzzling && !offline) {
+			const counts = {};
+			for (const c of selectedGems) counts[c] = (counts[c] || 0) + 1;
+			spawnFlyers(Object.entries(counts).map(([color, count]) =>
+				({ pid: myId, color, count, grow: false })), null);
+			preFlownRef.current = Date.now();   // tells the diff effect not to repeat it
+		}
 		sendMove({ type: "take_gems", colors: selectedGems });
 		setSelectedGems([]);
 	};
@@ -2468,6 +2782,13 @@ export default function SpenderApp() {
 					<p className="loading-hint">
 						{loadingProgress >= 0.99 ? "Ready!" : loadingProgress < 0.05 ? "Connecting…" : `${Math.round(loadingProgress * 100)}%`}
 					</p>
+					{/* The polling loop above never gives up, so a user with NO connection needs an
+					    exit that doesn't. Navigating away from "loading" cancels the poll (the
+					    effect's cleanup); the offline hub then works entirely from local storage. */}
+					<button className="btn btn-ghost" style={{ marginTop: 18 }}
+						onClick={() => { pushPath(buildPath("offline")); enterOfflineHub(null); }}>
+						Play offline vs AI →
+					</button>
 				</div>
 			</>
 		);
@@ -2475,117 +2796,77 @@ export default function SpenderApp() {
 
 	// Auth screen
 	if (screen === "auth") return (
-		<>
-			<style>{css}</style>
-			<div className="app auth-screen">
-				<div className="auth-logo">{SITE_NAME}</div>
-				<p className="auth-tagline">A collection of tabletop games</p>
-
-				<div className="auth-card">
-					<div className="auth-tabs">
-						{["login", "register", "guest"].map(tab => (
-							<button key={tab} className={`auth-tab${authTab === tab ? " active" : ""}`}
-								onClick={() => { setAuthTab(tab); setAuthError(""); }}>
-								{tab === "login" ? "Sign In" : tab === "register" ? "Register" : "Guest"}
-							</button>
-						))}
-					</div>
-
-					{authTab !== "guest" ? (
-						<>
-							<input className="auth-field" placeholder="Name" value={authName}
-								onChange={e => setAuthName(e.target.value)} maxLength={authTab === "register" ? 16 : 64}
-								onKeyDown={e => e.key === "Enter" && handleAuth()} />
-							<input className="auth-field" placeholder="Password" type="password" value={authPassword}
-								onChange={e => setAuthPassword(e.target.value)} maxLength={authTab === "register" ? 16 : 128}
-								onKeyDown={e => e.key === "Enter" && handleAuth()} />
-							{authError && <div className="auth-error">{authError}</div>}
-							<button className="btn btn-gold btn-full mt-8" onClick={handleAuth} disabled={authLoading}>
-								{authLoading && <span className="spinner" />}
-								{authTab === "login" ? "Sign In" : "Create Account"}
-							</button>
-						</>
-					) : (
-						<>
-							<p style={{ color: "var(--text-dim)", fontSize: ".88rem", marginBottom: 14, lineHeight: 1.5 }}>
-								Play without an account. Your game history won't be saved.
-							</p>
-							<div className="guest-name-row">
-								<input className="auth-field" placeholder="Display name (optional)"
-									value={guestName} onChange={e => setGuestName(e.target.value)} maxLength={20}
-									onKeyDown={e => e.key === "Enter" && handleGuestPlay()} />
-							</div>
-							<button className="btn btn-outline btn-full mt-8" onClick={handleGuestPlay}>
-								Play as Guest
-							</button>
-						</>
-					)}
-				</div>
-			</div>
-		</>
+		<AuthScreen siteName={SITE_NAME} httpBase={HTTP_BASE} css={css} myId={myId}
+			onAuthenticated={handleAuthenticated} />
 	);
 
 	// Home menu — pick a game (Forrest Games landing)
 	if (screen === "home") return (
-		<>
-			<style>{css}</style>
-			<div className="app">
-				<div className="home">
-					<div className="home-header">
-						<div className="browser-user">
-							{authUser?.guest && <span className="browser-guest-badge">Guest</span>}
-							<span className="browser-username">{authUser?.name}</span>
-							<button className="btn btn-ghost btn-sm" onClick={handleLogout}>
-								{authUser?.guest ? "Exit" : "Logout"}
-							</button>
-						</div>
-					</div>
-
-					<div className="home-hero">
-						<div className="home-logo">{SITE_NAME}</div>
-						<p className="home-tagline">Choose a game</p>
-					</div>
-
-					<div className="home-games">
-						{GAMES.map(gm => (
-							<button key={gm.id} className={`home-game-card ${gm.status}`}
-								onClick={() => setScreen(gm.screen)}>
-								<span className={`home-game-badge ${gm.status}`}>
-									{gm.status === "ready" ? "Play" : "Soon"}
-								</span>
-								<div className="home-game-name">{gm.name}</div>
-								<div className="home-game-desc">{gm.tagline}</div>
-							</button>
-						))}
-					</div>
-
-					<div style={{ textAlign: "center", marginTop: 24, display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-						<button type="button" className="btn btn-ghost" onClick={enterPuzzles}>
-							🧩 Spender Puzzles
-						</button>
-						<button type="button" className="btn btn-ghost" onClick={() => setScreen("books")}>
-							📚 Books
-						</button>
-					</div>
-				</div>
-				{toast && <div className="toast">{toast}</div>}
-			</div>
-		</>
+		<HomeScreen authUser={authUser} css={css} toast={toast}
+			onPickGame={nav}
+			onPuzzles={() => { pushPath(buildPath("puzzles")); enterPuzzles(); }}
+			onBooks={() => nav("books")}
+			onLogout={handleLogout} />
 	);
 
 	// Books — personal ranked reading list (public read, owner edit)
 	if (screen === "books") return (
-		<Books authUser={authUser} onExit={() => setScreen("home")} />
+		<Suspense fallback={<GameChunkLoading />}>
+			<Books authUser={authUser} onExit={() => nav("home")} />
+		</Suspense>
 	);
 
 	// Castles of Crimson — self-contained game component, mounted by the shell.
 	if (screen === "coc") {
-		return <CastlesOfCrimson myId={myId} authUser={authUser} onExit={() => setScreen("home")} />;
+		return (
+			<Suspense fallback={<GameChunkLoading />}>
+				<CastlesOfCrimson myId={myId} authUser={authUser} onExit={() => nav("home")} />
+			</Suspense>
+		);
 	}
 
 	// Where Wolf? — self-contained social-deduction game component.
 	if (screen === "werewolf") {
-		return <WhereWolf myId={myId} authUser={authUser} onExit={() => setScreen("home")} />;
+		return (
+			<Suspense fallback={<GameChunkLoading />}>
+				<WhereWolf myId={myId} authUser={authUser} onExit={() => nav("home")} />
+			</Suspense>
+		);
+	}
+
+	// Spender Duel — self-contained 2-player game component.
+	if (screen === "duel") {
+		return (
+			<Suspense fallback={<GameChunkLoading />}>
+				<SpenderDuel myId={myId} authUser={authUser} onExit={() => nav("home")} />
+			</Suspense>
+		);
+	}
+
+	if (screen === "dontminion") {
+		return (
+			<Suspense fallback={<GameChunkLoading />}>
+				<Dontminion myId={myId} authUser={authUser} onExit={() => nav("home")} />
+			</Suspense>
+		);
+	}
+
+	// Dissonance — self-contained 2-player trick-taking game component.
+	if (screen === "dissonance") {
+		return (
+			<Suspense fallback={<GameChunkLoading />}>
+				<Dissonance myId={myId} authUser={authUser} onExit={() => nav("home")} />
+			</Suspense>
+		);
+	}
+
+	// Rag Tag — self-contained 2-player auto battler.
+	if (screen === "ragtag") {
+		return (
+			<Suspense fallback={<GameChunkLoading />}>
+				<RagTag myId={myId} authUser={authUser} onExit={() => nav("home")} />
+			</Suspense>
+		);
 	}
 
 	// Puzzle picker — pick a scripted endgame puzzle to solve vs S.
@@ -2594,7 +2875,7 @@ export default function SpenderApp() {
 			<style>{css}</style>
 			<div className="app">
 				<div className="puzzle-top">
-					<button className="btn btn-ghost btn-sm" onClick={() => setScreen("home")}>← Back</button>
+					<button className="btn btn-ghost btn-sm" onClick={() => nav("home")}>← Back</button>
 					<span className="puzzle-top-title">Spender Puzzles</span>
 					<span style={{ width: 56 }} />
 				</div>
@@ -2607,101 +2888,292 @@ export default function SpenderApp() {
 		</>
 	);
 
-	// Game browser screen
-	if (screen === "browser") return (
+	// A CoC/Duel offline game in play: mount that game's component with the record. It
+	// renders its own whole screen (CoC's board layout / Duel's card catalog come from
+	// their localStorage caches, warmed by the precache).
+	if (screen === "offline" && offlinePlay) return (
+		<Suspense fallback={<GameChunkLoading />}>
+			{offlinePlay.game === "duel"
+				? <SpenderDuel myId={myId} authUser={authUser} offline={offlinePlay}
+					onExit={exitOfflinePlayToHub} />
+				: offlinePlay.game === "dissonance"
+					? <Dissonance myId={myId} authUser={authUser} offline={offlinePlay}
+						onExit={exitOfflinePlayToHub} />
+					: <CastlesOfCrimson myId={myId} authUser={authUser} offline={offlinePlay}
+						onExit={exitOfflinePlayToHub} />}
+		</Suspense>
+	);
+
+	// Local vs AI hub — start/resume/delete offline games + the offline-asset download.
+	// Reachable with NO backend (the boot gate skips the ping for /offline).
+	if (screen === "offline") return (
 		<>
 			<style>{css}</style>
-			<div className="app">
-				<div className="browser-header">
-					<div className="browser-head-left">
-						<button className="btn btn-ghost btn-sm" onClick={() => setScreen("home")}>
-							← Back
-						</button>
-						<button className="btn btn-ghost btn-sm" onClick={() => setShowRules(true)}>
-							📖 Rules
-						</button>
-					</div>
-					<div className="browser-title">Spender</div>
-					<div className="browser-user">
-						{authUser?.guest && <span className="browser-guest-badge">Guest</span>}
-						<span className="browser-username">{authUser?.name}</span>
-					</div>
-				</div>
-				<div className="browser">
-					<div className="browser-create">
-						<div className="create-controls">
-						<div className="length-toggle" title="Game length (Classic = race to 15, Long = race to 21) — also filters the open games below">
-							{[[15, "Classic 15"], [21, "Long 21"]].map(([wp, label]) => (
-								<button key={wp} type="button" className={`len-btn${winPoints === wp ? " sel" : ""}`}
-									onClick={() => setWinPoints(wp)}>{label}</button>
-							))}
-						</div>
-						<div className="ai-picker-wrap">
-							<button className={`btn btn-gold${showCreateMenu ? " active" : ""}`}
-								title="Create a game — play a friend or one of the AI opponents"
-								onClick={() => setShowCreateMenu(v => !v)}>
-								+ Create Game {showCreateMenu ? "▴" : "▾"}
-							</button>
-							{showCreateMenu && (
-								<div className="ai-picker">
-									<button className="btn btn-gold btn-sm"
-										title="Create a game for 2-4 players — friends join from Open Games (or your room code)"
-										onClick={() => { setShowCreateMenu(false); handleCreate(false, "A", winPoints); }}>
-										vs Friend
-									</button>
-									<span className="ai-picker-label">vs AI</span>
-									{["H2", "H3", "S", "N"].map(v => (
-										<button key={v} className="btn btn-outline btn-sm"
-											onClick={() => { setShowCreateMenu(false); handleCreate(true, v, winPoints); }}>
-											{aiPersona(v)} ({AI_TIERS[v]})
+			<div className="app" style={{ "--lby-accent": "#7fb069" }}>
+				<LobbyHeader
+					onBack={() => nav("home")}
+					title="Local vs AI"
+					user={<>
+						{authUser?.guest && <span className="lby-head-tag">Guest</span>}
+						<span className="lby-head-name">{authUser?.name}</span>
+					</>}
+				/>
+				<div className="browser offline-hub">
+					<div className="offline-panel">
+						<CmRow label="Game">
+							{/* WRAP: four games no longer fit one phone row, and the base
+							    control clips rather than scrolls -- see cm-seg-wrap. */}
+							<CmSeg wrap value={offlineGameSel} onChange={setOfflineGameSel} options={[
+								{ value: "spender", label: "Spender" },
+								{ value: "coc", label: "Castles of Crimson" },
+								{ value: "duel", label: "Spender Duel" },
+								{ value: "dissonance", label: "Dissonance" },
+							]} />
+						</CmRow>
+						{offlineGameSel === "duel" && (
+							<CmRow label="Difficulty">
+								<CmSeg value={offlineDuelTier} onChange={setOfflineDuelTier} options={[
+									{ value: "hard", label: "Hard" }, { value: "expert", label: "Expert" },
+								]} />
+								<span className="cm-hint">The client-WASM tiers — the same nets that play online.</span>
+							</CmRow>
+						)}
+						{offlineGameSel === "spender" && (<>
+							<CmRow label="Opponent">
+								<div className="cm-pills">
+									{["S", "N"].map(v => (
+										<button key={v} type="button" className={`cm-pill${offlineVariant === v ? " sel" : ""}`}
+											onClick={() => setOfflineVariant(v)}>
+											<span className="cm-pill-name">{aiPersona(v)}</span>
+											<span className="cm-pill-sub">{aiTierLabel(v)}</span>
 										</button>
 									))}
 								</div>
-							)}
-						</div>
-						</div>
-						<button className="refresh-btn" title="Refresh" onClick={() => fetchGames(authUser)}>
-							{browserLoading ? <span className="spinner" /> : "↻"}
+								<span className="cm-hint">These are the strongest opponents — the same AI that runs in your browser online.</span>
+							</CmRow>
+							<CmRow label="Length">
+								<CmSeg value={offlineWin} onChange={setOfflineWin} options={[
+									{ value: 15, label: "Classic 15" }, { value: 21, label: "Long 21" },
+								]} />
+							</CmRow>
+						</>)}
+						{offlineGameSel === "coc" && (<>
+							<CmRow label="Difficulty">
+								<CmSeg value={offlineCocTier} onChange={setOfflineCocTier} options={[
+									{ value: "hard", label: "Hard" }, { value: "expert", label: "Expert" },
+								]} />
+								<span className="cm-hint">The client-WASM tiers — the same nets that play online.</span>
+							</CmRow>
+							<CmRow label="Your Board">
+								<select className="input offline-select" value={offlineCocMyBoard}
+									onChange={(e) => setOfflineCocMyBoard(e.target.value)}>
+									{Object.entries(COC_BOARD_NAMES).map(([id, nm]) =>
+										<option key={id} value={id}>{id} — {nm}</option>)}
+								</select>
+							</CmRow>
+							<CmRow label="Bot's Board">
+								<select className="input offline-select" value={offlineCocOppBoard}
+									onChange={(e) => setOfflineCocOppBoard(e.target.value)}>
+									{Object.entries(COC_BOARD_NAMES).map(([id, nm]) =>
+										<option key={id} value={id}>{id} — {nm}</option>)}
+								</select>
+							</CmRow>
+						</>)}
+						{offlineGameSel === "dissonance" && (
+							<CmRow label="Difficulty">
+								<span className="cm-hint">
+									Hard — the exact solver, in this browser. Classic rounds to 200.
+								</span>
+							</CmRow>
+						)}
+						{/* duel: the Difficulty row above is its whole config (always 2p, one board) */}
+						<button type="button" className="cm-create" style={{ marginTop: 10 }}
+							onClick={createAndEnterOffline}>
+							Start Game
 						</button>
 					</div>
 
-					{/* Mobile-only tab bar: pick one section to show in the single-column layout. */}
-					<div className="lobby-tabs" role="tablist">
-						{[
-							["open", "Open", openGames.filter(g => (g.win_points || 15) === winPoints).length],
-							["active", "Active", activeGames.filter(g => (g.win_points || 15) === winPoints).length],
-							["history", "History", historyGames.filter(g => (g.win_points || 15) === winPoints).length],
-						].map(([key, label, count]) => (
-							<button key={key} type="button" role="tab" aria-selected={lobbyTab === key}
-								className={`lobby-tab${lobbyTab === key ? " sel" : ""}`}
-								onClick={() => setLobbyTab(key)}>
-								{label}{count > 0 ? <span className="lobby-tab-count">{count}</span> : null}
-							</button>
+					<div className="offline-panel">
+						<h3 className="offline-h">Saved games</h3>
+						{offlineGames == null && <div className="puzzle-empty">Loading…</div>}
+						{offlineGames != null && offlineGames.length === 0 &&
+							<div className="puzzle-empty">No local games yet — start one above.</div>}
+						{(offlineGames || []).map(g => (
+							<div key={g.id} className="offline-save-row">
+								<div className="offline-save-info">
+									{g.game === "coc"
+										? <><b>Castles</b> · {g.tier === "hard" ? "Hard" : "Expert"}</>
+										: g.game === "duel"
+											? <><b>Duel</b> · {g.tier === "hard" ? "Hard" : "Expert"}</>
+											: <><b>Spender · {aiPersona(g.aiVariant)}</b> · {g.winPoints === 21 ? "Long 21" : "Classic 15"}</>}
+									{" · "}{g.status === "over" ? "finished" : "in progress"}
+									<span className="offline-save-time"> · {timeAgo(Math.floor((g.updated || 0) / 1000))}</span>
+								</div>
+								<div className="offline-save-btns">
+									<button className="btn btn-gold btn-sm"
+										onClick={() => { pushPath(buildPath("offline", g.id)); enterOfflineRecord(g); }}>
+										{g.status === "over" ? "View" : "Continue"}
+									</button>
+									<button className="btn btn-ghost btn-sm" onClick={() => handleDeleteOffline(g.id)}>✕</button>
+								</div>
+							</div>
 						))}
 					</div>
 
-					<div className={`lobby-grid tab-${lobbyTab}`}>
-					<div className="browser-section open-section">
-						<div className="section-hd">
-							<span className="section-title">Open Games</span>
-							<span className="small-muted">{winPoints === 21 ? "Long (21)" : "Classic (15)"} - waiting for players (2-4)</span>
+					<div className="offline-panel">
+						<h3 className="offline-h">Play with no connection</h3>
+						<p className="offline-note">
+							Download a game's AI engine so it works fully offline — even in airplane mode.
+							Install the site to your home screen first for the best experience.
+						</p>
+						{Object.entries(OFFLINE_ASSETS).map(([key, spec]) => {
+							const st = precacheState[key];
+							return (
+								<div key={key} className="offline-save-row">
+									<div className="offline-save-info"><b>{spec.label}</b> · {spec.size}</div>
+									<div className="offline-save-btns">
+										{st === "ok" && <span className="offline-note ok">✓ Ready offline</span>}
+										{st && typeof st === "object" &&
+											<span className="offline-note">Downloading… {st.done}/{st.total}</span>}
+										{st === "err" &&
+											<span className="offline-note err">Unavailable here — open the live site once, then retry. </span>}
+										{(st == null || st === "err") &&
+											<button className="btn btn-outline btn-sm" onClick={() => startPrecache(key)}>Download</button>}
+									</div>
+								</div>
+							);
+						})}
+					</div>
+
+					{/* KEEPING SCORE AT A REAL TABLE — the one thing here that needs no
+					    engine at all. The card is localStorage plus `pricing.js`, the
+					    same mirror of `engine._terms_for` the board prices with, so it
+					    works with no connection and no download. It sits in the hub
+					    because the hub is the only screen you can REACH with no
+					    connection: the Dissonance lobby is behind the backend ping. */}
+					<div className="offline-panel">
+						<h3 className="offline-h">Playing with real cards?</h3>
+						<p className="offline-note">
+							Keep a Dissonance scorecard here — it works with no connection and
+							nothing to download, and it scores each round the way the game does.
+						</p>
+						<div className="offline-save-row">
+							<div className="offline-save-info"><b>Paper scorecard</b> · classic</div>
+							<div className="offline-save-btns">
+								<button className="btn btn-outline btn-sm"
+									onClick={() => setOfflineCard(true)}>Open</button>
+							</div>
 						</div>
+					</div>
+				</div>
+				{offlineCard && <DissonanceScorecard onClose={() => setOfflineCard(false)} />}
+				{toast && <div className="toast">{toast}</div>}
+			</div>
+		</>
+	);
+
+	// Game browser screen
+	// connecting to a room while still on the lobby → spinner, not a lobby flash (CoC)
+	if (screen === "spender" && spenderScreen === "browser" && connecting) return (
+		<>
+			<style>{css}</style>
+			<div className="app" style={{ "--lby-accent": "#d4a84c" }}>
+				<LobbyLoading label="Connecting…" />
+			</div>
+		</>
+	);
+	if (screen === "spender" && spenderScreen === "browser") return (
+		<>
+			<style>{css}</style>
+			<div className="app" style={{ "--lby-accent": "#d4a84c" }}>
+				<LobbyHeader
+					onBack={() => nav("home")}
+					title="Spender"
+					user={<>
+						{authUser?.guest && <span className="lby-head-tag">Guest</span>}
+						<span className="lby-head-name">{authUser?.name}</span>
+					</>}
+				/>
+				<div className="browser">
+						<LobbyCreateRow
+							onCreate={() => setShowCreateModal(true)}
+							onJoin={(code) => handleJoinGame(code)}
+							onRefresh={() => fetchGames(authUser)}
+							onRules={() => setShowRules(true)}
+							refreshing={browserLoading} />
+
+					{showCreateModal && (
+						<CreateModal title="New Game" onClose={() => setShowCreateModal(false)}>
+							<CmRow label="Opponent">
+								<CmSeg value={createOpp} onChange={setCreateOpp} options={[
+									{ value: "friend", label: "VS Friend", title: "An open game friends join from Open Games (or your room code)" },
+									{ value: "ai", label: "VS AI", title: "Starts instantly against one of the AI opponents" },
+								]} />
+							</CmRow>
+							{createOpp === "ai" ? (
+								<CmRow label="AI Difficulty">
+									<div className="cm-pills">
+										{AI_VARIANTS.map(v => (
+											<button key={v} type="button" className={`cm-pill${createVariant === v ? " sel" : ""}`}
+												onClick={() => setCreateVariant(v)}>
+												<span className="cm-pill-name">{aiPersona(v)}</span>
+												<span className="cm-pill-sub">{aiTierLabel(v)}</span>
+											</button>
+										))}
+									</div>
+								</CmRow>
+							) : (
+								<CmRow label="Players">
+									<CmSeg value={createSeats} onChange={setCreateSeats}
+										options={[2, 3, 4].map(n => ({ value: n, label: String(n) }))} />
+									<span className="cm-hint">Friends join from Open Games — or send your room code.</span>
+								</CmRow>
+							)}
+							<CmRow label="Length">
+								<CmSeg value={winPoints} onChange={setWinPoints} options={[
+									{ value: 15, label: "Classic 15" }, { value: 21, label: "Long 21" },
+								]} />
+							</CmRow>
+							<div className="cm-footer">
+								<span className="cm-summary">
+									Creating: <b>{createOpp === "ai"
+										? `${aiPersona(createVariant)} (${aiTierLabel(createVariant)})`
+										: `vs Friend · up to ${createSeats} players`}</b> · <b>{winPoints === 21 ? "Long 21" : "Classic 15"}</b>
+								</span>
+								<button type="button" className="cm-create"
+									onClick={() => { setShowCreateModal(false); handleCreate(createOpp === "ai", createVariant, winPoints, createSeats); }}>
+									Create Game
+								</button>
+							</div>
+						</CreateModal>
+					)}
+
+					{/* Mobile-only tab bar: pick one section to show in the single-column layout. */}
+					<LobbyTabs value={lobbyTab} onChange={setLobbyTab} tabs={[
+						{ key: "open", label: "Open", count: openGames.length || null },
+						{ key: "active", label: "Active", count: activeGames.length || null },
+						{ key: "history", label: "History", count: historyGames.length || null },
+					]} />
+
+					<div className={`lobby-grid lby-cols tab-${lobbyTab}`}>
+					<div className="browser-section lby-col-open">
+						<LobbySectionHd title="Open Games" note="waiting for players (2-4)" />
 						{browserLoading && openGames.length === 0 ? (
-							<div className="empty-state"><span className="spinner" />Loading…</div>
-						) : openGames.filter(g => (g.win_points || 15) === winPoints).length === 0 ? (
-							<div className="empty-state">No open {winPoints === 21 ? "Long (21)" : "Classic (15)"} games right now. Create one!</div>
+							<div className="lby-empty"><span className="lby-spinner lby-spinner-sm" />Loading…</div>
+						) : openGames.length === 0 ? (
+							<div className="lby-empty">No open games right now. Create one!</div>
 						) : (
-							<div className="game-cards">
-								{openGames.filter(g => (g.win_points || 15) === winPoints).map(g => (
-									<div key={g.id} className="game-card">
-										<div className="game-card-info">
-											<div className="game-card-title">
+							<div className="lby-list">
+								{openGames.map(g => (
+									<div key={g.id} className="lby-card">
+										<div className="lby-card-info">
+											<div className="lby-card-title">
 												{g.host_id === myId ? "Your game" : `${g.host_name}'s game`}
 												<span className="lobby-size">{g.player_count || 1}/{g.max_players || 4}</span>
 											</div>
-											<div className="game-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
+											<div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
 										</div>
-										<div className="game-card-actions">
+										<div className="lby-card-actions">
 											{g.host_id === myId
 												? <>
 													<button className="btn btn-outline btn-sm" onClick={() => handleContinue(g.id)}>
@@ -2720,18 +3192,15 @@ export default function SpenderApp() {
 							</div>
 						)}
 					</div>
-					<div className="browser-section history-section">
-						<div className="section-hd">
-							<span className="section-title">History</span>
-							<span className="small-muted">your recent games</span>
-						</div>
+					<div className="browser-section lby-col-history">
+						<LobbySectionHd title="History" note="your recent games" />
 						{(!authUser || authUser.guest) ? (
-							<div className="empty-state">Log in to see your game history.</div>
-						) : historyGames.filter(g => (g.win_points || 15) === winPoints).length === 0 ? (
-							<div className="empty-state">No finished {winPoints === 21 ? "Long (21)" : "Classic (15)"} games yet.</div>
+							<div className="lby-empty">Log in to see your game history.</div>
+						) : historyGames.length === 0 ? (
+							<div className="lby-empty">No finished games yet.</div>
 						) : (
-							<div className="game-cards">
-								{historyGames.filter(g => (g.win_points || 15) === winPoints).map(g => {
+							<div className="lby-list">
+								{historyShown.map(g => {
 									// History is always YOUR games, so drop the repeated "you" —
 									// just show Won/Lost vs the opponent(s) and the score (yours-theirs).
 									const me = g.players.find(p => p.is_you);
@@ -2740,20 +3209,21 @@ export default function SpenderApp() {
 									const myScore = me ? me.score : 0;
 									const oppScore = opps.length ? Math.max(...opps.map(o => o.score)) : 0;
 									return (
-									<div key={g.id} className="game-card history-card">
-										<div className="game-card-info">
-											<div className="game-card-title">
+									<div key={g.id} className="lby-card lby-card-hist">
+										<div className="lby-card-info">
+											<div className="lby-card-title">
 												<span className={`hist-result ${g.you_won ? "won" : "lost"}`}>{g.you_won ? "Won" : "Lost"}</span>
 												<span className="hist-scores">vs {oppNames} <span className="hist-score-num">{myScore}-{oppScore}</span></span>
 											</div>
-											<div className="game-card-meta">{timeAgo(g.finished_at)}{g.win_points === 21 ? " · Long (21)" : ""}</div>
+											<div className="lby-card-meta">{timeAgo(g.finished_at)}{g.win_points === 21 ? " · Long (21)" : ""}</div>
 										</div>
-										<div className="game-card-actions">
-											<button className="btn btn-outline btn-sm" onClick={() => enterReview(g.id)}>Review</button>
+										<div className="lby-card-actions">
+											<LobbyAction kind="secondary" onClick={() => enterReview(g.id)}>Review</LobbyAction>
 										</div>
 									</div>
 									);
 								})}
+								{historyMore}
 							</div>
 						)}
 					</div>
@@ -2762,20 +3232,17 @@ export default function SpenderApp() {
 						// All in-progress games (yours + others'). Yours pinned to the top;
 						// each sub-list is already updated_at-desc from the backend.
 						const hasMe = g => [g.player1_id, g.player2_id, g.player3_id, g.player4_id].includes(myId);
-						const lenGames = activeGames.filter(g => (g.win_points || 15) === winPoints);
+						const lenGames = activeGames;
 						const mine = lenGames.filter(hasMe);
 						const others = lenGames.filter(g => !hasMe(g));
 						const ordered = [...mine, ...others];
 						return (
-							<div className="browser-section active-section">
-								<div className="section-hd">
-									<span className="section-title">Active Games</span>
-									<span className="small-muted">{ordered.length} in progress</span>
-								</div>
+							<div className="browser-section lby-col-active">
+								<LobbySectionHd title="Active Games" note={`${ordered.length} in progress`} />
 								{ordered.length === 0 ? (
-									<div className="empty-state">No games in progress.</div>
+									<div className="lby-empty">No games in progress.</div>
 								) : (
-								<div className="game-cards">
+								<div className="lby-list">
 									{ordered.map(g => {
 										// 2-4 seats; show the full matchup, marking your own seat.
 										const seats = [
@@ -2785,25 +3252,25 @@ export default function SpenderApp() {
 										const isMine = seats.some(([id]) => id === myId);
 										const turnName = (seats.find(([id]) => id === g.turn) || [])[1] || null;
 										return (
-											<div key={g.id} className="game-card">
-												<div className="game-card-info">
-													<div className="game-card-title matchup">
+											<div key={g.id} className="lby-card">
+												<div className="lby-card-info">
+													<div className="lby-card-title matchup">
 														{seats.map(([id, nm], i) => (
 															<div key={id || i}>{i > 0 ? "vs " : ""}{displayName(nm)}{id === myId ? " (you)" : ""}</div>
 														))}
 													</div>
-													<div className="game-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
+													<div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
 												</div>
-												<div className="game-card-actions">
+												<div className="lby-card-actions">
 													{isMine ? (
 														<>
 															{g.turn === myId
-																? <span className="your-turn-badge">Your Turn</span>
-																: <span className="playing-badge">Their Turn</span>}
-															<button className="btn btn-outline btn-sm" onClick={() => handleContinue(g.id)}>Resume</button>
+																? <TurnBadge mine>Your Turn</TurnBadge>
+																: <TurnBadge>Their Turn</TurnBadge>}
+															<LobbyAction onClick={() => handleContinue(g.id)}>Resume</LobbyAction>
 														</>
 													) : (
-														<span className="playing-badge">{turnName ? `${displayName(turnName)}'s turn` : "In progress"}</span>
+														<TurnBadge>{turnName ? `${displayName(turnName)}'s turn` : "In progress"}</TurnBadge>
 													)}
 												</div>
 											</div>
@@ -2816,45 +3283,14 @@ export default function SpenderApp() {
 					})()}
 					</div>
 				</div>
-				{showRules && (
-					<div className="modal-backdrop" onClick={() => setShowRules(false)}>
-						<div className="modal rules-modal" onClick={e => e.stopPropagation()}>
-							<h3 style={{ marginTop: 0 }}>📖 How to Play — Spender</h3>
-							<div className="rules-body">
-								<p className="rules-lead">Build an engine of gem-producing cards to earn <b>prestige points</b>. The first player to reach the target — <b>15</b> in Classic, <b>21</b> in Long — triggers the final round; then the most prestige wins (fewest cards breaks a tie).</p>
-								<h4>On your turn, do exactly one</h4>
-								<ul>
-									<li><b>Take 3 gems</b> of three different colors.</li>
-									<li><b>Take 2 gems</b> of one color — only if at least 4 of that color remain.</li>
-									<li><b>Buy a card</b> from the board or your reserve by paying its gem cost.</li>
-									<li><b>Reserve a card</b> into your hand (max 3) and take 1 gold. Gold is a wild that stands in for any color.</li>
-								</ul>
-								<h4>Cards &amp; bonuses</h4>
-								<ul>
-									<li>Every card you buy gives a permanent <b>bonus gem</b> of its color that discounts all future purchases.</li>
-									<li>Higher-level cards cost more but are worth more prestige — build up cheap cards first to afford them.</li>
-								</ul>
-								<h4>Nobles</h4>
-								<ul>
-									<li>At the end of your turn, if your card bonuses meet a noble's requirement, that noble visits for extra prestige (you choose if more than one qualifies). Nobles are never taken on purpose — they come to you.</li>
-								</ul>
-								<h4>Gem limit</h4>
-								<ul>
-									<li>You may hold at most <b>10 gems</b> (gold included). If a take puts you over, discard down to 10.</li>
-								</ul>
-								<p className="rules-note">Play 2 players against an AI opponent, or 2–4 players against friends.</p>
-							</div>
-							<button className="btn btn-gold" style={{ width: "100%", marginTop: 4 }} onClick={() => setShowRules(false)}>Got it</button>
-						</div>
-					</div>
-				)}
+				{rulesModalEl}
 				{toast && <div className="toast">{toast}</div>}
 			</div>
 		</>
 	);
 
 	// Waiting screen
-	if (screen === "waiting") return (
+	if (screen === "spender" && spenderScreen === "waiting") return (
 		<>
 			<style>{css}</style>
 			<div className="app" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
@@ -2901,7 +3337,7 @@ export default function SpenderApp() {
 
 	// Winner screen (held back 2s after the game ends — see the resultReady effect —
 	// so the final board is visible for a beat before the result is revealed).
-	if (screen === "game" && game?.phase === "over" && !reviewing && !puzzling && resultReady) {
+	if (screen === "spender" && spenderScreen === "game" && game?.phase === "over" && !reviewing && !puzzling && resultReady) {
 		const winners = Array.isArray(game.winner) ? game.winner : [game.winner];
 		const isTie = winners.length > 1;
 		const iWon = winners.includes(myId);
@@ -2926,18 +3362,23 @@ export default function SpenderApp() {
 							})}
 						</div>
 						<div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-							<button className="btn btn-gold" onClick={() => enterReview(roomId)}>
-								Review Board & Log
-							</button>
-							<button className="btn btn-outline" onClick={() => {
-								try { localStorage.removeItem("spender_roomId"); } catch {}
-								setReviewing(false);
-								setReplaySnapshots(null); setReplayTurn(null);
-								setScreen("browser"); setRoomData(null); setRoomId(""); disconnect();
-								fetchGames(authUser);
-							}}>
-								Back to Browser
-							</button>
+							{/* Review needs the server's per-turn snapshots — a local save has none.
+							    "View board" drops the overlay so the final position is inspectable. */}
+							{offline
+								? <button className="btn btn-gold" onClick={() => setResultReady(false)}>View board</button>
+								: <button className="btn btn-gold" onClick={() => enterReview(roomId)}>Review game</button>}
+							{offline
+								? <button className="btn btn-outline" onClick={exitOfflineToHub}>Back to Local Games</button>
+								: <button className="btn btn-outline" onClick={() => {
+									try { localStorage.removeItem("spender_roomId"); } catch {}
+									setReviewing(false);
+									setReplaySnapshots(null); setReplayTurn(null);
+									pushPath(buildPath("spender"));   // leave the finished room's URL
+									goSpender("browser"); setRoomData(null); setRoomId(""); disconnect();
+									fetchGames(authUser);
+								}}>
+									Back to lobby
+								</button>}
 						</div>
 					</div>
 				</div>
@@ -2946,7 +3387,7 @@ export default function SpenderApp() {
 	}
 
 	// Game screen
-	if (screen === "game" && game) return (
+	if (screen === "spender" && spenderScreen === "game" && game) return (
 		<>
 			<style>{css}</style>
 			<div className="app game-screen">
@@ -2955,7 +3396,15 @@ export default function SpenderApp() {
 						? <button className="btn btn-ghost btn-sm" onClick={exitPuzzle}>← Puzzles</button>
 						: reviewChrome
 						? <button className="btn btn-ghost btn-sm" onClick={() => { setReplayTurn(null); setReviewing(false); setResultReady(true); }}>← Back to Results</button>
-						: <button className="btn btn-ghost btn-sm" onClick={goToMenu}>← Menu</button>}
+						: <GameMenu items={[
+								// Offline: "menu" is the Local Games hub, and leaving just closes the game
+								// (the save persists) — no socket to tear down, no server forfeit.
+								{ label: offline ? "Back to Local Games" : "Return to menu", icon: "←",
+									onClick: offline ? exitOfflineToHub : goToMenu },
+								{ label: "View rules", icon: "📖", onClick: () => setShowRules(true) },
+								{ label: offline ? "Delete game" : "Abandon game", icon: "⚑", danger: true,
+									onClick: () => setConfirmAbandon(true) },
+							]} />}
 					<span className="game-nav-title">Spender{puzzling ? " — Puzzle" : reviewChrome ? " — Review" : ""}</span>
 					{puzzling
 						? <div className="puzzle-nav-aids">
@@ -2967,7 +3416,7 @@ export default function SpenderApp() {
 							</div>
 						: reviewChrome
 						? <span style={{ width: 64 }} />
-						: <button className="btn btn-danger btn-sm" onClick={() => setConfirmAbandon(true)}>Abandon</button>}
+						: <span style={{ width: 40 }} />}
 				</div>
 				<div className="game-nav-spacer" />
 				<div className="game">
@@ -3252,7 +3701,7 @@ export default function SpenderApp() {
 				{flyers.length > 0 && (
 					<div className="fly-layer">
 						{flyers.map(f => f.kind === "card" ? (
-							<div key={f.id} className="fly-card" style={{
+							<div key={f.id} className="fly-card" ref={el => animateFlyer(el, f)} style={{
 								left: f.x, top: f.y, width: f.w, height: f.h, borderColor: GEM_HEX[f.color],
 								"--dx": `${f.dx}px`, "--dy": `${f.dy}px`, "--s0": f.s0, "--s1": f.s1,
 								animationDelay: `${f.delay}ms`,
@@ -3261,12 +3710,13 @@ export default function SpenderApp() {
 								<span className="fly-card-dot" style={{ background: GEM_HEX[f.color] }} />
 							</div>
 						) : (
-							<div key={f.id} className="fly-gem" style={{
+							<div key={f.id} className="fly-gem" ref={el => animateFlyer(el, f)} style={{
 								left: f.x - f.size / 2, top: f.y - f.size / 2, width: f.size, height: f.size,
-								background: GEM_HEX[f.color],
 								"--dx": `${f.dx}px`, "--dy": `${f.dy}px`, "--s0": f.s0, "--s1": f.s1,
 								animationDelay: `${f.delay}ms`,
-							}} />
+							}}>
+								<GemToken color={f.color} size={f.size} />
+							</div>
 						))}
 					</div>
 				)}
@@ -3330,16 +3780,19 @@ export default function SpenderApp() {
 				{confirmAbandon && (
 					<div className="modal-backdrop">
 						<div className="modal">
-							<h3>Abandon Game?</h3>
-							<p>This counts as a loss for you. Your opponent will be awarded the win.</p>
+							<h3>{offline ? "Delete Game?" : "Abandon Game?"}</h3>
+							<p>{offline
+								? "This deletes the local save. Nothing is recorded — offline games never leave this device."
+								: "This counts as a loss for you. Your opponent will be awarded the win."}</p>
 							<div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-								<button className="btn btn-danger" onClick={handleAbandon}>Yes, Abandon</button>
+								<button className="btn btn-danger" onClick={handleAbandon}>{offline ? "Yes, Delete" : "Yes, Abandon"}</button>
 								<button className="btn btn-ghost" onClick={() => setConfirmAbandon(false)}>Cancel</button>
 							</div>
 						</div>
 					</div>
 				)}
 
+				{rulesModalEl}
 				{toast && <div className="toast">{toast}</div>}
 			</div>
 		</>
