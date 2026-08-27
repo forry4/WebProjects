@@ -135,6 +135,20 @@ _RESEND_WINS = True
 # reproduced the winner, ching_shih tracked exactly while joan and mordred were wrong in
 # OPPOSITE directions -- our damage landing on the other side, which is what a reordered
 # deck does, and what no amount of per-card rules reading would have suggested.
+#
+# OPEN, AND WORTH SAYING SO: reading the packets structurally says the flip should NOT be
+# needed. Tracing one seat, the Fight deck runs 10@0, 100@1; card 11 is inserted at loc 2;
+# and after the round the deck is 100@0, 11@1 -- card 10, at loc 0, was revealed first. Our
+# engine also reveals index 0 (`deck.pop(0)`) and inserts with 0 as the top. By that reading
+# the two conventions already agree and flipping should HURT. It does the opposite, on three
+# independent measures, reproducibly. Something about how BGA maintains locationArg inside
+# `deck` is not what the trace above implies, and I have not pinned it down.
+#
+# One concrete alternative WAS tested and refuted: that BGA turns the played pile over when
+# it becomes the next Fight deck, which would make this a real engine bug rather than a
+# harness setting. Reversing `played` in _begin_build reads 16/31 and 19/31 against 24/31 --
+# clearly worse both ways, so our engine's order preservation is right and this stays a
+# property of the LOG, not of the rules.
 _POS_FROM_TOP = True
 
 
@@ -303,6 +317,11 @@ def parse_actions(events, manifest_row):
         # low — a uniform off-by-one across all four fighters, which is the signature of a
         # timing offset rather than a rules bug, and worth recognising as such.
         if kind == "order":
+            # The ORDER packet's deck holds exactly one card -- the partner's Starting Card,
+            # already placed -- so the sort direction cannot matter here and is left alone.
+            # Flipping the chosen slot was tried and is NOT a global correction: it fixes
+            # three games and breaks four, so which Fighter leads is being recovered wrongly
+            # in a way that varies per game. Unresolved; see the note on _POS_FROM_TOP.
             deck = sorted((a.get("deck") or []), key=lambda c: c.get("locationArg", 0))
             fid0 = BGA_TO_FID.get(deck[0].get("type")) if deck else None
             if fid0 in teams[seat]:
