@@ -44,8 +44,8 @@ def main():
             f0 = dv["fighters"][0]
             div[f"{f0[0]}: ours {f0[1]} vs BGA {f0[2]}"] += 1
             if "-v" in sys.argv:
-                print(f"  {tid}: STATE DIVERGENCE snap {dv['snapshot']} "
-                      f"round {dv['round']}: {dv['fighters']}")
+                print(f"  {tid}: STATE DIVERGENCE mid {dv['mid']} "
+                      f"round {dv['round']} phase={dv['phase']}: {dv['fighters']}")
         if r["winner_match"]:
             keep.append(tid)
         else:
@@ -61,7 +61,7 @@ def main():
         print(f"  {n:>3}  {why}")
     if div:
         print()
-        print("STATE DIVERGENCES - ORACLE UNCALIBRATED, these are SUSPECT not bugs:")
+        print("STATE DIVERGENCES (oracle calibrated at lag +1; a lead, not a verdict):")
         for what, n in div.most_common(12):
             print(f"  {n:>3}  {what}")
     open(f"{CORP}/kept_games.txt", "w").write("\n".join(keep))

@@ -344,7 +344,7 @@ function FighterCard({ fid, state, board, active, fx, beatKey, scale, onInfo }) 
   // Name then value, everywhere, and never a chip whose whole message is that
   // the player has none of something.
   for (const [name, n] of Object.entries(state.tracks || {})) {
-    const shown = name === "divine_voice" ? (n < 0 ? "halo" : n + 1) : n;
+    const shown = name === "divine_voice" ? (n === 0 ? "halo" : n) : n;
     if (shown === 0) continue;
     chips.push(
       <span className="rt-chip" key={`t-${name}`}>

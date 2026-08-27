@@ -242,13 +242,75 @@ def test_a_health_track_icon_fires_when_passed_and_not_when_left():
     assert f(game2, 0, 0)["power"] == was, "sitting on an icon and leaving pays nothing"
 
 
+def test_the_wild_bunch_gives_its_partner_a_power_at_setup():
+    """`setup_icons` must actually RESOLVE, not merely validate.
+
+    The Wild Bunch is the only fighter with a setup icon, and for a long time the engine
+    never read the field at all: import_bga generated it and test_fighters validated its
+    op vocabulary, so everything looked healthy while the partner silently started every
+    game one Power short. Caught by replaying real BGA games, whose log says in as many
+    words "The Wild Bunch gives <partner> 1 power".
+    """
+    game = rig(["the_wild_bunch", "golem"], ["mordred", "joan"])
+    assert f(game, 0, 1)["power"] == E.FIGHTERS["golem"]["base_power"] + 1
+    # It is a GRANT, not a transfer -- BGA reports startingPower 1 / power 1 for the
+    # Wild Bunch itself in the same snapshot where the partner is already up one.
+    assert f(game, 0, 0)["power"] == E.FIGHTERS["the_wild_bunch"]["base_power"]
+    # ...and it touches neither opponent.
+    assert f(game, 1, 0)["power"] == E.FIGHTERS["mordred"]["base_power"]
+    assert f(game, 1, 1)["power"] == E.FIGHTERS["joan"]["base_power"]
+
+
+def test_the_wild_bunch_grants_from_either_slot():
+    """The grant follows the Wild Bunch's slot, so it cannot be hardcoded to slot 0."""
+    game = rig(["golem", "the_wild_bunch"], ["mordred", "joan"])
+    assert f(game, 0, 0)["power"] == E.FIGHTERS["golem"]["base_power"] + 1
+    assert f(game, 0, 1)["power"] == E.FIGHTERS["the_wild_bunch"]["base_power"]
+
+
+def test_every_setup_icon_in_the_data_is_implemented():
+    """A new setup icon must break the suite rather than go quiet.
+
+    The original bug's whole shape was SILENCE: unread data. So the engine raises on any
+    setup op it cannot resolve, and this drives every fighter through setup to prove it.
+    """
+    roster = list(E.ROSTER)
+    for i, fid in enumerate(roster):
+        mate = roster[(i + 1) % len(roster)]
+        opp = [x for x in roster if x not in (fid, mate)][:2]
+        rig([fid, mate], opp)          # raises IllegalMove on an unimplemented icon
+
+
 def test_joans_divine_voice_dial_steps_clockwise_off_the_halo():
     game = rig(["joan", "golem"], ["mordred", "bodvar"], deck0=[30], deck1=[24])
-    assert f(game, 0, 0)["tracks"]["divine_voice"] == -1, "starts on the central Halo"
+    assert f(game, 0, 0)["tracks"]["divine_voice"] == 0, "starts on the central Halo"
     was = f(game, 0, 0)["power"]
     one_turn(game)
-    assert f(game, 0, 0)["tracks"]["divine_voice"] == 0
-    assert f(game, 0, 0)["power"] == was + 1, "the top-right space grants 1 Power"
+    assert f(game, 0, 0)["tracks"]["divine_voice"] == 1
+    assert f(game, 0, 0)["power"] == was, "the first step off the Halo is a blank space"
+
+
+def test_joans_divine_voice_grants_power_on_the_second_step():
+    """The self-Power icon is the SECOND space out, and the dial wraps through the Halo.
+
+    Both halves are what BGA's own marker does (table 896017372: 0,1,2,4,2,4). Getting
+    either wrong inflates Joan: the icon one space early pays out a step sooner, and a
+    four-space ring pays out every four steps instead of five.
+    """
+    game = rig(["joan", "golem"], ["mordred", "bodvar"], deck0=[30], deck1=[24])
+    hero = f(game, 0, 0)
+    hero["tracks"]["divine_voice"] = 1
+    was = hero["power"]
+    one_turn(game)
+    assert f(game, 0, 0)["tracks"]["divine_voice"] == 2
+    assert f(game, 0, 0)["power"] == was + 1, "bottom-right grants 1 Power to Joan"
+
+
+def test_joans_divine_voice_wraps_back_onto_the_halo():
+    game = rig(["joan", "golem"], ["mordred", "bodvar"], deck0=[30], deck1=[24])
+    f(game, 0, 0)["tracks"]["divine_voice"] = 4
+    one_turn(game)
+    assert f(game, 0, 0)["tracks"]["divine_voice"] == 0, "the Halo is part of the cycle"
 
 
 def test_ching_shihs_fleet_is_capped_at_twenty():

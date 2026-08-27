@@ -34,12 +34,13 @@
         "id": "divine_voice",
         "shape": "circular",
         "start": "halo_centre",
-        "_comment": "A dial: the marker starts on the central Halo and steps CLOCKWISE around four outer spaces. Ops fire on landing.",
+        "_comment": "A dial of FIVE positions: the central Halo is part of the cycle, not a place the marker leaves for good. It steps CLOCKWISE Halo -> top_right -> bottom_right -> bottom_left -> top_left -> Halo. Ops fire on the LANDING space only. Verified against BGA table 896017372, whose marker ran 0,1,2,4,2,4 -- the 4->2 wrap is what proves the Halo is re-entered, and the 1->2 step is where Joan's +1 Power actually lands. We previously modelled four outer spaces with the marker leaving the Halo forever and the self-Power icon on the FIRST step out, which granted Joan Power one step early and once every four steps instead of five; by mid-game she ran ~2 Power ahead of the real game.",
         "spaces": [
-          {"name": "top_right", "icons": [{"op": "power", "n": 1, "target": "self"}]},
-          {"name": "bottom_right", "icons": []},
-          {"name": "bottom_left", "icons": [{"op": "power", "n": 1, "target": "partner"}]},
-          {"name": "top_left", "icons": []}
+          {"name": "halo_centre", "icons": []},
+          {"name": "top_right", "icons": []},
+          {"name": "bottom_right", "icons": [{"op": "power", "n": 1, "target": "self"}]},
+          {"name": "bottom_left", "icons": []},
+          {"name": "top_left", "icons": [{"op": "power", "n": 1, "target": "partner"}]}
         ]
       },
       "tokens": {}

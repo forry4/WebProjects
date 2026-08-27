@@ -10,6 +10,21 @@ This is the CoB lesson applied: cob_replay.py only became score-exact because BG
 running `score` on `tileAddedToEstate`, which acted as a bisect oracle -- all five bugs were
 found by tracing it, and none by reading the rules. `power` is that field here.
 
+ALIGNMENT: this module reports raw state; the LAG lives in bga_replay.do_check, which
+compares our state at check i against BGA snapshot i+1. That offset is measured, not
+assumed -- see its docstring for the numbers.
+
+ALREADY PAID OFF: two real Power bugs, both invisible to the unit suite.
+  * The Wild Bunch's `setup_icons` ("gives partner 1 power") was generated into the data,
+    validated by test_fighters, and executed by NOBODY -- so its partner started every
+    game one Power short.
+  * Joan's divine-voice dial was a four-space ring the marker left for good, with the
+    self-Power icon on the first step out. BGA's is FIVE positions including the Halo,
+    with the icon on the second -- so our Joan paid out a step early and once every four
+    steps instead of five, compounding to ~2 Power by mid-game.
+Neither is the kind of bug a hand-written test finds, because both look exactly like the
+rules as written; only a real game disagrees.
+
 DELIBERATELY NOT COMPARED YET: the health marker. BGA reports it as a board SLOT id
 (locationArg 25/22/19/15/3), not an HP value, so it needs each fighter's track layout to
 become comparable. `power` needs no such mapping, so it is the cheap 80% -- add health once

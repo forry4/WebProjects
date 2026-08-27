@@ -291,31 +291,51 @@ def replay(path, manifest_row, verbose=False, on_move=None):
 
     game = engine.new_game(SEATS, seed=0)
     applied, recorded, checked, divergence = 0, None, 0, None
+    pending = None          # (our state, where we were) awaiting the NEXT BGA snapshot
     trace = []
     characters = {}
 
     def do_check(step):
-        nonlocal checked, divergence
+        """Compare our state to the PREVIOUS snapshot's counterpart — the oracle runs at lag 1.
+
+        CALIBRATED, and by measurement rather than by argument. BGA emits
+        `updateCardAndFighterData` BEFORE resolving the step it announces, so our engine sits
+        exactly one snapshot ahead of it. Scored over the whole corpus, matching our state at
+        check i against BGA snapshot i+k:
+
+            k = -1   0.358        k = +1   0.716   <-- calibrated
+            k =  0   0.537        k = +2   0.454
+
+        +1 is not a close call, and the peak either side of it is the shape you want to see:
+        a real alignment, not a shift that happens to flatter one game.
+
+        This file previously said a one-step lag "was tried and changed nothing". That was
+        measured BEFORE the Wild Bunch setup icon and Joan's divine-voice dial were fixed --
+        two real Power bugs that were then drowning the alignment signal. The lesson is the
+        order: a miscalibrated oracle and a buggy engine are indistinguishable from inside,
+        so the bugs whose cause is understood get fixed first and the oracle is calibrated
+        against what is left. Calibrating first would have fitted the lag to the bugs.
+
+        Residual mismatch at +1 is ~28% and is NOT all noise -- some of it is real engine
+        divergence still to be found. Treat a divergence as a LEAD, not a verdict.
+        """
+        nonlocal checked, divergence, pending
         snap = tt_oracle.snapshot_of(step["event"])
         if not snap or game["phase"] == "draft":
             return
-        # ORACLE IS NOT CALIBRATED — divergences below are NOT bug reports.
-        # BGA's snapshots do not correspond one-to-one with our engine's state transitions,
-        # and the offset is not even uniform: measured on a game that replays PERFECTLY,
-        # mordred tracks in lockstep while the_wild_bunch runs exactly one snapshot ahead
-        # (ours [1,1,4,7,10,13,13] vs theirs [1,1,1,4,7,10,13]). Different seats drain their
-        # builds at different points, so no single global shift can align them — a one-step
-        # lag was tried and changed nothing. Until this is calibrated against a game known to
-        # be correct, treat every divergence as SUSPECT: a miscalibrated oracle manufactures
-        # bugs that were never there, which is worse than having no oracle at all.
-        checked += 1
-        trace.append({"round": game.get("round"),
-                      "ours": {k: v[0] for k, v in tt_oracle.our_state(game).items()},
-                      "bga": {k: v[0] for k, v in snap.items()}})
-        bad = tt_oracle.diff(game, snap)
-        if bad and divergence is None:
-            divergence = {"mid": step["mid"], "round": game.get("round"),
-                          "phase": game["phase"], "fighters": bad}
+        if pending is not None:
+            prev_ours, prev_step = pending
+            checked += 1
+            trace.append({"round": prev_step["round"],
+                          "ours": {k: v[0] for k, v in prev_ours.items()},
+                          "bga": {k: v[0] for k, v in snap.items()}})
+            bad = [(fid, prev_ours.get(fid), theirs)
+                   for fid, theirs in snap.items() if prev_ours.get(fid) != theirs]
+            if bad and divergence is None:
+                divergence = {"mid": step["mid"], "round": prev_step["round"],
+                              "phase": prev_step["phase"], "fighters": bad}
+        pending = (tt_oracle.our_state(game),
+                   {"round": game.get("round"), "phase": game["phase"]})
 
     def do_build(step):
         """Submit one queued BUILD for its seat."""
