@@ -4761,11 +4761,12 @@ try {
 			// It rendered as the raw 1-5 beside "of 5 to learn" -- a scale the reader
 			// has never been shown either end of. It is dots plus a WORD now, in the
 			// rating block, so check the word is there and that no unexplained "N of
-			// 5" survives anywhere in the panel.
+			// 5" survives anywhere in the panel. Match only the literal phrasing --
+			// "N / 5" collides with the Fey Folk's honest "3 / 4 / 5 health".
 			const cx = (await page.locator(".rt-modal .rt-rate-cx .rt-rate-n").first()
 				.innerText().catch(() => "")).trim();
 			const dots = await page.locator(".rt-modal .rt-rate-cx .rt-dot").count();
-			if (!/^[A-Z][a-z]+$/.test(cx) || dots !== 5 || /\d\s*(of 5|\/\s*5)/.test(body)) {
+			if (!/^[A-Z][a-z]+$/.test(cx) || dots !== 5 || /\bof 5\b/.test(body)) {
 				boardFails.rate.push(`${who}: "${cx}", ${dots} dots`);
 			}
 			// The Fighters' Guide half: an epithet, a paragraph, and five rating
