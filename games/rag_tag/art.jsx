@@ -181,7 +181,7 @@ export const FX_TEXT = {
   mephisto_drag_you_to_hell: "Lose this turn for any reason and you win instead",
   mephisto_flip_serpent: "Turn the serpent over — the next card reads the new face",
   milady_poison: "Poison: half their current HP, rounded down",
-  milady_unleash_scheme: "Unleash an Intrigue, once both cards have finished",
+  milady_unleash_scheme: "Unleash a Scheme, once both cards have resolved",
   mordred_execution: "A finisher, read after their card resolves",
   wb_corrupted_lawman: "The Sheriff changes sides",
   wb_keys_to_the_armory: "Whoever holds the Sheriff gains 2 Power — even them",
@@ -209,8 +209,8 @@ export const OP_GLOSSARY = {
   ignite: "Aflame — a burning token that stays. Five of them is Incineration, and that is an instant loss.",
   track: "A track advances a marker on this fighter's own board, separately from their health.",
   spirit: "Spirits are the Fey Folk's Characters after they fall. They still count, and some cards scale with how many there are.",
-  plant_scheme: "A planted Intrigue waits on Milady's health track. It fires later, when her marker reaches the space it is on.",
-  unleash_scheme: "Unleashing takes an Intrigue off the face-down pile of eleven. Its effect is hidden until it resolves, and a spent one leaves the game — so the pile runs out.",
+  plant_scheme: "A planted Scheme waits above Milady's board. It is Unleashed later — by a card, or by her Health marker reaching one of the three spaces that call for one.",
+  unleash_scheme: "Unleashing turns a planted Scheme face up and applies it. Schemes Unleashed from the Health track resolve AFTER every card Action, which is how they can move a marker sitting on a Stop.",
   give_token: "Passing a token can hand an opponent something they want. Check who ends up holding it.",
   take_token: "Taking a token pulls it from whoever holds it, including an opponent.",
   flip_card: "This card has two faces. Turning it over changes what it does next time it is revealed.",
@@ -232,6 +232,15 @@ export function complexityWord(n) {
 /* The words the BOARD uses for a track and a token, against the ids the data
  * uses for them. Cards read "+1 navigation" and "Pass the presence token" —
  * field names, straight out of the JSON, on the face of a card. */
+export const TRACK_TITLE = {
+  divine_voice: "Divine Voice",
+  navigation: "Fleet",
+  rage: "Rage",
+  spirits: "Spirit",
+};
+
+/* The UNIT a track counts, which is not always its name: Ching Shih's is the
+   Fleet track and it counts Ships. */
 export const TRACK_WORD = {
   divine_voice: ["Divine Voice", "Divine Voice"],
   navigation: ["Ship", "Ships"],
@@ -244,7 +253,7 @@ export const TOKEN_WORD = {
   aflame: "Aflame!",
   sheriff: "Sheriff",
   concentration: "Concentration",
-  scheme: "Intrigue",
+  scheme: "Scheme",
   serpent: "serpent",
 };
 
@@ -273,8 +282,8 @@ export function tokenWord(id) {
 export const TRACK_GLOSSARY = {
   divine_voice: "Joan's dial. Her cards step it round, and ONLY the space it lands on pays out — a space it steps over does nothing. The Halo in the middle is where it starts and it is never returned to, so from the first step on it is a ring of four.",
   rage: "Bödvar's Rage. Each gain steps up one space. Reaching the top pays him 3 Power and then turns his board over to the Berserker Bear — a different fighter, with its own health track, and there is no way back.",
-  navigation: "Ching Shih's Navigation track, counted in Ships. It pays nothing by itself; her cards read the number off it, and the board rings 7, 10, 15 and 20 as the thresholds they ask about. Gains past the top are lost.",
-  spirits: "The Fey Folk's Spirits. It starts at 1 and steps up each time a Character falls, so it counts how far through the three they are. Several of their cards scale with it — and at the top all three are gone, which is the only way the Fey Folk can lose a fight.",
+  navigation: "Ching Shih's Fleet track, counted in Ships. It pays nothing by itself; her cards read the number off it, and the board rings 7, 10, 15 and 20 as the thresholds they ask about. Ships gained past 20 are ignored.",
+  spirits: "The Fey Folk's Spirit track. It starts at 1 and steps up each time a Character becomes a Spirit, so it counts how far through the three they are. Several of their cards scale with it — and at the top all three are Spirits, which is the only state in which they can lose.",
 };
 
 /* What each kind of space on a health track does. The modal printed this as a
@@ -298,7 +307,7 @@ export const TOKEN_GLOSSARY = {
   aflame: "Shango's flames sit on the fighter they are put on and never come off. Two of his cards hit for 1 extra per flame already on the target. A fifth on one fighter is Incineration — that team loses on the spot.",
   sheriff: "The Sheriff changes hands, and several Wild Bunch cards ask who is holding him — including one that pays the holder even when that is an opponent.",
   concentration: "Wong Fei-Hung spends a Concentration to mark an opponent. A later card cashes the mark in and hits them with their OWN Power, and takes the token back off the fighter it cashed.",
-  scheme: "Milady's Intrigues, face down. Eleven of them, drawn without replacement, so the pile runs out; what one does is hidden until it resolves.",
+  scheme: "Milady's Schemes, face down. Eleven of them, drawn without replacement, so the pile runs out; a Scheme's effect is hidden until it is Unleashed, and a spent one leaves the Fight.",
   serpent: "Mephisto's serpent shows one of two faces, chosen at random at setup. Some of his cards read the face that is showing; others turn it over — so the same card is two cards depending on when it comes up.",
 };
 

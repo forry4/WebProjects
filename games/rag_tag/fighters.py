@@ -30,6 +30,12 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
           'base_power': 1,
           'complexity': 1,
           'tags': ['Support', 'Versatile'],
+          'title': 'The Divine Shield',
+          'profile': 'A Paladin who wins by never letting anyone down. Her Divine Voice feeds '
+                     'Power to the whole team a little at a time, and she attacks, blocks and '
+                     'heals well enough that she is rarely the wrong card to have drawn. The '
+                     'straightforward one, and none the weaker for it.',
+          'rating': {'health': 4, 'offense': 3, 'defense': 3, 'heal': 4, 'special': 1},
           'hp_track': [{'kind': 'ko'},
                        {'kind': 'hp', 'hp': 1},
                        {'kind': 'hp', 'hp': 2},
@@ -52,13 +58,13 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
           'special_track': {'id': 'divine_voice',
                             'shape': 'circular',
                             'start': 'halo_centre',
-                            'wrap_to': 'top_right',
+                            'wrap_to': 'top_left',
                             'spaces': [{'name': 'halo_centre', 'icons': []},
-                                       {'name': 'top_right', 'icons': []},
-                                       {'name': 'bottom_right',
+                                       {'name': 'top_left', 'icons': []},
+                                       {'name': 'top_right',
                                         'icons': [{'op': 'power', 'n': 1, 'target': 'self'}]},
-                                       {'name': 'bottom_left', 'icons': []},
-                                       {'name': 'top_left',
+                                       {'name': 'bottom_right', 'icons': []},
+                                       {'name': 'bottom_left',
                                         'icons': [{'op': 'power',
                                                    'n': 1,
                                                    'target': 'partner'}]}]},
@@ -68,6 +74,12 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
                 'base_power': 2,
                 'complexity': 3,
                 'tags': ['Escalation', 'Versatile'],
+                'title': 'The Pirate Queen',
+                'profile': 'She fights by building a Fleet. Ships do no damage on their own — '
+                           'they are options: much of her deck reads the number on the Fleet '
+                           'track and does something different above each threshold. Reach '
+                           'twenty and Terror of the Seas ends the Fight where it stands.',
+                'rating': {'health': 2, 'offense': 4, 'defense': 3, 'heal': 3, 'special': 3},
                 'hp_track': [{'kind': 'ko'},
                              {'kind': 'hp', 'hp': 1},
                              {'kind': 'hp', 'hp': 2},
@@ -95,6 +107,12 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
             'base_power': 3,
             'complexity': 2,
             'tags': ['High Damage', 'Transformation'],
+            'title': 'The Bearserker',
+            'profile': 'All-out rage. Every card that feeds the Rage track drags him closer to '
+                       'turning over into the Berserker Bear, and almost nothing in the game '
+                       'hits as hard as what comes out the other side. The catch is the eleven '
+                       'health he has to stay standing on long enough to get there.',
+            'rating': {'health': 1, 'offense': 5, 'defense': 4, 'heal': 2, 'special': 2},
             'faces': ['bodvar', 'berserker_bear'],
             'note': 'The Bear arrives on as much health as Bödvar had Power at that instant, '
                     'capped at 15 — a starting point, not a ceiling, so he can Heal above it '
@@ -151,6 +169,14 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
                    'base_power': 2,
                    'complexity': 4,
                    'tags': ['Power Manipulation', 'Control'],
+                   'title': 'The Old Master',
+                   'profile': 'He fights with your own strength. A Concentration token marks '
+                              'an opponent, and cashing it in Attacks them with THEIR Power '
+                              "rather than his; another card sets his Power to his Partner's, "
+                              'downwards as readily as up. And Crippling Touch removes a card '
+                              'from the game for good — the only thing in Tag Team that makes '
+                              'a deck smaller.',
+                   'rating': {'health': 3, 'offense': 3, 'defense': 2, 'heal': 1, 'special': 5},
                    'hp_track': [{'kind': 'ko'},
                                 {'kind': 'hp', 'hp': 1},
                                 {'kind': 'hp', 'hp': 2},
@@ -176,6 +202,17 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
                     'base_power': 1,
                     'complexity': 5,
                     'tags': ['Precise Timing', 'Resilient'],
+                    'title': 'The Band of Outlaws',
+                    'profile': 'Five health and a Stop on every space, so nothing ever takes '
+                               'more than one off them — and nothing ever heals more than one '
+                               'back. The Fight is really about the Sheriff: several of their '
+                               'cards pay whoever is holding him, opponents included, so the '
+                               'token has to be in the right hands at the right moment.',
+                    'rating': {'health': 1,
+                               'offense': 4,
+                               'defense': 3,
+                               'heal': 3,
+                               'special': 3},
                     'setup_icons': [{'op': 'power', 'n': 1, 'target': 'partner'}],
                     'hp_track': [{'kind': 'ko'},
                                  {'kind': 'hp', 'hp': 1, 'icons': ['stop']},
@@ -190,6 +227,14 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
             'base_power': 0,
             'complexity': 5,
             'tags': ['Aggressive', 'Escalation'],
+            'title': 'The Keeper of Fire and Thunder',
+            'profile': 'Fire that sticks. Every Aflame! token he places stays on its target '
+                       'for the rest of the Fight and makes his own Attacks hit harder, and a '
+                       'fifth on one Fighter is Incineration — an instant loss, however much '
+                       'health they had left. He starts on no Power at all, so the flames have '
+                       'to do the work, and getting them onto the right Fighter is the whole '
+                       'trick.',
+            'rating': {'health': 3, 'offense': 4, 'defense': 2, 'heal': 1, 'special': 5},
             'hp_track': [{'kind': 'ko'},
                          {'kind': 'hp', 'hp': 1},
                          {'kind': 'hp', 'hp': 2},
@@ -213,6 +258,14 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
                   'base_power': 2,
                   'complexity': 4,
                   'tags': ['Control', 'Immortal'],
+                  'title': 'The Immortal Sorceress',
+                  'profile': 'She turns a Fight around rather than winning it head-on: '
+                             'cancelling a card outright, stealing the healing meant for '
+                             'someone else, or bending the Attacks she caught onto the '
+                             "attacker's own Partner. And two KO spaces are not the end of her "
+                             '— pushed past both, she comes back on 4 health with a Power in '
+                             'hand.',
+                  'rating': {'health': 3, 'offense': 2, 'defense': 3, 'heal': 2, 'special': 4},
                   'hp_track': [{'kind': 'revive',
                                 'icons': [{'op': 'power', 'n': 1, 'target': 'self'},
                                           {'op': 'fx', 'name': 'brijit_revive'}]},
@@ -242,6 +295,13 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
               'base_power': 1,
               'complexity': 3,
               'tags': ['Aggressive', 'Self-Sufficient'],
+              'title': 'The Agent of Darkness',
+              'profile': 'Much of his deck asks which way the Serpent token is lying, and '
+                         'other cards turn it over — so the same card is two cards depending '
+                         'on when it comes up. Thirteen health and nothing much for his '
+                         'Partner, set against some of the nastiest single cards in the box, '
+                         'including one that turns any loss this Turn into a win.',
+              'rating': {'health': 2, 'offense': 4, 'defense': 1, 'heal': 3, 'special': 5},
               'hp_track': [{'kind': 'ko'},
                            {'kind': 'hp', 'hp': 1},
                            {'kind': 'hp', 'hp': 2},
@@ -265,6 +325,13 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
              'base_power': 0,
              'complexity': 2,
              'tags': ['Power Build', 'Riposte'],
+             'title': 'The Black Knight',
+             'profile': 'He would much rather you swung first. Mordred blocks, banks Power off '
+                        'the Bonus Action, and punishes the openings: Hidden Dagger only fires '
+                        'on a Turn nobody attacked, and Dark Power becomes an Attack the '
+                        'moment he reaches 8. Nineteen health to do it on, and no healing to '
+                        'speak of.',
+             'rating': {'health': 4, 'offense': 3, 'defense': 5, 'heal': 1, 'special': 2},
              'hp_track': [{'kind': 'ko'},
                           {'kind': 'hp', 'hp': 1},
                           {'kind': 'hp', 'hp': 2},
@@ -292,6 +359,13 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
             'base_power': 1,
             'complexity': 2,
             'tags': ['Unpredictable', 'Riposte'],
+            'title': 'The Cloak and Dagger',
+            'profile': 'She plants Schemes and lets them go off later. Eleven face-down '
+                       'tokens, drawn without replacement, running from a couple of Power to '
+                       'Poison, and three spaces on her own Health track unleash one when her '
+                       'marker reaches them. You cannot plan around what you cannot see — and '
+                       'neither can she.',
+            'rating': {'health': 3, 'offense': 2, 'defense': 3, 'heal': 3, 'special': 4},
             'hp_track': [{'kind': 'ko'},
                          {'kind': 'hp', 'hp': 1, 'icons': ['stop']},
                          {'kind': 'hp',
@@ -322,6 +396,12 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
            'base_power': 1,
            'complexity': 1,
            'tags': ['Protector', 'Tank'],
+           'title': 'The Colossal Protector',
+           'profile': 'A tank, with nothing pretending otherwise. Twenty-five health is the '
+                      'most in the game, three icons on the way down pay him Power for taking '
+                      'the hits, and his Presence can eat an Attack aimed at his Partner. '
+                      'Slow, obvious, and very hard to put down.',
+           'rating': {'health': 5, 'offense': 3, 'defense': 1, 'heal': 2, 'special': 4},
            'hp_track': [{'kind': 'ko'},
                         {'kind': 'hp', 'hp': 1},
                         {'kind': 'hp', 'hp': 2},
@@ -362,6 +442,14 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
                   'base_power': 0,
                   'complexity': 4,
                   'tags': ['Support', 'Elusive'],
+                  'title': 'The People of the Forest',
+                  'profile': 'Three Forest Sprites who are worth something on the way down. '
+                             'Each Character that falls becomes a Spirit and steps the Spirit '
+                             'track up, and their cards pay by the Spirit, so losing '
+                             'Characters is part of the plan rather than the end of it. With '
+                             'all three gone they are still in the Fight, and there is only '
+                             'one card in the game that can finish them.',
+                  'rating': {'health': 2, 'offense': 1, 'defense': 3, 'heal': 4, 'special': 4},
                   'hp_track': None,
                   'characters': [{'id': 'fairy',
                                   'name': 'Fairy',

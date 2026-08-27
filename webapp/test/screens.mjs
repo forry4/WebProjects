@@ -4562,6 +4562,21 @@ try {
 		await page.waitForSelector(".lby-create-row", { timeout: 25_000 }).catch(() => {});
 		check("lobby reachable by URL", await page.locator(".lby-create-row").count() > 0);
 
+		// The rules panel. `RulesFacts` reads {k, v} off each item and Rag Tag was
+		// passing bare strings, so three of its sections rendered as EMPTY boxes --
+		// present, correctly styled, and saying nothing. Assert the boxes have text
+		// in them, not merely that they exist.
+		await page.locator(".lby-create-row button", { hasText: /rules/i }).first()
+			.click({ timeout: 10_000 }).catch(() => {});
+		await sleep(500);
+		const factText = await page.locator(".rl-fact").allInnerTexts().catch(() => []);
+		check("the rules panel opens, and no part of it is blank",
+			factText.length > 0 && factText.every((t) => t.trim().length > 4)
+			&& await page.locator(".rl-sec").count() > 5,
+			`${factText.length} fact boxes: ${JSON.stringify(factText.map((t) => t.slice(0, 20)))}`);
+		await page.keyboard.press("Escape").catch(() => {});
+		await sleep(300);
+
 		await page.locator(".lby-cta").click({ timeout: 15_000 }).catch(() => {});
 		await page.waitForSelector(".cm-create", { timeout: 15_000 }).catch(() => {});
 		await page.locator(".cm-create").click({ timeout: 15_000 }).catch(() => {});
@@ -4716,7 +4731,8 @@ try {
 		// `games/rag_tag/tests/test_words.py`. This is the render-level half: a raw
 		// key reaching the page through JSX rather than through a missing entry.
 		const seenBoards = [];
-		const boardFails = { leak: [], key: [], rate: [], head: [], dial: [], roster: [] };
+		const boardFails = { leak: [], key: [], rate: [], head: [], dial: [], roster: [],
+			profile: [] };
 		// Which fighters get drafted is random, so the two CONDITIONAL checks below
 		// (a ring must be drawn as one; a board with Characters must show them all)
 		// see nothing at all unless Joan or the Fey Folk turn up. A conditional that
@@ -4742,11 +4758,24 @@ try {
 				boardFails.key.push(`${who}: ${JSON.stringify(rows.map((t) => t.slice(0, 18)))}`);
 			}
 			// Every board carries a complexity rating, so this one is never vacuous.
-			// It used to render the raw 1-5 beside "of 5 to learn" -- a scale the
-			// reader has never been shown either end of.
-			const stats = await page.locator(".rt-modal-stats").first().innerText().catch(() => "");
-			if (!/to learn/.test(stats) || /\d\s*(of 5|\/\s*5)/.test(stats)) {
-				boardFails.rate.push(`${who}: ${stats.replace(/\n/g, " ")}`);
+			// It rendered as the raw 1-5 beside "of 5 to learn" -- a scale the reader
+			// has never been shown either end of. It is dots plus a WORD now, in the
+			// rating block, so check the word is there and that no unexplained "N of
+			// 5" survives anywhere in the panel.
+			const cx = (await page.locator(".rt-modal .rt-rate-cx .rt-rate-n").first()
+				.innerText().catch(() => "")).trim();
+			const dots = await page.locator(".rt-modal .rt-rate-cx .rt-dot").count();
+			if (!/^[A-Z][a-z]+$/.test(cx) || dots !== 5 || /\d\s*(of 5|\/\s*5)/.test(body)) {
+				boardFails.rate.push(`${who}: "${cx}", ${dots} dots`);
+			}
+			// The Fighters' Guide half: an epithet, a paragraph, and five rating
+			// bars. Every board has one, so this is never vacuous -- and it is the
+			// only part of the modal that answers the question the DRAFT asks.
+			const bars = await page.locator(".rt-modal .rt-rate").count();
+			const blurb = (await page.locator(".rt-modal .rt-profile").first()
+				.innerText().catch(() => "")).trim();
+			if (bars !== 6 || blurb.length < 80) {
+				boardFails.profile.push(`${who}: ${bars} bars, ${blurb.length}-char blurb`);
 			}
 			const heads = await page.locator(".rt-modal h3").allInnerTexts().catch(() => []);
 			if (!heads.some((h) => /health track/i.test(h))
@@ -4785,6 +4814,8 @@ try {
 			JSON.stringify(boardFails.leak));
 		check("...and each board key explains the kinds of space it draws",
 			boardFails.key.length === 0, JSON.stringify(boardFails.key));
+		check("...and each opens with a profile and five rated bars",
+			boardFails.profile.length === 0, JSON.stringify(boardFails.profile));
 		check("...and each rates the fighter in words, not on an unexplained scale",
 			boardFails.rate.length === 0, JSON.stringify(boardFails.rate));
 		check("...and each draws its health track under its own heading",

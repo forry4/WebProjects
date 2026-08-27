@@ -229,6 +229,15 @@ def test_the_catalog_ships_the_board_rules_the_tracks_do_not_draw():
     assert payload["fighters"]["joan"]["note"] is None, "a board with nothing extra to say"
 
 
+def test_the_catalog_ships_the_fighter_profile():
+    """The modal's whole top half — epithet, paragraph, five bars — is catalog data."""
+    fighters = run(m.catalog())["fighters"]
+    joan = fighters["joan"]
+    assert joan["title"] == "The Divine Shield"
+    assert joan["profile"] and joan["rating"]["health"] == 4
+    assert all(f.get("rating") for f in fighters.values()), "a board with no ratings"
+
+
 def test_an_instant_bonus_ships_as_its_ops_not_as_a_flag():
     """It was `bool(...)`, so the modal could flag the card and not say what it paid."""
     from games.rag_tag.fighters import CARDS

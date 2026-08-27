@@ -24,6 +24,9 @@ from pathlib import Path
 
 from games.rag_tag.fighters import CARDS, FIGHTERS
 
+#: the five bars the printed Fighters' Guide rates every Fighter on
+RATED = ("health", "offense", "defense", "heal", "special")
+
 HERE = Path(__file__).resolve().parents[1]
 ART = (HERE / "art.jsx").read_text(encoding="utf-8")
 UI = (HERE / "RagTag.jsx").read_text(encoding="utf-8")
@@ -114,6 +117,30 @@ def test_every_complexity_rating_has_a_word():
     rated = {b["complexity"] for b in FIGHTERS.values() if b.get("complexity") is not None}
     for n in sorted(rated):
         assert 0 <= n < len(words) and words[n], f"complexity {n} has no word"
+
+
+def test_every_fighter_has_a_profile_the_draft_can_be_read_from():
+    """Epithet, paragraph and five rating bars, mirroring the Fighters' Guide.
+
+    This is the half of a board that is a judgement rather than a rule, and the
+    only part of the modal that answers "is this Fighter for me" — the question
+    the draft actually asks. A board that gains none of it renders a modal that
+    looks complete and opens on the mechanics.
+    """
+    for fid, board in FIGHTERS.items():
+        assert board.get("title"), f"{fid} has no epithet"
+        assert len(board.get("profile") or "") > 120, f"{fid}'s profile is a stub"
+        rating = board.get("rating") or {}
+        assert set(rating) == set(RATED), f"{fid} rates {sorted(rating)}"
+        for k, v in rating.items():
+            assert isinstance(v, int) and 0 <= v <= 5, f"{fid}.{k} = {v!r}"
+
+
+def test_the_rating_bars_the_ui_draws_are_the_ones_the_data_carries():
+    """`RATED` in the JSX and the keys in boards.json are one list seen twice."""
+    m = re.search(r"^const RATED = \[(.*?)\];$", UI, re.M)
+    assert m, "RATED is gone from RagTag.jsx — this guard has rotted"
+    assert set(re.findall(r'"([a-z]+)"', m.group(1))) == set(RATED)
 
 
 def test_a_circular_track_is_drawn_as_a_circle():

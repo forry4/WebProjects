@@ -152,7 +152,7 @@ export function narrateBeat(beat, ctx) {
 
       case "scheme":
         push("info", "plant_scheme",
-          `${name(ev.seat, ev.slot)} plants an Intrigue (${ev.planted} waiting)`, k);
+          `${name(ev.seat, ev.slot)} plants a Scheme (${ev.planted} waiting)`, k);
         break;
 
       case "scheme_reveal":

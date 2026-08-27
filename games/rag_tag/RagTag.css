@@ -1598,6 +1598,82 @@
 
 .ragtag .rt-modal-stats .rt-stat { font-size: 1rem; }
 
+/* The Fighters' Guide profile: epithet, paragraph, rated bars, complexity dots.
+   Sits directly under the name, because it is what a reader opening a Fighter
+   wants first -- the mechanics below answer "how", this answers "what for". */
+.ragtag .rt-modal-epithet {
+  margin: -0.15rem 0 0.3rem;
+  font-size: var(--rt-fs-sm);
+  font-style: italic;
+  letter-spacing: 0.02em;
+  color: var(--f-ink);
+}
+
+.ragtag .rt-profile {
+  margin: 0.55rem 0 0;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--rt-ink);
+}
+
+.ragtag .rt-rates {
+  display: grid;
+  gap: 0.28rem;
+  margin-top: 0.7rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--rt-line-soft);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.ragtag .rt-rate {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.ragtag .rt-rate-l {
+  flex: none;
+  width: 5.4rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--rt-dim);
+}
+
+.ragtag .rt-rate-bar { display: flex; gap: 3px; flex: 0 1 auto; }
+
+.ragtag .rt-rate-c {
+  width: 1.5rem;
+  height: 0.66rem;
+  border: 1px solid var(--rt-line);
+  border-radius: 2px;
+  background: transparent;
+}
+
+.ragtag .rt-rate-on { background: var(--rt-gold); border-color: var(--rt-gold); }
+
+/* Complexity is dots rather than a bar, exactly as the printed sheet has it --
+   the shape says "this is a different kind of number" without a sentence. */
+.ragtag .rt-dot {
+  width: 0.62rem;
+  height: 0.62rem;
+  align-self: center;
+  border: 1px solid var(--rt-line);
+  border-radius: 50%;
+}
+
+.ragtag .rt-dot-on { background: var(--f-ink); border-color: var(--f-ink); }
+
+.ragtag .rt-rate-cx { margin-top: 0.2rem; }
+
+.ragtag .rt-rate-n {
+  font-size: var(--rt-fs-sm);
+  color: var(--f-ink);
+  font-weight: 650;
+}
+
 /* The health track, drawn. */
 .ragtag .rt-modal-track {
   display: flex;
@@ -1758,7 +1834,7 @@
 .ragtag .rt-dial-ring {
   fill: none;
   stroke: var(--rt-line);
-  stroke-width: 1.5;
+  stroke-width: 2;
 }
 
 .ragtag .rt-dial-in {
@@ -1767,11 +1843,11 @@
   stroke-dasharray: 3 3;
 }
 
-.ragtag .rt-dial-arrow { fill: var(--rt-line); }
+.ragtag .rt-dial-arrow { fill: var(--f-ink); }
 
 .ragtag .rt-dial-node {
   fill: #2f231c;
-  stroke: var(--rt-line-soft);
+  stroke: var(--rt-line);
   stroke-width: 1.5;
 }
 
@@ -2021,6 +2097,8 @@
   .ragtag .rt-modal-track-name { width: 100%; }
   .ragtag .rt-notes { margin-left: 0; }
   .ragtag .rt-notes li { display: grid; gap: 0; }
+  .ragtag .rt-rate-l { width: 4.4rem; }
+  .ragtag .rt-rate-c { width: 1.1rem; }
   .ragtag .rt-clash { min-height: 1.6rem; }
   .ragtag .rt-clash-burst { width: 2.2rem; height: 2.2rem; }
   .ragtag .rt-card { min-height: 0; }

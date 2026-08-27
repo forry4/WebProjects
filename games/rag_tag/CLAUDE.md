@@ -44,6 +44,38 @@ against the same pixels.
 truth for the transform, so a corrected dump is a re-run, never a re-transcription.
 `--check` regenerates in memory and the suite fails on a stale file.
 
+### The published rules are a SOURCE, and they settle vocabulary
+`TT_Rules_01/02_EN` (Fight Rules + Fighters' Guide) and `TT_FIGHTERS_PROFILES_1_EN`
+are the publisher's own PDFs. They are **not** in the repo — this package holds
+mechanics, not publisher copy — but they are what the wording is checked against,
+and three of our names were simply wrong until 2026-08-27:
+
+* Ching Shih's is the **Fleet track**, counted in **Ships**. We printed the
+  internal id (`+1 navigation`) on card faces.
+* Milady's tokens are **Schemes**. A `_comment` in `cards.json` calls them
+  "Intrigue (Scheme)" — BGA's word — and a previous pass renamed the whole UI to
+  Intrigue on the strength of it. The rulebook says Scheme throughout.
+* The Fey Folk's is the **Spirit track**, singular.
+
+The rulebook also **independently confirmed two corpus findings**, which is the
+strongest evidence either way: its Scheme token table lists exactly 9 distinct
+effects with Poison drawn three times over 11 tokens (what the corpus deduced
+from duplicate token ids), and Bödvar's Bear entry matches our note on his
+opening HP word for word in substance.
+
+**Where the rulebook and the corpus disagree, the corpus wins on TIMING and the
+rulebook wins on NAMES.** Two live examples: Maman Brijit's revive is printed as
+"at the end of the Turn" and BGA resolves it inline (902742623 f5t2 shows the
+next Intrigue landing on the revived HP) — we do what BGA does, because that is
+the opponent players actually face. Joan's dial went the other way: the rulebook
+says the marker pays HER on the **top right** space and her **Partner** on the
+**bottom left**, and our space NAMES were rotated a step off that. The icons sit
+on ring indices 2 and 4, which the corpus measured directly, so relabelling
+index 1 as `top_left` satisfies both at once — the ring becomes TL → TR → BR →
+BL (still clockwise) and the icons land on the spaces the rulebook names.
+**Behaviour-neutral, and proved so: the full parity gate still reads 4103/4103
+per-turn tracks.** Do not "fix" one of these by breaking the other.
+
 ### The one gap — CLOSED by the corpus
 Milady's 11 Intrigue tokens carry only **9 distinct** abilities, and which are duplicated
 is not visible in any public source: the pile is face down. This file recorded that as a
@@ -383,10 +415,39 @@ struck through; without it the Fey Folk read "3/3" while carrying nine more
 health nobody could see. Their `chars` map already reaches the client, so this
 is client-side only.
 
+**The modal opens with the FIGHTERS' GUIDE half, not the mechanics.** `title`,
+`profile` and `rating` in `boards.json` mirror the printed profile sheet: an
+epithet, a paragraph on how the Fighter plays, and five 0–5 bars
+(health/offense/defense/heal/special) over the complexity dots. Everything below
+it is derived from the rules and is the right answer to "how does this work" and
+a useless answer to **"is this Fighter for me"** — which is the only question the
+draft actually asks, and the one the modal could not answer at all. The ratings
+were MEASURED off the sheet (a flattened image: sampled at 200dpi, checked
+against two crops read by eye) rather than eyeballed, because the eyeballed pass
+had Bödvar's DEFENSE at 2 where it is 4.
+
 **A rating is not a scale.** `complexity` shipped as its raw 1–5 beside the
 words "of 5 to learn", which tells a reader neither end of the range; it is a
 word now (`COMPLEXITY_WORD`). Two of the three things a player reads on a board
 were numbers that needed a legend nobody had.
+
+### The rules panel follows the RULEBOOK's order and vocabulary
+`rules.jsx` is laid out in the printed order — what kind of game, the goal, the
+draft, a Round, Actions, who counts as whom, the icons, how a Fight ends, the
+Golden Rule — so a reader who has the real rules can find the same thing in the
+same place. It uses the rulebook's words (Active Fighter, Partner, Opponents,
+Bonus Action, Success, Direct Damage, Stop, THEN, Power cubes, Fight Deck),
+because a rules panel that renames things makes the CARDS harder to read.
+
+**`RulesFacts` takes `{k, v}` and `RulesDefs` takes `{t, d}` — a bare string
+renders an EMPTY BOX.** Rag Tag passed bare strings in three places, so its
+Setup, Health-track and Winning sections were blank strips for as long as the
+game existed. Nothing could see it: the markup was all present and correctly
+styled, so `screens` found its elements, the Python suite does not render, and
+the CSS token test only looks at tokens. Guarded now by
+`shared/tests/test_rules_kit_shapes.py`, which globs every `games/*/rules.jsx`
+(Rag Tag was the only offender) and by a `screens` check that the fact boxes
+contain TEXT rather than merely existing.
 
 ### Everything visual is drawn in the bundle
 There is no licensed art in the repo (see *Where the data came from*), so `art.jsx`
@@ -417,7 +478,7 @@ media rules and pins a phone to three columns. Width and padding ARE fair game.
 
 ## Testing
 
-`pytest games/rag_tag/tests -n0 -q` — 133 tests.
+`pytest games/rag_tag/tests -n0 -q` — 136 tests.
 
 | File | Covers |
 |---|---|
@@ -428,7 +489,7 @@ media rules and pins a phone to three columns. Width and padding ARE fair game.
 | `test_ws_auth` | seat identity binding |
 | `test_redaction` | the whole serialized payload of a REAL played game |
 | `test_persist` | compaction round trip, structural proof it did something, resume mid-fight and mid-build |
-| `test_words` | every op, condition, `fx`, token, track, complexity rating and kind of space the DATA uses has words in the UI — the one gate over a layer whose every failure mode renders a plausible-looking sentence rather than throwing. Also the two SHAPE guards (a circular track is drawn as a circle; a board of Characters lists them all on the fighting card), which exist because the browser can only check those when Joan or the Fey Folk happen to be drafted |
+| `test_words` | every op, condition, `fx`, token, track, complexity rating, profile/rating block and kind of space the DATA uses has words in the UI — the one gate over a layer whose every failure mode renders a plausible-looking sentence rather than throwing. Also the two SHAPE guards (a circular track is drawn as a circle; a board of Characters lists them all on the fighting card), which exist because the browser can only check those when Joan or the Fey Folk happen to be drafted |
 
 Frontend: `webapp/test/screens.mjs` §`ragtagFight` (lane A) creates a vs-bot game
 and plays a full round in a browser. Mounting the route proves nothing about a

@@ -687,6 +687,12 @@ async def catalog():
                 # not: an icon that fires before the first card, a token that
                 # eats an Attack, the health a revive comes back on. The modal
                 # had no way to say any of it, so it said nothing.
+                # The Fighters' Guide profile: the epithet under the name, the
+                # paragraph on how they play, and the five rating bars beside
+                # the complexity dots.
+                "title": board.get("title"),
+                "profile": board.get("profile"),
+                "rating": board.get("rating"),
                 "note": board.get("note"),
                 "setup_icons": board.get("setup_icons"),
                 "absorbs_attack": board.get("absorbs_attack"),

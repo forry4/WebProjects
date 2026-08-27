@@ -12,7 +12,7 @@ import {
 import { buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 import {
   Sigil, Icon, sigilOf, iconForOp, FX_TEXT, OP_GLOSSARY,
-  TRACK_GLOSSARY, TOKEN_GLOSSARY, SPACE_GLOSSARY, TOKEN_WORD, trackWord, tokenWord, complexityWord,
+  TRACK_GLOSSARY, TOKEN_GLOSSARY, SPACE_GLOSSARY, TOKEN_WORD, TRACK_TITLE, trackWord, tokenWord, complexityWord,
 } from "./art.jsx";
 import { narrateBeat, narrateRound } from "./narrate.jsx";
 import { useCardInfoGesture } from "../../shared/gestures.js";
@@ -140,8 +140,8 @@ function opCore(op) {
     case "cancel": return "Cancel their card";
     case "track": return `+${valueWord(op.n)} ${trackWord(op.track, op.n)}`;
     case "ignite": return "Set them Aflame";
-    case "plant_scheme": return "Plant an Intrigue";
-    case "unleash_scheme": return "Unleash an Intrigue";
+    case "plant_scheme": return "Plant a Scheme";
+    case "unleash_scheme": return "Unleash a Scheme";
     case "give_token": return `Pass the ${tokenWord(op.token)} to ${TARGET_WORD[op.to] || "them"}`;
     case "take_token": return `Take the ${tokenWord(op.token)} back`;
     case "flip_card": return "Turn this card over";
@@ -761,15 +761,26 @@ function DialRing({ spaces }) {
   const ring = spaces.slice(1);
   if (!ring.length) return null;
   const C = 62, R = 40, NODE = 12;
+  // Place each space where it actually IS on the board when the data says so.
+  // Laying them out by index instead put Joan's first step in the top RIGHT
+  // corner, where the rulebook has her second — the drawn dial has to agree with
+  // the physical one or it is worse than the row of boxes it replaced.
+  const CORNER = {
+    top_left: -135, top_right: -45, bottom_right: 45, bottom_left: 135,
+  };
   const at = (i) => {
-    const deg = -45 + (360 / ring.length) * i;
+    const named = CORNER[ring[i]?.name];
+    const deg = named != null ? named : -45 + (360 / ring.length) * i;
     const a = (deg * Math.PI) / 180;
     return [C + R * Math.cos(a), C + R * Math.sin(a)];
   };
   const [ex, ey] = at(0);
-  // The travel arrow sits on the ring midway between the first two nodes,
-  // pointing the way the marker goes.
-  const mid = ((-45 + 180 / ring.length) * Math.PI) / 180;
+  // The travel arrow sits on the ring midway along the arc from the first node
+  // to the second, pointing the way the marker goes.
+  const ang = (i) => Math.atan2(at(i)[1] - C, at(i)[0] - C);
+  const step = ring.length > 1
+    ? ((ang(1) - ang(0) + Math.PI * 4) % (Math.PI * 2)) : Math.PI / 2;
+  const mid = ang(0) + step / 2;
   const [ax, ay] = [C + R * Math.cos(mid), C + R * Math.sin(mid)];
   const tan = mid + Math.PI / 2;                       // clockwise tangent
   const tip = (d, w) => [ax + d * Math.cos(tan) + w * Math.cos(tan + Math.PI / 2),
@@ -818,7 +829,7 @@ function DialRing({ spaces }) {
 function SpecialTrack({ track }) {
   if (!track || !track.id) return null;
   const spaces = track.spaces || [];
-  const label = String(track.id).replace(/_/g, " ");
+  const label = TRACK_TITLE[track.id] || String(track.id).replace(/_/g, " ");
   const gloss = TRACK_GLOSSARY[track.id];
   // A circular track's first space is where the marker STARTS and, for Joan, is
   // never returned to; the rest are the ring. Numbering from the start space
@@ -858,6 +869,62 @@ function SpecialTrack({ track }) {
         </ul>
       )}
     </div>
+  );
+}
+
+/* A Fighter's profile, laid out like the printed Fighters' Guide: what they are
+ * in one paragraph, then five rated bars and the complexity dots.
+ *
+ * This is the half of a board that is a JUDGEMENT rather than a rule, and it is
+ * the half our modal had none of. Everything else in here is derived from the
+ * mechanics, which is right for the mechanics and useless for "is this Fighter
+ * for me" -- the question the draft actually asks. The bars are data
+ * (`rating` in boards.json, measured off the official sheet), so they draw the
+ * same way for a thirteenth Fighter.
+ */
+const RATED = ["health", "offense", "defense", "heal", "special"];
+const RATING_MAX = 5;
+
+function RatingBar({ label, n }) {
+  return (
+    <div className="rt-rate">
+      <span className="rt-rate-l">{label}</span>
+      <span className="rt-rate-bar" role="img" aria-label={`${n} of ${RATING_MAX}`}>
+        {Array.from({ length: RATING_MAX }, (_, i) => (
+          <i key={i} className={`rt-rate-c${i < n ? " rt-rate-on" : ""}`} />
+        ))}
+      </span>
+    </div>
+  );
+}
+
+function FighterProfile({ board }) {
+  const rating = board.rating;
+  const cx = board.complexity;
+  if (!board.profile && !rating && cx == null) return null;
+  return (
+    <>
+      {board.profile && <p className="rt-profile">{board.profile}</p>}
+      {(rating || cx != null) && (
+        <div className="rt-rates">
+          {rating && RATED.map((k) => (
+            <RatingBar key={k} label={k} n={rating[k] ?? 0} />
+          ))}
+          {cx != null && (
+            <div className="rt-rate rt-rate-cx">
+              <span className="rt-rate-l">complexity</span>
+              <span className="rt-rate-bar" role="img"
+                aria-label={`${complexityWord(cx)} to learn, ${cx} of ${RATING_MAX}`}>
+                {Array.from({ length: RATING_MAX }, (_, i) => (
+                  <i key={i} className={`rt-dot${i < cx ? " rt-dot-on" : ""}`} />
+                ))}
+              </span>
+              <span className="rt-rate-n">{complexityWord(cx)}</span>
+            </div>
+          )}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -939,12 +1006,14 @@ function InfoModal({ info, catalog, onClose }) {
           {/* Two tiers, not one dot-run: what KIND of thing this is, then the
               numbers, in the same chip vocabulary the board uses — those are
               what the modal was opened to check. */}
+          {!isCard && board.title && <p className="rt-modal-epithet">{board.title}</p>}
           <p className="rt-modal-tags">
             {isCard
               ? [board?.name, card.starting ? "Starting Card" : null,
                 card.instant_bonus ? "instant bonus" : null].filter(Boolean).join(" · ")
               : (board.tags || []).join(" · ")}
           </p>
+          {!isCard && <FighterProfile board={board} />}
           <p className="rt-modal-stats">
             {isCard ? (
               <span className="rt-chip">
@@ -958,12 +1027,6 @@ function InfoModal({ info, catalog, onClose }) {
                 <span className="rt-stat rt-pw">
                   <Icon name="power" /><b>{board.base_power}</b><small>Power</small>
                 </span>
-                {complexityWord(board.complexity) && (
-                  <span className="rt-stat rt-cx">
-                    <Icon name="fx" /><b>{complexityWord(board.complexity)}</b>
-                    <small>to learn</small>
-                  </span>
-                )}
               </>
             )}
           </p>
