@@ -337,6 +337,70 @@ def test_miladys_intrigues_are_a_pile_of_eleven_drawn_without_replacement():
     assert milady["scheme_pool"] == []
 
 
+def test_a_deferred_op_resolves_as_the_fighter_that_queued_it():
+    """Milady's health-track Intrigue is HERS, even on a turn her Partner is up.
+
+    A deferred op used to be re-run against `turn.active[seat]`, so the Intrigue her own
+    track fires resolved as her Partner -- who has no planted Schemes -- and did nothing at
+    all. Silent, and in eight games. BGA 889668565 f3t2: Milady takes 2 to land on the icon
+    at 12 while Ching Shih is active, and the Intrigue goes off.
+    """
+    game = rig(["ching_shih", "milady"], ["the_wild_bunch", "mordred"],
+               deck0=[70], deck1=[101])          # TWB attacks the opposing PARTNER
+    milady = f(game, 0, 1)
+    set_hp(game, 0, 1, 14)
+    milady["planted"] = 1
+    milady["scheme_pool"] = ["gain_2_power"]
+    f(game, 1, 0)["power"] = 2
+    was = milady["power"]
+    one_turn(game)
+    assert hp(game, 0, 1) == 12, "she has to land on the Intrigue icon at 12"
+    assert milady["scheme_pool"] == [], "the icon unleashed her Scheme, not her partner's"
+    assert milady["power"] >= was + 2
+
+
+def test_a_worked_blocks_counter_is_visible_to_if_you_are_attacked():
+    """Order matters: the riposte is declared BEFORE the conditional branches are read.
+
+    BGA 902217634 f2t3 spells it out -- Milady attacks, Mordred blocks, "Mordred attacks"
+    (the Block's bonus), and only then "Milady activates WITH A STAB AND A SMILE". Reading
+    the branches first made the riposte invisible to her own card, so the Intrigue that
+    hangs off it never fired.
+    """
+    game = rig(["milady", "golem"], ["mordred", "joan"],
+               deck0=[91], deck1=[21])           # With a Stab and a Smile vs Vicious Riposte
+    milady = f(game, 0, 0)
+    milady["planted"] = 1
+    milady["scheme_pool"] = ["gain_2_power"]
+    f(game, 1, 0)["power"] = 3
+    one_turn(game)
+    assert milady["scheme_pool"] == [], "being counter-attacked counts as being Attacked"
+
+
+def test_an_attack_declared_after_the_declare_step_still_lands():
+    """The declare step banks HP once, at its end. A later Attack has to land itself.
+
+    An icon or a deferred THEN can perform an Attack after that, and those used to be filed
+    into the turn and never resolved -- no damage, no shield spent, nothing. BGA 901568802
+    f2t2 is the case that made it matter: Milady Attacks off her health track, the Golem's
+    presence eats it and goes home, and the NEXT Protect the Innocent therefore takes its
+    expensive branch.
+    """
+    game = rig(["milady", "golem"], ["joan", "mordred"],
+               deck0=[90], deck1=[31])           # Dressed to Kill; Joan attacks Milady
+    milady = f(game, 0, 0)
+    set_hp(game, 0, 0, 14)
+    milady["planted"] = 1
+    milady["scheme_pool"] = ["attack_both"]      # off the icon at 12: hit both opponents
+    milady["power"] = 4
+    f(game, 1, 0)["power"] = 2
+    joan_hp, mordred_hp = hp(game, 1, 0), hp(game, 1, 1)
+    one_turn(game)
+    assert hp(game, 0, 0) == 12, "she has to land on the Intrigue icon"
+    assert milady["scheme_pool"] == []
+    assert hp(game, 1, 0) < joan_hp and hp(game, 1, 1) < mordred_hp,         "the Attack the Intrigue performed has to deal its damage"
+
+
 def test_the_wild_bunch_gives_its_partner_a_power_at_setup():
     """`setup_icons` must actually RESOLVE, not merely validate.
 

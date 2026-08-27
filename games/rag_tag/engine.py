@@ -469,7 +469,11 @@ class Turn:
         self.blocks: list[dict] = []
         self.hp_delta: dict[tuple[int, int], int] = {}
         self.power_ops: list[tuple[int, int, int]] = []
-        self.deferred: list[tuple[int, dict]] = []
+        # (seat, ACTING FIGHTER, op). The fighter has to travel with the op: a deferred
+        # op used to be re-run against `turn.active[seat]`, so an Intrigue unleashed by an
+        # icon on Milady's own health track resolved as her PARTNER and found no planted
+        # Schemes -- silently nothing, in eight games.
+        self.deferred: list[tuple[int, tuple[int, int], dict]] = []
         self.beat: dict = {"events": []}
         self.power_snapshot: dict[tuple[int, int], int] = {}
         self.immune: set[tuple[int, int]] = set()
@@ -676,7 +680,7 @@ def _run_ops(turn: Turn, seat: int, ops: Iterable[dict], phase: str) -> None:
     who = (seat, turn.active[seat])
     for op in ops:
         if op.get("after") and phase == "declare":
-            turn.deferred.append((seat, op))
+            turn.deferred.append((seat, who, op))
             continue
         _run_op(turn, seat, who, op, phase)
 
@@ -710,12 +714,25 @@ def _run_op(turn: Turn, seat: int, who: tuple[int, int], op: dict, phase: str) -
         if op.get("flamepower"):
             # Shango: +1 per Aflame! token already on the target, so each target
             # takes a different number and they cannot share one attack entry.
-            for tgt in targets:
-                turn.add_attack(seat, src, [tgt],
-                                power + turn.f(tgt)["tokens"].get("aflame", 0),
-                                success=op.get("success"))
-            return
-        turn.add_attack(seat, src, targets, power, success=op.get("success"))
+            made = [turn.add_attack(seat, src, [tgt],
+                                    power + turn.f(tgt)["tokens"].get("aflame", 0),
+                                    success=op.get("success"))
+                    for tgt in targets]
+        else:
+            made = [turn.add_attack(seat, src, targets, power,
+                                    success=op.get("success"))]
+        if phase == "late":
+            # AN ATTACK DECLARED AFTER THE DECLARE STEP HAS TO LAND ITSELF. The declare
+            # step turns queued Attacks into HP at its end, and it has already run by the
+            # time an icon or a deferred THEN speaks -- so a late Attack used to be filed
+            # and never resolved. Milady's health-track Intrigue is the visible case: BGA
+            # 901568802 f2t2 has her Attack the Golem off the track, the presence eat it
+            # and the token go home, which flips the NEXT Protect the Innocent to its
+            # expensive branch. We queued the Attack, dealt nothing, kept the token, and
+            # took the cheap branch for the rest of the game.
+            _apply_blocks(turn)                    # a Block still catches it
+            for atk in made:
+                _land_attack(turn, atk)
         return
 
     if name == "block":
@@ -893,7 +910,7 @@ def _unleash_scheme(turn: Turn, who: tuple[int, int], phase: str) -> None:
     eff = next(e for e in MILADY_SCHEMES["effects"] if e["id"] == eid)
     turn.note(kind="scheme_reveal", seat=who[0], slot=who[1], effect=eff["id"])
     if eff["id"] == "poison":
-        turn.deferred.append((who[0], {"op": "fx", "name": "milady_poison"}))
+        turn.deferred.append((who[0], who, {"op": "fx", "name": "milady_poison"}))
         return
     for op in eff["ops"]:
         _run_op(turn, who[0], who, op, phase)
@@ -970,6 +987,19 @@ def _declare(turn: Turn) -> None:
 
     _apply_blocks(turn)
 
+    # A WORKED BLOCK PAYS OUT BEFORE THE CONDITIONAL BRANCHES ARE READ, because its
+    # bonus is usually a counter-Attack and "if you are Attacked" has to see it. BGA's
+    # log is explicit about the order (902217634 f2t3): Milady attacks, Mordred blocks,
+    # "Mordred attacks" -- the riposte -- and only THEN "Milady activates WITH A STAB AND
+    # A SMILE". Reading the branches first made her riposte invisible to her own card, so
+    # the Intrigue that follows it never fired.
+    for block in turn.blocks:
+        if block["worked"] and block["success"]:
+            for op in block["success"]:
+                _run_op(turn, block["seat"], block["source"], op, "declare")
+    if turn.blocks:
+        _apply_blocks(turn)
+
     # SECOND PASS. Everything that had to wait for the other card is answered
     # now, against a fully declared turn: "if neither Opponent Attacks", "if you
     # are Attacked", "if the Attack is Blocked". Anything they add is then run
@@ -979,12 +1009,7 @@ def _declare(turn: Turn) -> None:
     if turn.late_conds:
         _apply_blocks(turn)
 
-    # Success is knowable now: a Block that caught at least one Attack, and an
-    # Attack that nothing Blocked. Their bonuses join the same simultaneous pool.
-    for block in turn.blocks:
-        if block["worked"] and block["success"]:
-            for op in block["success"]:
-                _run_op(turn, block["seat"], block["source"], op, "declare")
+    # An Attack that nothing Blocked is knowable only once every Block is in.
     for atk in list(turn.attacks):
         if not atk["negated"] and atk["success"]:
             for op in atk["success"]:
@@ -1012,12 +1037,17 @@ def _declare(turn: Turn) -> None:
     # Surviving Attacks land. Several sources hitting one fighter is a single
     # Attack of their combined Power, which only shows in the log.
     for atk in turn.attacks:
-        if atk["negated"] or atk["power"] < 0:
+        _land_attack(turn, atk)
+
+
+def _land_attack(turn: Turn, atk: dict) -> None:
+    """Turn one surviving Attack into HP loss, spending any shield in its way."""
+    if atk["negated"] or atk["power"] < 0:
+        return
+    for tgt in atk["targets"]:
+        if atk["power"] > 0 and _absorb_attack(turn, tgt):
             continue
-        for tgt in atk["targets"]:
-            if atk["power"] > 0 and _absorb_attack(turn, tgt):
-                continue
-            turn.add_hp(tgt, -atk["power"])
+        turn.add_hp(tgt, -atk["power"])
 
 
 def _absorb_attack(turn: Turn, who: tuple[int, int]) -> bool:
@@ -1138,8 +1168,8 @@ def _resolve_turn(game: dict, revealed: list, doubles=None) -> dict:
                         again.add_hp(tgt, -atk["power"])
             _settle(again)
             while again.deferred:
-                d_seat, op = again.deferred.pop(0)
-                _run_op(again, d_seat, (d_seat, again.active[d_seat]), op, "late")
+                d_seat, d_who, op = again.deferred.pop(0)
+                _run_op(again, d_seat, d_who, op, "late")
                 _settle(again)
             turn.instant_loss |= again.instant_loss
             turn.drag |= again.drag
@@ -1149,8 +1179,8 @@ def _resolve_turn(game: dict, revealed: list, doubles=None) -> dict:
     # Step 7: the printed THEN, and the cards that read "after your Opponent's
     # card is resolved". They run in declaration order against the settled state.
     while turn.deferred:
-        seat, op = turn.deferred.pop(0)
-        _run_op(turn, seat, (seat, turn.active[seat]), op, "late")
+        seat, who, op = turn.deferred.pop(0)
+        _run_op(turn, seat, who, op, "late")
         _settle(turn)
 
     _become_spirits(turn)

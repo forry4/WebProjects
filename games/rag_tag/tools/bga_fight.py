@@ -80,18 +80,23 @@ def bga_turns(events):
     state, out, cur = {}, [], None
     for (fight, _log), (kind, v) in _entries(events):
         if kind == "cardsRevealed":
-            if cur is not None:
-                out.append((cur[0], cur[1], dict(state)))
             cur = (fight, int(v["turnNumber"]))
-        elif kind == "trackPositionUpdated" and cur is not None:
+        elif kind == "cardsFinished" and cur is not None:
+            # CLOSE THE TURN AT `cardsFinished`, not at the next reveal. Health moves
+            # between rounds -- an Instant Bonus off a card just built, "The Wild Bunch
+            # heals The Wild Bunch for 1" -- and bucketing those with the turn before them
+            # compares our end-of-turn state against BGA's end-of-BUILD state. It read as a
+            # persistent off-by-one on The Wild Bunch in eight games. They still update the
+            # carried state, so the next turn's snapshot has them.
+            out.append((cur[0], cur[1], dict(state)))
+            cur = None
+        elif kind == "trackPositionUpdated":
             m = v.get("marker") or {}
             if m.get("type") != "health":
                 continue
             fid = BGA_TO_FID.get(str(m.get("location", "")).split("_track_")[0])
             if fid is not None:
                 state[(fid, m.get("id"))] = m.get("locationArg")
-    if cur is not None:
-        out.append((cur[0], cur[1], dict(state)))
     return out
 
 

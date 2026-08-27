@@ -300,7 +300,7 @@ def _milady_unleash_from_track(turn, seat, who, phase):
     That timing is the whole difference from the card version: because it lands
     later it can move a marker that is currently sitting on a Stop.
     """
-    turn.deferred.append((who[0], {"op": "unleash_scheme"}))
+    turn.deferred.append((who[0], who, {"op": "unleash_scheme"}))
 
 
 @fx("golem_reanimation")
@@ -316,7 +316,7 @@ def _mordred_execution(turn, seat, who, phase):
     from . import engine
 
     if phase == "declare":
-        turn.deferred.append((seat, {"op": "fx", "name": "mordred_execution"}))
+        turn.deferred.append((seat, who, {"op": "fx", "name": "mordred_execution"}))
         return
     opp = turn.resolve_target(seat, "opp")[0]
     left = engine.hp_value(turn.f(opp))
@@ -412,7 +412,7 @@ def _harder_they_fall(turn, seat, who, phase):
         # Their Power, not his -- and if the target gets redirected it is still
         # the ORIGINAL target's Power that is used.
         turn.add_attack(seat, who, [opp], turn.power(opp))
-        turn.deferred.append((seat, {"op": "take_token", "token": "concentration"}))
+        turn.deferred.append((seat, who, {"op": "take_token", "token": "concentration"}))
         return
     if turn.f(who)["tokens"].get("concentration", 0) > 0:
         turn.move_token(who, opp, "concentration")
@@ -426,7 +426,7 @@ def _crippling_touch(turn, seat, who, phase):
     one thing in Rag Tag that changes how long a fight can run.
     """
     if phase == "declare":
-        turn.deferred.append((seat, {"op": "fx", "name": "wong_crippling_touch"}))
+        turn.deferred.append((seat, who, {"op": "fx", "name": "wong_crippling_touch"}))
         return
     turn.remove_from_play(turn.revealed[1 - seat])
     turn.remove_from_play(turn.revealed[seat])
