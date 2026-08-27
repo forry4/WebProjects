@@ -838,15 +838,24 @@ def advance_track(turn: Turn, who: tuple[int, int], name: str, n: int) -> None:
         return
 
     before = f["tracks"].get(name, 0)
-    if name == "divine_voice":
-        # A five-position dial INCLUDING the Halo, so it wraps back onto the centre --
-        # not four outer spaces the marker leaves for good. Only the space it LANDS on
-        # fires; spaces stepped over on a multi-space move do nothing.
-        pos = (before + n) % len(spec["spaces"])
+    if spec["shape"] == "circular":
+        # Only the space it LANDS on fires; spaces stepped over do nothing.
+        #
+        # `wrap_to` is the space the ring returns to, which is NOT always index 0: Joan's
+        # dial has five printed positions but a cycle of four, because the central Halo is
+        # only where the marker starts. Measured over the corpus -- 21 first moves all onto
+        # 1, transitions 1->2, 2->3, 3->4, 4->1, and not one 4->0. A plain modulo made the
+        # ring five long, so from the second lap her Power arrived a step late.
+        spaces = spec["spaces"]
+        wrap = next((i for i, sp in enumerate(spaces)
+                     if sp.get("name") == spec.get("wrap_to")), 0)
+        pos = before
+        for _ in range(n):
+            pos = pos + 1 if pos + 1 < len(spaces) else wrap
         f["tracks"][name] = pos
         turn.note(kind="track", seat=who[0], slot=who[1], track=name,
                   **{"from": before, "to": pos})
-        for icon in spec["spaces"][pos].get("icons", []):
+        for icon in spaces[pos].get("icons", []):
             _run_op(turn, who[0], who, icon, "late")
         return
 

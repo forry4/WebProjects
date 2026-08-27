@@ -546,11 +546,17 @@ def test_joans_divine_voice_grants_power_on_the_second_step():
     assert f(game, 0, 0)["power"] == was + 1, "bottom-right grants 1 Power to Joan"
 
 
-def test_joans_divine_voice_wraps_back_onto_the_halo():
+def test_joans_divine_voice_never_returns_to_the_halo():
+    """Five printed positions, a cycle of FOUR: the centre is a start, not a stop.
+
+    Measured over the corpus -- 21 first moves all land on 1, and the transitions are
+    1->2, 2->3, 3->4 and 4->1, with not one 4->0. Wrapping onto the Halo makes the ring
+    five long, so from the second lap Joan's Power arrives a step late.
+    """
     game = rig(["joan", "golem"], ["mordred", "bodvar"], deck0=[30], deck1=[24])
     f(game, 0, 0)["tracks"]["divine_voice"] = 4
     one_turn(game)
-    assert f(game, 0, 0)["tracks"]["divine_voice"] == 0, "the Halo is part of the cycle"
+    assert f(game, 0, 0)["tracks"]["divine_voice"] == 1, "the ring skips the centre"
 
 
 def test_ching_shihs_fleet_is_capped_at_twenty():

@@ -95,12 +95,18 @@ def bga_turns(events):
             cur = None
         elif kind == "trackPositionUpdated":
             m = v.get("marker") or {}
-            if m.get("type") != "health":
-                continue
             where = str(m.get("location", "")).split("_track_")
             fid = BGA_TO_FID.get(where[0])
-            if fid is not None and len(where) == 2 and where[1].isdigit():
+            if fid is None or len(where) != 2 or not where[1].isdigit():
+                continue
+            if m.get("type") == "health":
                 state[(fid, int(where[1]))] = m.get("locationArg")
+            elif m.get("type") == "special":
+                # A fighter has at most one special track, so it needs no numbering: Joan's
+                # Divine Voice dial, Bodvar's Rage, Ching Shih's Ships, the Fey Folk's
+                # Spirits. Worth comparing because it is upstream of Power -- Joan's dial
+                # pays her, and a dial one step out puts every Attack she makes one light.
+                state[(fid, "special")] = m.get("locationArg")
     return out
 
 
@@ -127,10 +133,16 @@ def our_turns(path, row):
 
     def spy(game, revealed, doubles=None):
         beat = real(game, revealed, doubles)
-        snaps.append((game["round"], game["turn"],
-                      {(game["teams"][s][t], _track_no(game["fighters"][s][t])):
-                       engine.hp_value(game["fighters"][s][t])
-                       for s in (0, 1) for t in (0, 1)}))
+        st = {}
+        for s in (0, 1):
+            for t in (0, 1):
+                f = game["fighters"][s][t]
+                fid = game["teams"][s][t]
+                st[(fid, _track_no(f))] = engine.hp_value(f)
+                spec = engine._board(f).get("special_track")
+                if spec:
+                    st[(fid, "special")] = f["tracks"].get(spec["id"])
+        snaps.append((game["round"], game["turn"], st))
         return beat
 
     engine._resolve_turn = spy
@@ -179,7 +191,8 @@ def compare(path, row):
             if got[key] == hp:
                 agreed += 1
             elif first_bad is None:
-                first_bad = (i + 1, key[0], got[key], hp)
+                first_bad = (i + 1, key[0] + ("*" if key[1] == "special" else ""),
+                             got[key], hp)
     return agreed, total, first_bad, r, theirs, ours
 
 
@@ -196,11 +209,12 @@ def one(tid):
     for i, (f, t, want) in enumerate(theirs):
         got = mine.get((f, t)) or {}
         cells = []
-        for key, hp in sorted(want.items()):
+        for key, hp in sorted(want.items(), key=lambda kv: (kv[0][0], str(kv[0][1]))):
             if key not in got:
                 continue
             val = got[key]
-            cells.append(f"{key[0]}:{val}" + ("" if val == hp else f"!={hp}"))
+            tag = key[0] if key[1] != "special" else key[0] + "*"
+            cells.append(f"{tag}:{val}" + ("" if val == hp else f"!={hp}"))
         print(f"  f{f} t{t}  " + "  ".join(cells))
     for (f, t), kos in sorted(bga_kos(list(tt_inspect.events(f"{CORP}/logs/{tid}.json")))
                               .items()):
