@@ -138,6 +138,34 @@ _RESEND_WINS = True
 _POS_FROM_TOP = True
 
 
+def public_builds(events, fid_seat):
+    """The PUBLIC record of each build: {(seat, deck_sig): (offer multiset, kept cid)}.
+
+    A build's public packet carries `addedCard` (what was kept) and `discardedCards` (the
+    rest of the offer), so it names the whole step by itself and needs no reconstruction.
+    It exists for only about half the builds -- a log carries one player's private stream --
+    which is why the parse cannot be driven off it. But where it DOES exist it is an
+    independent check on the private reconstruction, and that is what `verify_against_public`
+    uses it for. Feeding it into the parse instead changes nothing at all (measured: 22/30
+    either way, and with every combination of displacing and gap-filling), which is the
+    result worth having -- the two streams agree.
+    """
+    out = {}
+    for _mid, d in events:
+        if d["type"] != "updateBuildDeckArgs":
+            continue
+        a = d["args"]
+        added, disc = a.get("addedCard"), a.get("discardedCards")
+        if not added or not disc or a.get("drawnCards"):
+            continue
+        seat = fid_seat.get(BGA_TO_FID.get(added.get("type")))
+        if seat is None:
+            continue
+        sig = (seat, tuple((c.get("type"), c.get("typeArg")) for c in (a.get("deck") or [])))
+        out[sig] = (tuple(sorted([_cid(added)] + [_cid(c) for c in disc])), _cid(added))
+    return out
+
+
 def _steps(events, fid_seat):
     """The real per-seat step sequence, in log order.
 
@@ -176,20 +204,24 @@ def _steps(events, fid_seat):
             # the two seats stop pairing up round by round, and the second submission comes
             # back with an EMPTY legal list — the tell for "this seat already moved".
             #
-            # locationArg is DELIBERATELY NOT in the signature. The re-send often carries a
-            # DIFFERENT insert position for the same build (table 886355216: card 14 arrives
-            # at loc 2 and again at loc 3, same drawn pair, same deck length), so keying on it
-            # let the duplicate through and the replay tried to build a one-copy card twice --
-            # surfacing as "card 14 not in offer+deck", which reads like a deck-state bug and
-            # is really a de-duplication miss.
+            # THE KEY IS THE FIGHT DECK ITSELF, and nothing about the offer. One build
+            # emits up to three packets and the two private ones DISAGREE with each other --
+            # different kept card, different offer -- so any key built from the offer sees
+            # them as separate builds and replays both:
             #
-            # `deck` LENGTH is what keeps genuine repeats apart, and it has to: several cards
-            # have 2-3 copies and are legitimately built more than once. Every real repeat in
-            # the corpus differs in deck length (card 64 at 2 then 8, card 65 at 4 then 5)
-            # because the Fight deck grows underneath it; a re-send never does.
-            sig = (seat, tuple(sorted((c.get("type"), c.get("typeArg")) for c in drawn)),
-                   (added.get("type"), added.get("typeArg")),
-                   len(a.get("deck") or []))
+            #   added=82 loc=2 drawn=[21,21] deck=[20,80]                private view A
+            #   added=21 loc=0 drawn=[82,21] deck=[20,80]                private view B
+            #   added=21 loc=0 drawn=[]      deck=[20,80] disc=[21,82]   PUBLIC, confirms B
+            #
+            # `deck` is the Fight deck BEFORE the card goes in: identical across all three
+            # packets of one step, and necessarily different between a seat's consecutive
+            # builds because a card was just added to it. So it identifies the STEP, which is
+            # what we actually want to de-duplicate on.
+            #
+            # This is also what keeps genuine repeats apart, and it has to: several cards have
+            # 2-3 copies and are legitimately built more than once.
+            sig = (seat, tuple((c.get("type"), c.get("typeArg"))
+                               for c in (a.get("deck") or [])))
             if sig in seen:
                 if _RESEND_WINS:            # measured; see the constant
                     out[seen[sig]] = (mid, seat, "build", a, drawn)
@@ -322,6 +354,36 @@ class _Pending(Exception):
     """A choose_character the log has not told us how to answer."""
 
 
+def verify_against_public(events, manifest_row):
+    """Check the private reconstruction against BGA's own public record.
+
+    Returns (confirmed, disagreed, unchecked). This is the alignment-free half of the gate:
+    it needs no engine, no oracle and no calibration, so it stays meaningful on a log our
+    engine cannot finish. A disagreement means the PARSE is wrong, which is a different
+    animal from an engine bug and worth telling apart before chasing rules.
+    """
+    plan = parse_actions(events, manifest_row)
+    picks = [(st["seat"], st["move"]["fighter"]) for st in plan
+             if st["op"] == "move" and st["move"]["kind"] == "draft"]
+    fid_seat = {fid: seat for seat, fid in picks}
+    pub = public_builds(events, fid_seat)
+    confirmed = disagreed = 0
+    for _m, seat, kind, a, drawn in _steps(events, fid_seat):
+        if kind != "build":
+            continue
+        sig = (seat, tuple((c.get("type"), c.get("typeArg")) for c in (a.get("deck") or [])))
+        want = pub.get(sig)
+        if want is None:
+            continue
+        ours = (tuple(sorted([_cid(c) for c in drawn] + [_cid(a["addedCard"])])),
+                _cid(a["addedCard"]))
+        if ours == want:
+            confirmed += 1
+        else:
+            disagreed += 1
+    return confirmed, disagreed, len(pub)
+
+
 def replay(path, manifest_row, verbose=False, on_move=None):
     """Drive our engine from a log. Returns a dict describing how far it got."""
     events = list(tt_inspect.events(path))
@@ -420,9 +482,17 @@ def replay(path, manifest_row, verbose=False, on_move=None):
             fid = game["teams"][pend["seat"]][pend["slot"]]
             queue = characters.get(fid) or []
             pick = next((c for c in queue if c in pend["options"]), None)
+            if pick is None and len(pend["options"]) == 1:
+                # A FORCED choice is not a decision, and BGA does not log one. The Fey Folk
+                # reach their last Character with nothing left to choose between, so the
+                # log's activeTrack never flips a third time (table 901568802 records elf,
+                # then fairy, then all three as Spirits). Demanding the log name it stalled
+                # the replay on a move that had exactly one legal answer.
+                pick = pend["options"][0]
             if pick is None:
                 raise _Pending()
-            queue.remove(pick)   # consume in order; transitions are recorded in sequence
+            if pick in queue:
+                queue.remove(pick)   # consume in order; transitions are recorded in sequence
             engine.apply_move(game, SEATS[pend["seat"]], {"kind": "character",
                                                           "character": pick})
 

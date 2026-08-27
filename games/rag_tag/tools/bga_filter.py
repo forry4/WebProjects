@@ -32,12 +32,24 @@ def main():
         return 1
 
     keep, reasons, div = [], collections.Counter(), collections.Counter()
+    pub = collections.Counter()
     for p in paths:
         tid = os.path.basename(p)[:-5]
         row = manifest.get(tid)
         if not row:
             reasons["not in manifest"] += 1
             continue
+        # ALIGNMENT-FREE, and reported even for a log the engine cannot finish: does our
+        # reconstruction of each build match BGA's own public record of it? A disagreement
+        # here is a PARSE bug, which is worth telling apart from an engine bug before
+        # anybody goes looking through the rules.
+        try:
+            ok, bad, _n = tt_replay.verify_against_public(
+                list(tt_replay.tt_inspect.events(p)), row)
+            pub["confirmed"] += ok
+            pub["disagreed"] += bad
+        except Exception:                             # noqa: BLE001 — never break the batch
+            pub["errored"] += 1
         r = tt_replay.replay(p, row)
         dv = r.get("divergence")
         if dv:
@@ -57,6 +69,10 @@ def main():
                 print(f"  {tid}: applied {r['applied']:>3} | {why}")
 
     print(f"\n{len(paths)} logs | KEEP (replays to the recorded winner): {len(keep)}")
+    tot = pub["confirmed"] + pub["disagreed"]
+    if tot:
+        print(f"  build parse vs BGA's own public record: {pub['confirmed']}/{tot} "
+              f"({pub['confirmed'] / tot:.1%}) - a disagreement here is a PARSE bug")
     for why, n in reasons.most_common(15):
         print(f"  {n:>3}  {why}")
     if div:
