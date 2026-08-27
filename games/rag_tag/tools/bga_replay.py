@@ -398,6 +398,35 @@ def _character_choices(events):
     return out
 
 
+def character_tracks(events):
+    """fid -> [character ids] read off which health TRACK BGA moves, in play order.
+
+    A SECOND source for the same fact `_character_choices` reads from
+    `fighterSpecificState.activeTrack`, and it is needed because that one has gaps: a log
+    can stop re-broadcasting fighter state and still keep logging the fight, which left
+    884758143 with one recorded choice and a Fey Folk who had to pick twice. The fightLog
+    names the track it moves ("TheFeyFolk_track_2"), and track N is that fighter's Nth
+    Character in board order -- the same 1-based numbering `activeTrack` uses.
+    """
+    out, last = collections.defaultdict(list), {}
+    for _k, (kind, v) in fight_entries(events):
+        if kind != "trackPositionUpdated":
+            continue
+        m = v.get("marker") or {}
+        if m.get("type") != "health":
+            continue
+        where = str(m.get("location", "")).split("_track_")
+        fid = BGA_TO_FID.get(where[0])
+        if fid is None or len(where) != 2 or not where[1].isdigit():
+            continue
+        chars = FIGHTERS[fid].get("characters") or []
+        n = int(where[1])
+        if 1 <= n <= len(chars) and last.get(fid) != n:
+            last[fid] = n
+            out[fid].append(chars[n - 1]["id"])
+    return out
+
+
 def parse_actions(events, manifest_row):
     """BGA events -> ordered replay instructions (see module docstring for the shapes)."""
     seats = _seat_map(events, manifest_row)
@@ -406,7 +435,8 @@ def parse_actions(events, manifest_row):
         raise ValueError(f"expected 4 fighterDrafted, got {len(picks)}")
 
     plan = [{"op": "draft_hands", "hands": _reconstruct_hands(picks)},
-            {"op": "characters", "choices": _character_choices(events)},
+            {"op": "characters", "choices": _character_choices(events),
+             "from_tracks": character_tracks(events)},
             {"op": "tokens", "serpent": serpent_faces(events),
              "schemes": scheme_pile(events)}]
     for seat, fid in picks:
@@ -604,7 +634,7 @@ def replay(path, manifest_row, verbose=False, on_move=None):
     applied, recorded, checked, divergence = 0, None, 0, None
     pending = None          # (our state, where we were) awaiting the NEXT BGA snapshot
     trace = []
-    characters = {}
+    characters, by_track = {}, {}
 
     def do_check(step):
         """Compare our state to the PREVIOUS snapshot's counterpart — the oracle runs at lag 1.
@@ -691,6 +721,12 @@ def replay(path, manifest_row, verbose=False, on_move=None):
             fid = game["teams"][pend["seat"]][pend["slot"]]
             queue = characters.get(fid) or []
             pick = next((c for c in queue if c in pend["options"]), None)
+            if pick is None:
+                # `activeTrack` has gaps -- a log can stop re-broadcasting fighter state
+                # while the fight carries on -- so fall back to which health TRACK the
+                # fightLog moves next. Same fact, different half of the log.
+                queue = by_track.get(fid) or []
+                pick = next((c for c in queue if c in pend["options"]), None)
             if pick is None and len(pend["options"]) == 1:
                 # A FORCED choice is not a decision, and BGA does not log one. The Fey Folk
                 # reach their last Character with nothing left to choose between, so the
@@ -725,6 +761,7 @@ def replay(path, manifest_row, verbose=False, on_move=None):
                 force_draft_hands(game, step["hands"])
             elif op == "characters":
                 characters.update(step["choices"])
+                by_track.update(step["from_tracks"])
             elif op == "tokens":
                 tokens.update(step["serpent"])
                 schemes[:] = step["schemes"]
@@ -759,6 +796,12 @@ def replay(path, manifest_row, verbose=False, on_move=None):
                 _collect()
                 applied += 1
                 drain()
+        # THE LAST THING THE ENGINE ASKS FOR CAN ARRIVE AFTER THE PLAN RUNS OUT. A Character
+        # that dies on the final turn of a fight leaves a `choose_character` pending with no
+        # plan step behind it, and the game sat there unfinished -- reported as "stalled in
+        # phase=fight", which reads like a rules bug and is a driver that stopped early.
+        answer_pending()
+        drain()
     except _Pending:
         return _stop(game, applied, "unhandled pending: choose_character")
     except Exception as e:                            # noqa: BLE001 — report, don't crash the batch
