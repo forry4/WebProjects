@@ -32,7 +32,7 @@ def main():
         return 1
 
     keep, reasons, div = [], collections.Counter(), collections.Counter()
-    pub = collections.Counter()
+    pub, rev = collections.Counter(), collections.Counter()
     for p in paths:
         tid = os.path.basename(p)[:-5]
         row = manifest.get(tid)
@@ -58,6 +58,14 @@ def main():
             if "-v" in sys.argv:
                 print(f"  {tid}: STATE DIVERGENCE mid {dv['mid']} "
                       f"round {dv['round']} phase={dv['phase']}: {dv['fighters']}")
+        rev["ok"] += r.get("rev_ok", 0)
+        rev["tot"] += r.get("rev_tot", 0)
+        if r.get("rev_tot"):
+            rev["games"] += 1
+            if r.get("rev_first_bad") is None:
+                rev["clean"] += 1
+            elif not r["winner_match"]:
+                rev["bad_and_wrong"] += 1
         if r["winner_match"]:
             keep.append(tid)
         else:
@@ -73,6 +81,12 @@ def main():
     if tot:
         print(f"  build parse vs BGA's own public record: {pub['confirmed']}/{tot} "
               f"({pub['confirmed'] / tot:.1%}) - a disagreement here is a PARSE bug")
+    if rev["tot"]:
+        print(f"  cards revealed, vs BGA's own fightLog: {rev['ok']}/{rev['tot']} "
+              f"({rev['ok'] / rev['tot']:.1%}); {rev['clean']}/{rev['games']} games match the "
+              f"WHOLE sequence")
+        print(f"    -> reveals right but winner wrong = an ENGINE bug; reveals wrong = the "
+              f"replay lost the deck order")
     for why, n in reasons.most_common(15):
         print(f"  {n:>3}  {why}")
     if div:

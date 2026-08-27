@@ -248,6 +248,47 @@ def _steps(events, fid_seat):
     return out
 
 
+def reveals(events, seat_of_pid):
+    """The exact card each seat revealed, per fight and turn, from BGA's own fightLog.
+
+    `newPrivateState` carries a `fightLog`, and its `cardsRevealed` entries name both
+    revealed cards outright -- with the active Fighter, the turn and the fight. This is the
+    strongest record in the log by a distance: everything else about the Fight deck has to
+    be inferred from insert positions, and this simply says what happened.
+
+    It is also what settles which end of the Fight deck is the top. Round 1 of table
+    886302456 reveals the card at locationArg 1 out of a deck holding locationArgs 0 and 1,
+    so the HIGHEST is the top -- confirming the flip that three separate measures had
+    already forced, and correcting a structural reading that said the opposite (it had
+    confused BGA's per-instance `id` with the card's `typeArg`).
+
+    Returns [(fight, turn, {seat: cid})] in play order.
+    """
+    out = {}
+    for _mid, d in events:
+        if d["type"] != "newPrivateState":
+            continue
+        a = d.get("args") or {}
+        inner = a.get("args") if isinstance(a, dict) else None
+        if not isinstance(inner, dict) or "fightLog" not in inner:
+            continue
+        for e in inner["fightLog"]:
+            if e.get("type") != "cardsRevealed":
+                continue
+            try:
+                v = json.loads(e["value"])
+            except Exception:                         # noqa: BLE001 — a malformed entry is not fatal
+                continue
+            row = {}
+            for who, team in (("card1", "teamId1"), ("card2", "teamId2")):
+                card, seat = v.get(who), seat_of_pid.get(str(v.get(team)))
+                if card is not None and seat is not None:
+                    row[seat] = ART_TO_CID[int(card["typeArg"])]
+            if row:
+                out[(int(e["fight_id"]), int(e["log_id"]))] = (v.get("turnNumber"), row)
+    return [(f, t, row) for (f, _l), (t, row) in sorted(out.items())]
+
+
 def _character_choices(events):
     """fid -> [character ids, in the order the log first reveals them].
 
@@ -296,6 +337,16 @@ def parse_actions(events, manifest_row):
         teams[seat].append(fid)
     fid_seat = {fid: seat for seat, fids in teams.items() for fid in fids}
 
+    # The Fighter each seat leads with, straight from the first revealed cards.
+    seq = reveals(events, _seat_map(events, manifest_row))
+    lead = {}
+    if seq:
+        _f, _t, first = seq[0]
+        for seat, cid in first.items():
+            fid = CARDS[cid].get("fighter")
+            if fid in teams[seat]:
+                lead[seat] = fid
+
     # Snapshots carry move_ids too, so checks can be INTERLEAVED BY MOVE ID rather than
     # consumed in sequence — which is what made the earlier "joan power 2 vs 1" divergence
     # untrustworthy. A check now lands at the point in the game it actually describes.
@@ -317,13 +368,16 @@ def parse_actions(events, manifest_row):
         # low — a uniform off-by-one across all four fighters, which is the signature of a
         # timing offset rather than a rules bug, and worth recognising as such.
         if kind == "order":
-            # The ORDER packet's deck holds exactly one card -- the partner's Starting Card,
-            # already placed -- so the sort direction cannot matter here and is left alone.
-            # Flipping the chosen slot was tried and is NOT a global correction: it fixes
-            # three games and breaks four, so which Fighter leads is being recovered wrongly
-            # in a way that varies per game. Unresolved; see the note on _POS_FROM_TOP.
-            deck = sorted((a.get("deck") or []), key=lambda c: c.get("locationArg", 0))
-            fid0 = BGA_TO_FID.get(deck[0].get("type")) if deck else None
+            # WHICH FIGHTER LEADS COMES FROM THE FIGHT LOG, not from the Starting-Card
+            # packet. That packet holds a single card and says nothing about the choice, so
+            # the old reading -- take the card already in the deck -- was a guess; flipping
+            # it fixed three games and broke four, which is the signature of a guess rather
+            # than an off-by-one. The first `cardsRevealed` of the first fight names the
+            # active Fighter for BOTH seats outright, so there is nothing left to infer.
+            fid0 = lead.get(seat)
+            if fid0 is None:                       # no fightLog (a game that ended in draft)
+                deck = sorted((a.get("deck") or []), key=lambda c: c.get("locationArg", 0))
+                fid0 = BGA_TO_FID.get(deck[0].get("type")) if deck else None
             if fid0 in teams[seat]:
                 plan.append({"op": "move", "seat": seat,
                              "move": {"kind": "order", "slot": teams[seat].index(fid0)}})
@@ -411,6 +465,24 @@ def replay(path, manifest_row, verbose=False, on_move=None):
     except Exception as e:                            # noqa: BLE001
         return _stop(None, 0, f"parse: {type(e).__name__}: {e}")
 
+    seat_of_pid = _seat_map(events, manifest_row)
+    want_reveals = reveals(events, seat_of_pid)
+    seen_beats = {}                 # (round, turn) -> revealed cids, accumulated across rounds
+
+    def _collect():
+        """`game["beats"]` is CLEARED every round, so it has to be harvested as it goes.
+
+        Reading it at the end compares one round against the whole game and scores ~0.21
+        while the truth is 0.935 -- a measurement that looks like a catastrophic engine bug
+        and is nothing but a stale read.
+        """
+        for b in game["beats"]:
+            # Not every beat is a reveal: the Golem's Reanimation and Milady's Schemes append
+            # their own beats, which carry narration but no `cids`. Only the reveal beats are
+            # comparable, and skipping the rest is not a loss -- BGA logs them separately too.
+            if "cids" in b and "turn" in b:
+                seen_beats.setdefault((game["round"], b["turn"]), b["cids"])
+
     game = engine.new_game(SEATS, seed=0)
     applied, recorded, checked, divergence = 0, None, 0, None
     pending = None          # (our state, where we were) awaiting the NEXT BGA snapshot
@@ -476,6 +548,7 @@ def replay(path, manifest_row, verbose=False, on_move=None):
         if on_move is not None:
             on_move(game, SEATS[seat], move, seat)
         engine.apply_move(game, SEATS[seat], move)
+        _collect()
         applied += 1
         if verbose:
             print(f"  [{applied:>3}] seat {seat} {move}")
@@ -550,12 +623,28 @@ def replay(path, manifest_row, verbose=False, on_move=None):
                 if on_move is not None:
                     on_move(game, SEATS[seat], move, seat)
                 engine.apply_move(game, SEATS[seat], move)
+                _collect()
                 applied += 1
                 drain()
     except _Pending:
         return _stop(game, applied, "unhandled pending: choose_character")
     except Exception as e:                            # noqa: BLE001 — report, don't crash the batch
         return _stop(game, applied, f"{type(e).__name__}: {e}")
+    _collect()
+    ours_reveals = [c for _k, c in sorted(seen_beats.items())]
+    rev_ok = rev_tot = 0
+    rev_first_bad = None
+    for i, (_f, _t, row) in enumerate(want_reveals):
+        if i >= len(ours_reveals):
+            break
+        for st in (0, 1):
+            if row.get(st) is None:
+                continue
+            rev_tot += 1
+            if row[st] == ours_reveals[i][st]:
+                rev_ok += 1
+            elif rev_first_bad is None:
+                rev_first_bad = i + 1
     left = len(queues[0]) + len(queues[1])
     over = engine.is_over(game)
     summary = engine.result_summary(game) if over else {}
@@ -569,13 +658,15 @@ def replay(path, manifest_row, verbose=False, on_move=None):
             "winner": ours, "recorded_winner": recorded,
             "winner_match": bool(over) and ours == recorded,
             "phase": game["phase"], "summary": summary,
-            "divergence": divergence, "checked": checked, "unused": left, "trace": trace}
+            "divergence": divergence, "checked": checked, "unused": left, "trace": trace,
+            "rev_ok": rev_ok, "rev_tot": rev_tot, "rev_first_bad": rev_first_bad}
 
 
 def _stop(game, applied, why):
     return {"over": False, "applied": applied, "stopped": why,
             "winner": None, "recorded_winner": None, "winner_match": False, "summary": {},
-            "divergence": None, "checked": 0, "unused": 0, "trace": []}
+            "divergence": None, "checked": 0, "unused": 0, "trace": [],
+            "rev_ok": 0, "rev_tot": 0, "rev_first_bad": None}
 
 
 def main():
