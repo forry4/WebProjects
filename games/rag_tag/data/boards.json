@@ -257,7 +257,19 @@
         {"kind": "hp", "hp": 25, "start": true}
       ],
       "special_track": null,
-      "tokens": {"presence": 1}
+      "tokens": {"presence": 1},
+      "absorbs_attack": ["presence"],
+      "_comment": [
+        "Protect the Innocent invests: the Golem takes 3 and his Partner gains his",
+        "presence. The token is a ONE-SHOT SHIELD -- the next Attack aimed at whoever",
+        "holds it is negated and the token comes back to the Golem, which is what lets",
+        "the card be played for its investment again later. Read straight off BGA's log:",
+        "902218046 f1t2 'The Wild Bunch attacks Bodvar' -> Bodvar loses no health ->",
+        "'The Golem gains [token]', and 886355216 f2t2 where Maman Brijit DEFLECTS the",
+        "Golem's own Attack onto his partner Milady and the presence eats it.",
+        "Modelling it as a permanent flag stuck the card's if/else on 'partner has it'",
+        "after one play, so the Golem never paid the 3 again."
+      ]
     },
 
     "the_fey_folk": {

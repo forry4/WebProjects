@@ -242,6 +242,101 @@ def test_a_health_track_icon_fires_when_passed_and_not_when_left():
     assert f(game2, 0, 0)["power"] == was, "sitting on an icon and leaving pays nothing"
 
 
+def test_a_track_icon_pays_the_fighter_whose_marker_moved_not_the_active_one():
+    """The Golem's +1 Power icon is HIS, even on a turn his Partner is up.
+
+    `resolve_target` read "self" off the seat's ACTIVE fighter, which is right for a card
+    and wrong for a health-track icon -- an icon belongs to whoever's marker just crossed
+    it, and that is the Partner as often as not. BGA's log says it plainly: 902218046 f2t2
+    heals the Golem 19 -> 21 across his icon at 20 while Bodvar is active, and BGA pays THE
+    GOLEM. We paid Bodvar, so the Golem's Attacks went out two Power light for the rest of
+    the game.
+    """
+    game = rig(["bodvar", "golem"], ["joan", "mordred"],
+               deck0=[121], deck1=[30])          # Blood Ties heals the partner; Joan idles
+    set_hp(game, 0, 1, 19)
+    golem_was = f(game, 0, 1)["power"]
+    bodvar_was = f(game, 0, 0)["power"]
+    one_turn(game)
+    assert hp(game, 0, 1) == 21, "the heal has to actually cross the icon at 20"
+    assert f(game, 0, 1)["power"] == golem_was + 1, "the icon pays the marker's owner"
+    assert f(game, 0, 0)["power"] == bodvar_was, "and not the fighter who happens to be up"
+
+
+def test_the_golems_presence_eats_one_attack_and_goes_home():
+    """Protect the Innocent INVESTS: 3 damage now for a one-shot shield on the Partner.
+
+    The token used to be a permanent flag, so the card's if/else stuck on "partner has it"
+    after a single play and the Golem attacked free for the rest of the game, never paying
+    the 3 again. BGA spends it: 902218046 f1t2 has The Wild Bunch attack Bodvar, Bodvar lose
+    no health, and "The Golem gains [token]" in the same breath.
+    """
+    game = rig(["golem", "shango"], ["the_wild_bunch", "mordred"],
+               deck0=[10, 11],                   # Protect the Innocent, then Fist of Clay
+               deck1=[104, 101])                 # a heal, then We Ain't Here to Talk
+    golem_hp = hp(game, 0, 0)
+    one_turn(game)
+    assert hp(game, 0, 0) == golem_hp - 3, "he pays 3 to place it"
+    assert f(game, 0, 1)["tokens"].get("presence") == 1, "and his Partner is holding it"
+
+    # We Ain't Here to Talk attacks the opposing PARTNER -- the fighter now shielded.
+    f(game, 1, 0)["power"] = 5
+    shango_hp = hp(game, 0, 1)
+    one_turn(game)
+    assert hp(game, 0, 1) == shango_hp, "the presence negated the Attack outright"
+    assert f(game, 0, 1)["tokens"].get("presence", 0) == 0
+    assert f(game, 0, 0)["tokens"].get("presence") == 1, "and the token returns to the Golem"
+
+
+def test_the_presence_is_spent_once_and_the_next_attack_lands():
+    """One shield, one Attack. The third turn has to hurt."""
+    game = rig(["golem", "shango"], ["the_wild_bunch", "mordred"],
+               deck0=[10, 11, 11], deck1=[104, 101, 101])
+    f(game, 1, 0)["power"] = 5
+    one_turn(game)
+    one_turn(game)
+    shango_hp = hp(game, 0, 1)
+    one_turn(game)
+    assert hp(game, 0, 1) < shango_hp, "the shield is gone; this one lands"
+
+
+def test_miladys_intrigues_are_a_pile_of_eleven_drawn_without_replacement():
+    """Nine faces, eleven tokens, poison three of them -- and a revealed token is gone.
+
+    The engine used to `random.choice` an effect per reveal, which priced poison at 1-in-9
+    on every Intrigue instead of 3-in-11 that shrink as they are spent, and let one game
+    reveal the same unique token four times. The composition is not a guess: BGA names each
+    revealed token `token-milady-scheme-N`, and across 40 games only face 6 (poison) ever
+    shows up on two -- or three -- distinct token ids inside a single game.
+    """
+    from games.rag_tag.fighters import MILADY_SCHEMES
+
+    counts = {eff["id"]: eff["copies"] for eff in MILADY_SCHEMES["effects"]}
+    assert sum(counts.values()) == MILADY_SCHEMES["total_tokens"] == 11
+    assert counts["poison"] == 3
+    assert sorted(v for k, v in counts.items() if k != "poison") == [1] * 8
+
+    game = rig(["milady", "mordred"], ["joan", "golem"])
+    milady = f(game, 0, 0)
+    assert sorted(milady["scheme_pool"]) == sorted(
+        [e["id"] for e in MILADY_SCHEMES["effects"] for _ in range(e["copies"])])
+
+    # A reveal takes the top token off the pile and it does not come back.
+    milady["scheme_pool"] = ["gain_2_power", "partner_gains_2_power"]
+    milady["planted"] = 2
+    turn = E.Turn(game, [None, None])
+    was = milady["power"]
+    E._unleash_scheme(turn, (0, 0), "late")
+    E._apply_power(turn)
+    assert milady["scheme_pool"] == ["partner_gains_2_power"]
+    assert milady["power"] == was + 2, "the token on top is the one that resolved"
+
+    milady["scheme_pool"] = []
+    milady["planted"] = 1
+    E._unleash_scheme(turn, (0, 0), "late")       # an empty pile reveals nothing
+    assert milady["scheme_pool"] == []
+
+
 def test_the_wild_bunch_gives_its_partner_a_power_at_setup():
     """`setup_icons` must actually RESOLVE, not merely validate.
 

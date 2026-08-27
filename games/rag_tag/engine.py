@@ -275,6 +275,8 @@ def _begin_order(game: dict) -> None:
             for f in side:
                 if "serpent" in f["tokens"]:
                     f["tokens"]["serpent_face"] = r.randint(0, 1)
+                if f["tokens"].get("scheme"):
+                    f["scheme_pool"] = _scheme_pile(r)
 
     game["phase"] = "order"
     _apply_setup_icons(game)
@@ -342,6 +344,24 @@ def _new_fighter(fid: str) -> dict:
     f["planted"] = 0        # Milady: face-down Schemes above her board
     f["scheme_pool"] = []   # filled at setup so a reveal is reproducible
     return f
+
+
+def _scheme_pile(r: random.Random) -> list[str]:
+    """Milady's Intrigues, shuffled face-down at setup.
+
+    The pile is drawn WITHOUT REPLACEMENT -- a revealed token leaves the game -- so the
+    eleven tokens have to exist as eleven tokens. Picking an effect at random per reveal
+    (what this used to do) makes every Intrigue an independent 1-in-9, which prices poison
+    at 11% instead of the 3-in-11 it starts at and lets one game reveal the same unique
+    token four times.
+
+    Shuffling at SETUP rather than drawing at reveal is what makes a game reproducible from
+    its seed, and it is the hook a replay overrides -- the same treatment the draft and the
+    Build deck get.
+    """
+    pile = [eff["id"] for eff in MILADY_SCHEMES["effects"] for _ in range(eff["copies"])]
+    r.shuffle(pile)
+    return pile
 
 
 def _start_index(track: list[dict]) -> int:
@@ -478,9 +498,20 @@ class Turn:
             self.active.append(game["instances"][inst]["slot"] if inst is not None else 0)
 
     # ---- addressing --------------------------------------------------
-    def resolve_target(self, seat: int, target: str) -> list[tuple[int, int]]:
-        me = (seat, self.active[seat])
-        mate = (seat, partner_slot(self.active[seat]))
+    def resolve_target(self, seat: int, target: str,
+                       who: tuple[int, int] | None = None) -> list[tuple[int, int]]:
+        """Who `target` names, from the point of view of the fighter doing the acting.
+
+        `who` DEFAULTS to the seat's Active Fighter, which is right for a card -- a card is
+        played by the fighter who is up. It is NOT right for a HEALTH-TRACK ICON, which
+        belongs to whoever's marker just moved, and that fighter is often the Partner.
+        Reading "self" off the active fighter regardless sent every icon on a non-active
+        board to the wrong fighter: the Golem's own +1 Power icons landed on Bodvar all game
+        (902218046 f2t2 and f2t3), and his Attacks then went out at 2 Power where BGA's went
+        out at 4.
+        """
+        me = who or (seat, self.active[seat])
+        mate = (me[0], partner_slot(me[1]))
         opp = (other_seat(seat), self.active[other_seat(seat)])
         opp_mate = (other_seat(seat), partner_slot(self.active[other_seat(seat)]))
         return {
@@ -635,7 +666,7 @@ def _cond(turn: Turn, seat: int, who: tuple[int, int], cond: dict) -> bool:
     if kind == "has_token":
         return me["tokens"].get(cond["token"], 0) > 0
     if kind == "token_on":
-        who2 = turn.resolve_target(who[0], cond["who"])[0]
+        who2 = turn.resolve_target(who[0], cond["who"], who)[0]
         return turn.f(who2)["tokens"].get(cond["token"], 0) > 0
     raise IllegalMove(f"unknown condition {kind!r}")
 
@@ -675,7 +706,7 @@ def _run_op(turn: Turn, seat: int, who: tuple[int, int], op: dict, phase: str) -
         power = turn.power(src)
         if op.get("power_bonus"):
             power += _value(turn, seat, who, op["power_bonus"])
-        targets = turn.resolve_target(seat, op.get("target", "opp"))
+        targets = turn.resolve_target(seat, op.get("target", "opp"), who)
         if op.get("flamepower"):
             # Shango: +1 per Aflame! token already on the target, so each target
             # takes a different number and they cannot share one attack entry.
@@ -693,25 +724,25 @@ def _run_op(turn: Turn, seat: int, who: tuple[int, int], op: dict, phase: str) -
         return
 
     if name == "damage":
-        for tgt in turn.resolve_target(seat, op.get("target", "opp")):
+        for tgt in turn.resolve_target(seat, op.get("target", "opp"), who):
             turn.add_hp(tgt, -_value(turn, seat, who, op["n"]))
         return
 
     if name == "heal":
-        for tgt in turn.resolve_target(seat, op.get("target", "self")):
+        for tgt in turn.resolve_target(seat, op.get("target", "self"), who):
             amount = _value(turn, seat, who, op["n"])
             turn.add_hp(tgt, amount)
             turn.heal_log.append((seat, tgt, amount))
         return
 
     if name == "power":
-        for tgt in turn.resolve_target(seat, op.get("target", "self")):
+        for tgt in turn.resolve_target(seat, op.get("target", "self"), who):
             turn.add_power(tgt, _value(turn, seat, who, op["n"]))
         return
 
     if name == "transfer_power":
-        src = turn.resolve_target(seat, op["from"])[0]
-        dst = turn.resolve_target(seat, op["to"])[0]
+        src = turn.resolve_target(seat, op["from"], who)[0]
+        dst = turn.resolve_target(seat, op["to"], who)[0]
         amount = min(op["n"], turn.f(src)["power"])
         if amount:
             turn.add_power(src, -amount)
@@ -719,7 +750,7 @@ def _run_op(turn: Turn, seat: int, who: tuple[int, int], op: dict, phase: str) -
         return
 
     if name == "cancel":
-        for tgt in turn.resolve_target(seat, op.get("target", "opp")):
+        for tgt in turn.resolve_target(seat, op.get("target", "opp"), who):
             turn.cancelled[tgt[0]] = True
         return
 
@@ -732,7 +763,7 @@ def _run_op(turn: Turn, seat: int, who: tuple[int, int], op: dict, phase: str) -
         return
 
     if name == "ignite":
-        opp = turn.resolve_target(seat, "opp")[0]
+        opp = turn.resolve_target(seat, "opp", who)[0]
         _ignite(turn, who, opp)
         return
 
@@ -745,7 +776,7 @@ def _run_op(turn: Turn, seat: int, who: tuple[int, int], op: dict, phase: str) -
         return
 
     if name == "give_token":
-        dst = turn.resolve_target(seat, op["to"])[0]
+        dst = turn.resolve_target(seat, op["to"], who)[0]
         _move_token(turn, who, dst, op["token"])
         return
 
@@ -855,11 +886,11 @@ def _unleash_scheme(turn: Turn, who: tuple[int, int], phase: str) -> None:
     the HP total AFTER everything else -- so it is deferred rather than run here.
     """
     f = turn.f(who)
-    if f["planted"] <= 0:
+    if f["planted"] <= 0 or not f.get("scheme_pool"):
         return
     f["planted"] -= 1
-    with _with_rng(turn.game) as r:
-        eff = r.choice(MILADY_SCHEMES["effects"])
+    eid = f["scheme_pool"].pop(0)
+    eff = next(e for e in MILADY_SCHEMES["effects"] if e["id"] == eid)
     turn.note(kind="scheme_reveal", seat=who[0], slot=who[1], effect=eff["id"])
     if eff["id"] == "poison":
         turn.deferred.append((who[0], {"op": "fx", "name": "milady_poison"}))
@@ -984,7 +1015,43 @@ def _declare(turn: Turn) -> None:
         if atk["negated"] or atk["power"] < 0:
             continue
         for tgt in atk["targets"]:
+            if atk["power"] > 0 and _absorb_attack(turn, tgt):
+                continue
             turn.add_hp(tgt, -atk["power"])
+
+
+def _absorb_attack(turn: Turn, who: tuple[int, int]) -> bool:
+    """Eat one Attack with a shield token, and send the token home.
+
+    The Golem's presence is the only one today. Protect the Innocent INVESTS -- he takes 3
+    and his Partner gains the token -- and the token is spent the next time an Attack is
+    aimed at whoever holds it, returning to the Golem so the card can be invested again.
+
+    Read straight off BGA's log rather than guessed: 902218046 f1t2 has "The Wild Bunch
+    attacks Bodvar", Bodvar loses no health, and "The Golem gains [token]" in the same
+    breath; 886355216 f2t2 has Maman Brijit DEFLECT the Golem's own Attack onto his partner
+    Milady, where the presence eats it. Modelling the token as a permanent flag -- which is
+    what we had -- pinned the card's if/else on "partner has it" after a single play, so the
+    Golem attacked free for the rest of the game and never paid the 3 again.
+
+    A 0-Power Attack does not spend it (nothing would have landed); a Block, which negates
+    the Attack outright, gets there first and spends nothing either.
+    """
+    holder = turn.f(who)
+    for seat in (0, 1):
+        for slot in (0, 1):
+            owner = fighter(turn.game, seat, slot)
+            for token in _board(owner).get("absorbs_attack", []):
+                # The owner holding it is the token sitting BESIDE their board, unassigned:
+                # it shields whoever it was given to, never its owner.
+                if (seat, slot) == who or holder["tokens"].get(token, 0) <= 0:
+                    continue
+                holder["tokens"][token] -= 1
+                owner["tokens"][token] = owner["tokens"].get(token, 0) + 1
+                turn.note(kind="absorb", token=token, seat=who[0], slot=who[1])
+                turn.note(kind="token", token=token, seat=seat, slot=slot, delta=1)
+                return True
+    return False
 
 
 def _apply_blocks(turn: Turn) -> None:

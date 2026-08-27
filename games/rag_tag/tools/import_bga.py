@@ -141,6 +141,17 @@ def build() -> dict:
     schemes = cards_doc["milady_schemes"]
     for i, eff in enumerate(schemes["effects"]):
         effects.validate_ops(eff["ops"], f"milady_scheme[{eff['id']}]")
+    # The pile is drawn without replacement, so the copy counts ARE the pile. Checking them
+    # against the printed token count is what keeps "9 faces, 11 tokens" from drifting into
+    # a pile of the wrong size the moment someone edits one number and not the other.
+    total = sum(eff["copies"] for eff in schemes["effects"])
+    if total != schemes["total_tokens"]:
+        raise effects.OpError(
+            f"milady_schemes: copies sum to {total}, total_tokens says "
+            f"{schemes['total_tokens']}")
+    faces = [eff["bga_token"] for eff in schemes["effects"]]
+    if len(set(faces)) != len(faces):
+        raise effects.OpError("milady_schemes: duplicate bga_token")
 
     return {
         "FIGHTERS": fighters,

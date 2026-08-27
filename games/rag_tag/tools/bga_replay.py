@@ -47,7 +47,7 @@ SEATS = ["p0", "p1"]
 
 # ── the BGA half — written against real logs (tt_inspect.py), not guessed ────────────
 import collections
-from games.rag_tag.fighters import CARDS, FIGHTERS, ROSTER
+from games.rag_tag.fighters import CARDS, FIGHTERS, MILADY_SCHEMES, ROSTER
 
 
 
@@ -248,6 +248,57 @@ def _steps(events, fid_seat):
     return out
 
 
+def fight_entries(events):
+    """Every `fightLog` entry in the log, de-duplicated by (fight, log_id), in play order.
+
+    The entries arrive spread over many `newPrivateState` packets that re-send overlapping
+    slices of the same fight, so they have to be KEYED rather than concatenated. Both ids are
+    STRINGS in the log and sorting them as strings interleaves turn 10 with turn 1 -- an
+    ordering bug that reads exactly like a rules divergence.
+
+    Yields ((fight, log_id), (type, parsed value)).
+    """
+    out = {}
+    for _mid, d in events:
+        if d["type"] != "newPrivateState":
+            continue
+        a = d.get("args") or {}
+        inner = a.get("args") if isinstance(a, dict) else None
+        if not isinstance(inner, dict) or "fightLog" not in inner:
+            continue
+        for e in inner["fightLog"]:
+            try:
+                out[(int(e["fight_id"]), int(e["log_id"]))] = (e["type"],
+                                                               json.loads(e["value"]))
+            except Exception:                     # noqa: BLE001 — a malformed entry is not fatal
+                continue
+    return [(k, v) for k, v in sorted(out.items())]
+
+
+def scheme_pile(events):
+    """Milady's Intrigue pile, in the order the log reveals it.
+
+    Her pile is face-down and drawn without replacement, so it is setup randomness the same
+    way the draft and the Build deck are, and a replay has to override it rather than seed
+    its way to it. BGA names each revealed token `token-milady-scheme-N`, and `bga_token` in
+    the data carries that N -- a mapping derived from the corpus (see cards.json), not
+    guessed.
+
+    Returns the revealed faces in order; the caller pads with whatever is left of the pile.
+    """
+    by_n = {eff["bga_token"]: eff["id"] for eff in MILADY_SCHEMES["effects"]}
+    out = []
+    for _k, (kind, v) in fight_entries(events):
+        if kind != "schemeUnleashed":
+            continue
+        face = ((v.get("token") or {}).get("typeArg") or "")
+        if face.startswith("token-milady-scheme-"):
+            eid = by_n.get(int(face.rsplit("-", 1)[1]))
+            if eid:
+                out.append(eid)
+    return out
+
+
 def reveals(events, seat_of_pid):
     """The exact card each seat revealed, per fight and turn, from BGA's own fightLog.
 
@@ -264,29 +315,48 @@ def reveals(events, seat_of_pid):
 
     Returns [(fight, turn, {seat: cid})] in play order.
     """
+    out = []
+    for (_f, _l), (kind, v) in fight_entries(events):
+        if kind != "cardsRevealed":
+            continue
+        row = {}
+        for who, team in (("card1", "teamId1"), ("card2", "teamId2")):
+            card, seat = v.get(who), seat_of_pid.get(str(v.get(team)))
+            if card is not None and seat is not None:
+                row[seat] = ART_TO_CID[int(card["typeArg"])]
+        if row:
+            out.append((_f, v.get("turnNumber"), row))
+    return out
+
+
+def serpent_faces(events):
+    """{fid: 0|1} — the face Mephisto's serpent token is SET UP on, from the log.
+
+    This is setup randomness, exactly like the draft and the build shuffle, and it has to be
+    overridden for the same reason: `_begin_order` rolls it (`r.randint(0, 1)`) and a replay
+    cannot seed its way to the same coin. Leaving it random silently halves the games where
+    Mephisto plays, because Twin Serpents ATTACKS on black and merely gives a Power on white.
+
+    The mapping is DERIVED, not guessed: over the four games in the corpus that field
+    Mephisto, `state: "back"` always precedes a first Twin Serpents that attacks (884758143,
+    888405016) and `"front"` always precedes one that only grants Power (902099944,
+    902266350). The split is 2/2, which is also the evidence that the real game randomises it
+    -- so our engine's coin is the right RULE, and this is a harness override rather than a
+    fix.
+    """
     out = {}
     for _mid, d in events:
-        if d["type"] != "newPrivateState":
+        if d["type"] != "updateCardAndFighterData":
             continue
-        a = d.get("args") or {}
-        inner = a.get("args") if isinstance(a, dict) else None
-        if not isinstance(inner, dict) or "fightLog" not in inner:
-            continue
-        for e in inner["fightLog"]:
-            if e.get("type") != "cardsRevealed":
+        for f in (d["args"].get("allFighters") or []):
+            fid = BGA_TO_FID.get(f.get("typeArg"))
+            st = f.get("fighterState") or {}
+            if fid is None or fid in out or not isinstance(st, dict):
                 continue
-            try:
-                v = json.loads(e["value"])
-            except Exception:                         # noqa: BLE001 — a malformed entry is not fatal
-                continue
-            row = {}
-            for who, team in (("card1", "teamId1"), ("card2", "teamId2")):
-                card, seat = v.get(who), seat_of_pid.get(str(v.get(team)))
-                if card is not None and seat is not None:
-                    row[seat] = ART_TO_CID[int(card["typeArg"])]
-            if row:
-                out[(int(e["fight_id"]), int(e["log_id"]))] = (v.get("turnNumber"), row)
-    return [(f, t, row) for (f, _l), (t, row) in sorted(out.items())]
+            for t in (st.get("tokens") or []):
+                if t.get("typeArg") == "token-serpent" and t.get("state") in ("front", "back"):
+                    out[fid] = 1 if t["state"] == "back" else 0
+    return out
 
 
 def _character_choices(events):
@@ -328,7 +398,9 @@ def parse_actions(events, manifest_row):
         raise ValueError(f"expected 4 fighterDrafted, got {len(picks)}")
 
     plan = [{"op": "draft_hands", "hands": _reconstruct_hands(picks)},
-            {"op": "characters", "choices": _character_choices(events)}]
+            {"op": "characters", "choices": _character_choices(events)},
+            {"op": "tokens", "serpent": serpent_faces(events),
+             "schemes": scheme_pile(events)}]
     for seat, fid in picks:
         plan.append({"op": "move", "seat": seat, "move": {"kind": "draft", "fighter": fid}})
 
@@ -423,6 +495,34 @@ def force_build_offer(game, seat, cids):
     return chosen
 
 
+def _force_tokens(game, faces, pile):
+    """Override the setup randomness that lives on a fighter board.
+
+    Two things, both hidden and both rolled in `_begin_order`: Mephisto's serpent coin, and
+    Milady's face-down Intrigue pile. Neither can be reached by seeding, and both change the
+    fight outright -- Twin Serpents attacks on black and merely grants a Power on white, and
+    the Intrigues run from "heal 6" to poison.
+
+    The pile is set to the faces the log actually revealed, with whatever is left of the
+    eleven appended so the pile stays the right multiset. A log that revealed MORE of a face
+    than the pile holds would be a mapping error rather than a long game, so the leftovers
+    are computed by removal and the extras are kept where they fall -- visible, not silently
+    dropped.
+    """
+    for seat in (0, 1):
+        for slot in (0, 1):
+            f = game["fighters"][seat][slot]
+            want = faces.get(game["teams"][seat][slot])
+            if want is not None and "serpent" in f["tokens"]:
+                f["tokens"]["serpent_face"] = want
+            if pile and f.get("scheme_pool"):
+                left = list(f["scheme_pool"])
+                for eid in pile:
+                    if eid in left:
+                        left.remove(eid)
+                f["scheme_pool"] = list(pile) + left
+
+
 class _Pending(Exception):
     """A choose_character the log has not told us how to answer."""
 
@@ -484,6 +584,7 @@ def replay(path, manifest_row, verbose=False, on_move=None):
                 seen_beats.setdefault((game["round"], b["turn"]), b["cids"])
 
     game = engine.new_game(SEATS, seed=0)
+    tokens, schemes, forced = {}, [], False
     applied, recorded, checked, divergence = 0, None, 0, None
     pending = None          # (our state, where we were) awaiting the NEXT BGA snapshot
     trace = []
@@ -608,6 +709,9 @@ def replay(path, manifest_row, verbose=False, on_move=None):
                 force_draft_hands(game, step["hands"])
             elif op == "characters":
                 characters.update(step["choices"])
+            elif op == "tokens":
+                tokens.update(step["serpent"])
+                schemes[:] = step["schemes"]
             elif op == "result":
                 recorded = step["winner_seat"]
             elif op == "check":
@@ -623,6 +727,19 @@ def replay(path, manifest_row, verbose=False, on_move=None):
                 if on_move is not None:
                     on_move(game, SEATS[seat], move, seat)
                 engine.apply_move(game, SEATS[seat], move)
+                # `_begin_order` rolls the serpent coin as the last draft pick lands, so the
+                # override goes in the moment the phase leaves "draft" -- before any card can
+                # read it. Setting it earlier is a no-op (the fighters do not exist yet).
+                #
+                # EXACTLY ONCE. The two `order` moves are emitted where their Starting-Card
+                # packets sit in the log, and the second one can land after the engine has
+                # already played the whole first fight -- so re-forcing on every move reset
+                # Mephisto's serpent to its setup face mid-game and un-flipped it. That read
+                # as a rules divergence in a game which, before the override existed, had
+                # reproduced all 74 of its turns exactly.
+                if game["phase"] != "draft" and not forced:
+                    forced = True
+                    _force_tokens(game, tokens, schemes)
                 _collect()
                 applied += 1
                 drain()
