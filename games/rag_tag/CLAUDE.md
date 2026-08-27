@@ -58,8 +58,19 @@ this engine. The corpus lives OUTSIDE the repo (`TAGTEAM_CORPUS`, default
 
     python -m games.rag_tag.tools.bga_filter [-v]     # replay all, histogram the stops
 
-**Winner parity is 13/30 as of 2026-08-26, and the stop REASONS are the output** — the
-percentage is noise at this corpus size, the reasons are informative from game one.
+**Winner parity is 27/40 as of 2026-08-27** (was 13/30 the day before). The stop REASONS
+matter more than the percentage, and so do the two ALIGNMENT-FREE gates the filter now
+prints, because both stay meaningful on a log the engine cannot finish:
+
+    build parse vs BGA's own public record: 194/197 (98.5%)  <- a miss here is a PARSE bug
+    cards revealed, vs BGA's fightLog:     1573/1682 (93.5%); 37/40 whole sequences
+
+**That second number is the one to read first.** `newPrivateState` carries a `fightLog`
+whose `cardsRevealed` entries name both revealed cards, the active Fighter and the turn —
+the strongest record in the log, and it splits the two failure modes that otherwise look
+identical: **reveals right but winner wrong is an ENGINE bug; reveals wrong means the replay
+lost the deck order.** 37 games play exactly the right cards in exactly the right order while
+only 27 finish right, so ten failures are known rules divergences rather than archaeology.
 
 **Two real Power bugs came out of it that 101 passing tests could not see**, because
 both look exactly like the rules as written and only a real game disagrees:
@@ -86,10 +97,29 @@ data. BGA's own `startingPower` matches `base_power` for all 12 fighters, and ev
 health track matches slot-for-slot (Brijit's 16..−2 range and the Fey Folk's three
 character tracks included). Joan's dial was the ONLY geometry mismatch in the game.
 
-Still open: 6 logs stall in `phase=build` with no builds left, 4 hit `card N not in
-offer+deck`, and the draft hands are reconstructed with invented padding — fine for
-parity, **must not be used to train a draft policy**. Health markers are still not
-compared (BGA reports a board SLOT id, so it needs each track's layout mapped).
+**Three harness bugs, each of which looked like an engine bug.** Worth knowing because the
+next one will too:
+* **Positions were reversed.** BGA's `addedCard.locationArg` counts from the opposite end of
+  the Fight deck to our insert index. Nothing ever threw — every position stayed in range
+  either way (246/246) — the cards just went in in the wrong order.
+* **De-duplication was keyed on the offer.** One build emits up to three packets and the two
+  private ones DISAGREE (different kept card, different offer), so any offer-based key sees
+  two builds and replays both. `deck` — the Fight deck before the card goes in — is identical
+  across all three and differs between consecutive builds, so it identifies the STEP.
+* **A forced choice is not a decision** and BGA does not log one; the Fey Folk's last
+  Character stalled the replay on a move with one legal answer.
+
+Still open: 7 logs stall in `phase=build` with no builds left — six of them play EVERY card
+BGA did, in order, and then fail to end the game, so a win condition is being missed. The
+draft hands are still reconstructed with invented padding — fine for parity, **must not be
+used to train a draft policy**.
+
+**The next lever is the rest of the fightLog**, which records `attackPerformed`,
+`damageTaken`, `trackPositionUpdated` (steps + fighter), `powerGained` and `healPerformed`
+per turn — enough to locate a rules divergence exactly. A first attempt at a per-turn damage
+comparison scored a 0.6–0.9 mismatch rate on EVERY card, which cannot be true when 27/40
+games reproduce exactly, so that instrument needs calibrating before its output means
+anything. Do not read blame counts off it until it agrees with the games that already pass.
 
 The three INFERRED readings below are what more parity would settle next.
 
