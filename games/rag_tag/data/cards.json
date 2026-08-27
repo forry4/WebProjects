@@ -33,11 +33,12 @@
   "schema": 1,
 
   "known_gaps": [
-    "Milady's 11 Intrigue (Scheme) tokens carry only 9 DISTINCT abilities, listed in",
-    "milady_schemes below and taken verbatim-in-mechanics from BGA's own i18n strings.",
-    "Which 2 are duplicated is not visible in any public source — the art is a face-down",
-    "pile. A gamedatas dump or a replay settles it; until then import_bga.py must not",
-    "silently guess. See data/README.md.",
+    "RESOLVED 2026-08-27, by the replay corpus. Milady's 11 Intrigue (Scheme) tokens carry",
+    "only 9 DISTINCT abilities, and which repeat was invisible in every public source — the",
+    "art is a face-down pile. This entry said a gamedatas dump or a replay would settle it,",
+    "and the replay did: BGA names each revealed token `token-milady-scheme-N` and the token",
+    "`id` is a distinct physical piece, so two ids on one face proves a duplicate. POISON is",
+    "the only repeated face and it has THREE copies. See milady_schemes below.",
     "",
     "Ching Shih's 'Terror of the Seas' prints effects for 0-7, 8-15 and exactly 20 Ships.",
     "16-19 is deliberately blank on the card — it does nothing but the trailing THEN +1 Ship."

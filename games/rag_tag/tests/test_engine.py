@@ -482,6 +482,66 @@ def test_wong_takes_his_concentration_back_from_the_one_he_cashed_in():
     assert other["tokens"]["concentration"] == 1, "and the other Opponent keeps theirs"
 
 
+def test_an_intrigues_attack_is_thrown_with_the_intriguers_power():
+    """Whose Power an Attack uses follows the same rule as who "self" means.
+
+    `Turn.actor` read the seat's Active Fighter, so an Attack performed by an Intrigue off
+    Milady's own health track went out with her PARTNER's Power. BGA 886310308 f4t5 hits
+    for 4 where we hit for 2.
+    """
+    game = rig(["joan", "golem"], ["ching_shih", "milady"],
+               deck0=[30], deck1=[70])            # neither active fighter attacks
+    milady = f(game, 1, 1)
+    set_hp(game, 1, 1, 14)
+    milady["planted"], milady["scheme_pool"] = 1, ["attack_both"]
+    milady["power"] = 5
+    f(game, 1, 0)["power"] = 1                    # the partner, whose Power we used to take
+    f(game, 1, 1)["tokens"]["scheme"] = 10
+    before = hp(game, 0, 0)
+    turn = E.Turn(game, [None, None])
+    E._move_marker(game, 1, 1, -2, turn.beat)     # land her on the Intrigue icon at 12
+    E._unleash_scheme(turn, (1, 1), "late")
+    E._settle(turn)
+    assert before - hp(game, 0, 0) == 5, "her Power, not her Partner's"
+
+
+def test_maman_brijit_revives_before_the_rest_of_the_turn_lands_on_her():
+    """Not at the end of the turn -- as soon as the movement that revived her settles.
+
+    BGA 902742623 f5t2 puts it inline: she is pushed past both KO spaces, "resets their
+    Health Points to 4", and only THEN does the next Intrigue deal its 1 damage, taking her
+    to 3. Reviving at the end of the turn let that damage land on the revive space, where
+    the floor swallows it, and she finished a point up.
+    """
+    game = rig(["maman_brijit", "mordred"], ["milady", "joan"], deck0=[62], deck1=[90])
+    set_hp(game, 0, 0, 1)
+    turn = E.Turn(game, [None, None])
+    turn.add_hp((0, 0), -4)                       # past both KOs, onto the revive space
+    E._settle(turn)
+    assert hp(game, 0, 0) == 4, "she is back on 4 already"
+    turn.add_hp((0, 0), -1)                       # and further damage bites from there
+    E._settle(turn)
+    assert hp(game, 0, 0) == 3
+
+
+def test_a_deflected_attack_is_still_an_attack_when_it_arrives():
+    """Maman Brijit's deflection can be eaten by a shield on the fighter she aims it at.
+
+    BGA 896447364 f6t5: she turns the Golem's 9 onto his own Partner, the Partner loses
+    nothing, and "The Golem gains [token]". Adding the damage straight to HP walked past
+    the presence and cost that Partner 9 health they never lost.
+    """
+    game = rig(["golem", "joan"], ["maman_brijit", "mordred"],
+               deck0=[10, 11], deck1=[62, 64])    # invest the presence, then he Attacks
+    one_turn(game)
+    assert f(game, 0, 1)["tokens"].get("presence") == 1
+    f(game, 0, 0)["power"] = 9
+    joan_hp = hp(game, 0, 1)
+    one_turn(game)                                # You Are Mine deflects onto Joan
+    assert hp(game, 0, 1) == joan_hp, "the presence eats the deflected Attack"
+    assert f(game, 0, 0)["tokens"].get("presence") == 1, "and goes home"
+
+
 def test_the_wild_bunch_gives_its_partner_a_power_at_setup():
     """`setup_icons` must actually RESOLVE, not merely validate.
 

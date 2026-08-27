@@ -62,15 +62,13 @@ def _entries(events):
 def bga_turns(events):
     """[(fight, turn, {(fid, marker_id): printed_hp})] — health markers at each turn's END.
 
-    BGA's `locationArg` is a board SLOT, and for every fighter in the corpus the alive slots
-    read as the PRINTED HP: slot 16 is 16 health. That is not the same as our track INDEX.
-    Nine of the ten fighters have exactly one space below "1 health", so index and printed HP
+    BGA's `locationArg` is a board SLOT, not our track INDEX: it numbers the space printed
+    "1" as slot 1, so every alive slot reads as the printed HP and the spaces below run 0,
+    -1, -2. Nine of the ten fighters have exactly one space under "1", so index and slot
     coincide and the distinction never shows; Maman Brijit has three (two KOs and a revive),
-    so our index runs two ahead of her printed HP all game.
-
-    Comparing indices therefore scored her wrong on turn 1 of every game she appeared in --
-    a systematic 2 in games that otherwise reproduce perfectly, which is the signature of an
-    encoding mismatch rather than a rules bug. Compare PRINTED HP on both sides.
+    so our index ran two ahead of her all game -- a systematic 2 in games that otherwise
+    reproduce perfectly, which is the signature of an encoding mismatch, not a rules bug.
+    `_slot` derives the offset per track rather than assuming it.
 
     A marker that is not touched in a turn keeps its position, so the state is carried
     forward rather than rebuilt; only markers of `type: "health"` count.
@@ -138,7 +136,7 @@ def our_turns(path, row):
             for t in (0, 1):
                 f = game["fighters"][s][t]
                 fid = game["teams"][s][t]
-                st[(fid, _track_no(f))] = engine.hp_value(f)
+                st[(fid, _track_no(f))] = _slot(f)
                 spec = engine._board(f).get("special_track")
                 if spec:
                     st[(fid, "special")] = f["tracks"].get(spec["id"])
@@ -153,6 +151,23 @@ def our_turns(path, row):
     return snaps, r
 
 
+def _slot(f):
+    """Our track index expressed as BGA's board SLOT.
+
+    BGA numbers a health track so that the space printed "1" is slot 1, which makes every
+    alive slot read as the printed HP -- and the spaces BELOW it run 0, -1, -2. Our tracks
+    carry a different number of spaces under "1" (Maman Brijit has three: two KOs and a
+    revive), so the offset has to be derived rather than assumed, and printed HP alone
+    cannot tell her two KO spaces apart (886310308 ends with BGA reporting her on -1).
+    """
+    track = engine.track_of(f)
+    if not track or f.get("hp") is None:
+        return 0
+    one = next((i for i, sp in enumerate(track)
+                if sp["kind"] == "hp" and sp.get("hp") == 1), None)
+    return f["hp"] - one + 1 if one is not None else engine.hp_value(f)
+
+
 def _track_no(f):
     """Which of BGA's numbered health tracks this fighter's marker is on right now.
 
@@ -164,7 +179,7 @@ def _track_no(f):
     chars = board.get("characters") or []
     if chars:
         return next((i + 1 for i, c in enumerate(chars) if c["id"] == f.get("character")), 1)
-    return 2 if board.get("back") and f.get("flipped") else 1
+    return 2 if f.get("face") == "berserker_bear" else 1
 
 
 def compare(path, row):

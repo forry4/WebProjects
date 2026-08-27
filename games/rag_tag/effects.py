@@ -344,10 +344,20 @@ def _all_legends_must_pass(turn, seat, who, phase):
 
 @fx("brijit_redirect_attacks")
 def _brijit_redirect(turn, seat, who, phase):
-    """Every Attack her Block caught turns around onto the opposing Partner."""
+    """Every Attack her Block caught turns around onto the opposing Partner.
+
+    It is still an ATTACK when it gets there, so a shield on the new target eats it: BGA
+    896447364 f6t5 has her deflect the Golem's 9 onto his own Partner Joan, Joan lose
+    nothing, and "The Golem gains [token]". Adding the damage straight to HP walked past
+    the Golem's presence and cost Joan 9 health she never lost.
+    """
+    from . import engine
+
     opp_mate = turn.resolve_target(seat, "opp_partner")[0]
     for atk in turn.attacks:
         if atk["seat"] != seat and atk["negated"] and atk["power"] > 0:
+            if engine._absorb_attack(turn, opp_mate):
+                continue
             turn.add_hp(opp_mate, -atk["power"])
             turn.note(kind="redirect", seat=opp_mate[0], slot=opp_mate[1],
                       power=atk["power"])

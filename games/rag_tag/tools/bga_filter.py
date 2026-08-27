@@ -17,6 +17,7 @@ import sys
 # TAGTEAM_CORPUS. The `cob-mining` branch's scraper writes it; nothing here downloads.
 CORP = os.environ.get("TAGTEAM_CORPUS", "C:/Users/Forrest/TagTeam_corpus")
 
+from games.rag_tag.tools import bga_fight as tt_fight
 from games.rag_tag.tools import bga_replay as tt_replay
 
 
@@ -32,7 +33,7 @@ def main():
         return 1
 
     keep, reasons, div = [], collections.Counter(), collections.Counter()
-    pub, rev = collections.Counter(), collections.Counter()
+    pub, rev, trk = collections.Counter(), collections.Counter(), collections.Counter()
     for p in paths:
         tid = os.path.basename(p)[:-5]
         row = manifest.get(tid)
@@ -50,7 +51,23 @@ def main():
             pub["disagreed"] += bad
         except Exception:                             # noqa: BLE001 — never break the batch
             pub["errored"] += 1
-        r = tt_replay.replay(p, row)
+        # THREE GATES OFF ONE REPLAY, in increasing resolution: the winner (one bit at the
+        # end), the cards revealed (the whole sequence), and every fighter's health and
+        # special track on every turn. The last one is what actually finds rules bugs --
+        # the winner only tells you a game diverged somewhere.
+        try:
+            agreed, total, first_bad, r, theirs, ours = tt_fight.compare(p, row)
+            trk["ok"] += agreed
+            trk["tot"] += total
+            trk["games"] += 1
+            trk["clean"] += first_bad is None
+            trk["turns"] += len(ours) == len(theirs)
+            if first_bad and "-v" in sys.argv:
+                print(f"  {tid}: TURN {first_bad[0]} {first_bad[1]} "
+                      f"ours {first_bad[2]} vs BGA {first_bad[3]}")
+        except Exception as e:                        # noqa: BLE001 — never break the batch
+            print(f"  {tid}: per-turn gate: {type(e).__name__}: {e}")
+            r = tt_replay.replay(p, row)
         dv = r.get("divergence")
         if dv:
             f0 = dv["fighters"][0]
@@ -87,6 +104,10 @@ def main():
               f"WHOLE sequence")
         print(f"    -> reveals right but winner wrong = an ENGINE bug; reveals wrong = the "
               f"replay lost the deck order")
+    if trk["tot"]:
+        print(f"  every fighter's TRACKS, per turn, vs the fightLog: {trk['ok']}/{trk['tot']}"
+              f" ({trk['ok'] / trk['tot']:.1%}); {trk['clean']}/{trk['games']} games exact "
+              f"throughout, {trk['turns']}/{trk['games']} matching BGA's turn count")
     for why, n in reasons.most_common(15):
         print(f"  {n:>3}  {why}")
     if div:

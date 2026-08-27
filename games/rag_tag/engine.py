@@ -525,10 +525,19 @@ class Turn:
             "all": [me, mate, opp, opp_mate],
         }[target]
 
-    def actor(self, seat: int, by: str | None) -> tuple[int, int]:
+    def actor(self, seat: int, by: str | None,
+              who: tuple[int, int] | None = None) -> tuple[int, int]:
+        """Whose Power an Attack is thrown with.
+
+        Same rule as `resolve_target`: the fighter doing the acting, which defaults to the
+        Active Fighter but is not it when a health-track icon or an Intrigue is what
+        performs the Attack. Milady's Intrigue Attack was being thrown with her PARTNER's
+        Power and credited to them (886310308 f4t5: BGA hits for 4, we hit for 2).
+        """
+        me = who or (seat, self.active[seat])
         if by == "partner":
-            return (seat, partner_slot(self.active[seat]))
-        return (seat, self.active[seat])
+            return (me[0], partner_slot(me[1]))
+        return me
 
     # ---- helpers effects may use -------------------------------------
     def f(self, who: tuple[int, int]) -> dict:
@@ -706,7 +715,7 @@ def _run_op(turn: Turn, seat: int, who: tuple[int, int], op: dict, phase: str) -
         return
 
     if name == "attack":
-        src = turn.actor(seat, op.get("by"))
+        src = turn.actor(seat, op.get("by"), who)
         power = turn.power(src)
         if op.get("power_bonus"):
             power += _value(turn, seat, who, op["power_bonus"])
@@ -732,6 +741,12 @@ def _run_op(turn: Turn, seat: int, who: tuple[int, int], op: dict, phase: str) -
             # took the cheap branch for the rest of the game.
             _apply_blocks(turn)                    # a Block still catches it
             for atk in made:
+                # Note it here: the declare step narrates its own Attacks and has already
+                # been and gone, so without this an Intrigue's Attack lands with nothing in
+                # the beat to show for it and the fight log skips a hit.
+                turn.note(kind="attack", seat=atk["seat"], slot=atk["source"][1],
+                          power=atk["power"], negated=bool(atk["negated"]),
+                          targets=[[t[0], t[1]] for t in atk["targets"]])
                 _land_attack(turn, atk)
         return
 
@@ -1166,6 +1181,7 @@ def _apply_power(turn: Turn) -> None:
 
 def _settle(turn: Turn) -> None:
     _apply_hp_and_icons(turn)
+    _do_revives(turn)
     _apply_power(turn)
 
 
@@ -1228,15 +1244,22 @@ def _resolve_turn(game: dict, revealed: list, doubles=None) -> dict:
         _settle(turn)
 
     _become_spirits(turn)
-    _do_revives(turn)
     _check_end_of_turn(turn)
     _pend_fey_folk_setup(game)
     return turn.beat
 
 
 def _do_revives(turn: Turn) -> None:
-    """Maman Brijit's marker returns to 4 at the end of the turn she came back."""
-    for who in turn.revive:
+    """Maman Brijit's marker returns to 4 as soon as the movement that revived her settles.
+
+    NOT at the end of the turn, which is what this used to say and do. BGA 902742623 f5t2
+    puts it inline: she is pushed past both KO spaces, gains her Power and "resets their
+    Health Points to 4", and only THEN does the next Intrigue deal its 1 damage -- taking
+    her to 3. Reviving at the end of the turn let that damage land on the revive space,
+    where the floor swallows it, and she finished the turn a point up.
+    """
+    for who in list(turn.revive):
+        turn.revive.discard(who)
         f = turn.f(who)
         target = _board(f).get("revive_to_hp")
         if target is None:
