@@ -4618,10 +4618,15 @@ try {
 			cardNames.filter((t) => t && t !== "—").length >= 2,
 			JSON.stringify(cardNames));
 
-		// The log is HISTORY: it carries the turns already stepped past, not the
-		// one on the stage. Showing both put the same sentences on screen twice.
+		// The log runs up to AND INCLUDING the turn on the stage, and marks that one.
+		// It used to stop one turn short to avoid printing the same sentences twice;
+		// that reads as "the log is always one turn behind" while you play, so the
+		// live turn is marked instead.
 		const logLines = await page.locator(".rt-log-line").count();
 		check("the battle log is present", await page.locator(".rt-log").count() === 1);
+		check("the log includes the turn on the stage",
+			await page.locator(".rt-log-turn.rt-log-now").count() === 1,
+			`${await page.locator(".rt-log-turn.rt-log-now").count()} marked rows`);
 
 		// Nothing may ask for the next decision while turns remain unwatched.
 		if (turnsThisRound > 1) {
@@ -4638,6 +4643,62 @@ try {
 		const logAfter = await page.locator(".rt-log-line").count();
 		check("the turn just watched lands in the log", logAfter > logLines,
 			`${logLines} -> ${logAfter}`);
+
+		// THE FIGHTER BOARDS STEP WITH THE CURSOR. The server resolves a whole round in
+		// one go, so reading the boards off live state made every health bar jump to its
+		// end-of-round value the moment the round landed, while the cards and the log
+		// walked through it turn by turn. Both branches are asserted: if the round cost
+		// somebody health the readouts MUST differ, and if it cost nobody any they must
+		// not -- a one-sided check here would pass on a quiet round without proving
+		// anything.
+		const healthNow = async () => (await page.locator(".rt-fighter .rt-hp b")
+			.allInnerTexts().catch(() => [])).join("|");
+		// "To the end" is picked BY ITS TEXT, not by position: the control row is
+		// [Back, Next turn, To the end] only while turns remain, and collapses to just
+		// [Back] at the end -- so `.last()` silently becomes Back on a two-turn round and
+		// both reads land on the same turn. It also has to be put BACK at the end
+		// afterwards, because the next decision is deliberately held until the last turn
+		// is on screen and leaving the cursor at turn 1 strands the whole BUILD step.
+		const toEnd = async () => {
+			const btn = page.locator(".rt-ctl", { hasText: "To the end" });
+			if (await btn.count()) { await btn.first().click().catch(() => {}); await sleep(400); }
+		};
+		const toStart = async () => {
+			for (let i = 0; i < 12; i++) {
+				const back = page.locator(".rt-ctl").first();
+				if (await back.isDisabled().catch(() => true)) break;
+				await back.click().catch(() => {});
+				await sleep(150);
+			}
+		};
+		// WHETHER the boards should differ between turn 1 and the end is not something the
+		// round tally can answer: a round can spend all its health on turn 1 -- Protect the
+		// Innocent's self-damage is a starting card, so it usually does -- and then the
+		// board after turn 1 ALREADY is the end-of-round board, correctly. Gating on the
+		// tally called that a failure. What settles it is the LOG, which now runs up to the
+		// live turn: if it grows more health lines between turn 1 and the end, health moved
+		// after turn 1 and the boards must move with it; if it does not, they must not.
+		// Scoped to the LIVE round's section: archived rounds keep their own lines, and
+		// counting those would make the two reads differ for a reason that is not this.
+		const hpLines = async () => (await page.locator(".rt-log-live .rt-log-line").allInnerTexts()
+			.catch(() => [])).filter((t) => /\b(takes|recovers)\s+\d+/.test(t)).length;
+		await toEnd();
+		const endHealth = await healthNow();
+		const endHp = await hpLines();
+		const tally = await page.locator(".rt-resolved").first().innerText().catch(() => "");
+		await toStart();
+		const startHealth = await healthNow();
+		const startHp = await hpLines();
+		check("the round tally is on screen at the end", tally.length > 0,
+			`tally was "${tally.replace(/\n/g, " ")}"`);
+		const movedLater = endHp > startHp;
+		check(movedLater
+			? "the boards show THIS turn, not the end of the round"
+			: "the boards hold still when no health moves after turn 1",
+			movedLater ? startHealth !== endHealth : startHealth === endHealth,
+			`turn 1 "${startHealth}" (${startHp} hp lines) vs end "${endHealth}" `
+			+ `(${endHp} hp lines); tally "${tally.replace(/\n/g, " ")}"`);
+		await toEnd();
 
 		// The detail modal. Right-click is the desktop half of the gesture
 		// (shared/gestures.js); the touch half is a timer, because iOS Safari does
@@ -4693,10 +4754,9 @@ try {
 		await sleep(2500);
 		const roundText = await page.locator(".rt-stage-hd .rt-round").first().innerText().catch(() => "");
 		check("a second round began", /2/.test(roundText), `stage header was "${roundText}"`);
-		// An empty round header is suppressed, so at turn 1 of round 2 the log
-		// legitimately holds only the ARCHIVED round 1. Step one turn: now the
-		// log must carry both -- the finished round kept, and the live one it is
-		// building. That is the pair worth asserting.
+		// The log now includes the turn on the stage, so round 2 opens with a live
+		// section already. Step one turn anyway and assert the PAIR: the finished
+		// round kept, and the live one it is building beneath it.
 		await page.locator(".rt-ctl-go").click({ timeout: 8_000 }).catch(() => {});
 		await sleep(600);
 		const rounds = await page.locator(".rt-log-round h4").allInnerTexts().catch(() => []);

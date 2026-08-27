@@ -17,6 +17,9 @@ WHAT IS SECRET IN RAG TAG, and why it matters more than it looks:
   next three cards drawn.
 * An unsubmitted build choice, since the whole step is a simultaneous secret.
 * `rng_state`, which predicts every Scheme reveal to come.
+* `scheme_pool` -- Milady's face-down Intrigue pile IN ORDER, which is the same thing
+  read straight off. The pile is drawn without replacement, so its order is every reveal
+  she has left, and poison is three of the eleven.
 """
 
 from __future__ import annotations
@@ -97,6 +100,31 @@ def test_rng_state_never_ships():
         blob = _payload(game, viewer)
         assert "rng_state" not in blob
         assert str(game["rng_state"][1][:4])[1:-1] not in blob
+
+
+def test_miladys_face_down_pile_never_ships_to_anyone():
+    """Including through a BEAT, which is where a snapshot would smuggle it out.
+
+    `public_view` strips `scheme_pool` off the live fighters, but beats are shipped whole
+    and by reference — so the per-turn board snapshot each beat now carries has to strip
+    it at the point it is MADE. This is the shape CoC's `turn_undo` leak had: correct
+    top-level redaction for months while a nested snapshot shipped the same hidden keys
+    to every client, which is why this asserts against the serialized bytes and not
+    against `public_view`.
+    """
+    for seed in (4, 11, 23):
+        game = _game_in_progress(seed=seed)
+        pools = [f["scheme_pool"] for side in game["fighters"] for f in side
+                 if f.get("scheme_pool")]
+        if not pools:
+            continue                    # no Milady in this draft; try the next seed
+        for viewer in ("alice", "bob", None):
+            blob = _payload(game, viewer)
+            assert "scheme_pool" not in blob
+            for pool in pools:
+                assert json.dumps(pool)[1:-1] not in blob
+        return
+    raise AssertionError("no seed drafted Milady — the test proved nothing")
 
 
 def _at_a_build_step(seed=6):

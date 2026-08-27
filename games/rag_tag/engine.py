@@ -1185,6 +1185,35 @@ def _settle(turn: Turn) -> None:
     _apply_power(turn)
 
 
+#: Fighter fields a BEAT must not carry. `scheme_pool` is Milady's face-down Intrigue
+#: pile, and its ORDER is every reveal she has left -- `public_view` strips it from the
+#: live fighters, but a beat is shipped whole and by reference, so a snapshot that copied
+#: the fighter dict verbatim would hand it back through the side door. That is the exact
+#: shape of CoC's `turn_undo` leak: top-level redaction correct for months while a nested
+#: snapshot shipped the same hidden keys to every client.
+_BEAT_HIDDEN = frozenset({"scheme_pool"})
+
+
+def _fighter_snapshot(game: dict) -> list[list[dict]]:
+    """Every fighter's PUBLIC state, frozen as it stands right now.
+
+    A round is resolved server-side in one go, so without this the client has the state
+    after the LAST turn of the round and nothing else -- health, Power and tokens all jump
+    to their end-of-round values the instant the round lands, while the cards and the log
+    step through turn by turn. Freezing the state onto each beat is what lets the fighter
+    boards step with them.
+
+    Deliberately NOT reconstructed on the client by rewinding the events. The client would
+    have to model every event kind the engine can emit -- hp, power, track, token,
+    transform, spirit, absorb, revive -- and stay in step with it forever; the engine
+    already knows the answer.
+    """
+    return [[{k: (dict(v) if isinstance(v, dict) else v)
+              for k, v in f.items() if k not in _BEAT_HIDDEN}
+             for f in side]
+            for side in game["fighters"]]
+
+
 def _resolve_turn(game: dict, revealed: list, doubles=None) -> dict:
     turn = Turn(game, revealed)
     turn.beat.update({"turn": game["turn"], "insts": list(revealed),
@@ -1246,6 +1275,7 @@ def _resolve_turn(game: dict, revealed: list, doubles=None) -> dict:
     _become_spirits(turn)
     _check_end_of_turn(turn)
     _pend_fey_folk_setup(game)
+    turn.beat["state"] = _fighter_snapshot(game)
     return turn.beat
 
 
@@ -1410,6 +1440,7 @@ def _finish_build(game: dict) -> None:
                 _run_op(turn, seat, who, op, "late")
         _settle(turn)
         _check_end_of_turn(turn)
+        turn.beat["state"] = _fighter_snapshot(game)
         game["beats"].append(turn.beat)
 
     if game["winner"] is None:

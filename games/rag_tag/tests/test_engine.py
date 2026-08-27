@@ -542,6 +542,44 @@ def test_a_deflected_attack_is_still_an_attack_when_it_arrives():
     assert f(game, 0, 0)["tokens"].get("presence") == 1, "and goes home"
 
 
+def test_every_beat_carries_the_board_as_it_stood_when_that_turn_ended():
+    """A round resolves server-side in one go, so the beat has to carry the state.
+
+    Without it the client only ever has `game["fighters"]` — the board AFTER the last
+    turn of the round — so every health bar, Power total and token jumps to its
+    end-of-round value the moment the round lands, while the cards and the log step
+    through it turn by turn. That is the bug: "the game resolves health for the entire
+    round of cards when it should be turn by turn".
+    """
+    game = rig(["golem", "shango"], ["mordred", "joan"],
+               deck0=[11, 11], deck1=[22, 22])    # he attacks twice; Mordred waits
+    f(game, 0, 0)["power"] = 3
+    start = hp(game, 1, 0)
+    E.advance(game)                               # resolves the WHOLE round at once
+
+    turns = [b for b in game["beats"] if any(i is not None for i in b["insts"])]
+    assert len(turns) == 2, "two cards each, so two turns in the round"
+    after = [E.hp_value(b["state"][1][0]) for b in turns]
+    assert after == [start - 3, start - 6], "each beat holds that turn's board, not the last"
+    assert E.hp_value(f(game, 1, 0)) == after[-1], "and the live state is the final one"
+
+
+def test_a_beat_never_carries_miladys_face_down_pile():
+    """`public_view` strips `scheme_pool` from the fighters — and ships beats WHOLE.
+
+    A snapshot that copied the fighter dict verbatim would hand the pile straight back
+    through the side door, which is exactly the shape of CoC's `turn_undo` leak: correct
+    top-level redaction for months while a nested snapshot shipped the same hidden keys.
+    """
+    game = rig(["milady", "mordred"], ["joan", "golem"], deck0=[90], deck1=[30])
+    assert f(game, 0, 0)["scheme_pool"], "she has a pile to leak in the first place"
+    E.advance(game)
+    for beat in game["beats"]:
+        for side in beat.get("state", []):
+            for snap in side:
+                assert "scheme_pool" not in snap
+
+
 def test_the_wild_bunch_gives_its_partner_a_power_at_setup():
     """`setup_icons` must actually RESOLVE, not merely validate.
 

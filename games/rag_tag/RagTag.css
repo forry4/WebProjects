@@ -1409,6 +1409,27 @@
 .ragtag .rt-log-line.rt-tone-good, .ragtag .rt-log-line.rt-tone-heal { border-left-color: var(--rt-hp); }
 .ragtag .rt-log-line.rt-tone-power { border-left-color: var(--rt-power); }
 .ragtag .rt-log-line.rt-tone-big { border-left-color: var(--rt-gold); }
+/* The turn currently on the stage. The log includes it rather than stopping one turn
+   short of what the player is looking at; marking it is what keeps that from reading as
+   the same sentences printed twice. */
+.ragtag .rt-log-turn.rt-log-now .rt-log-turn-n {
+  color: var(--rt-ink);
+  border-color: var(--rt-gold);
+}
+
+.ragtag .rt-log-here {
+  flex: none;
+  color: var(--rt-gold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.6rem;
+}
+
+.ragtag .rt-log-line.rt-log-now {
+  background: var(--rt-panel-2);
+  border-radius: 0 0.3rem 0.3rem 0;
+}
+
 .ragtag .rt-log-empty { color: var(--rt-faint); font-style: italic; font-size: var(--rt-fs-sm); }
 
 /* ── Odds and ends ──────────────────────────────────────────────────────── */

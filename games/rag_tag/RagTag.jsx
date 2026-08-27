@@ -916,13 +916,16 @@ export default function RagTag({ myId, authUser, onExit }) {
     return beats.length - 1;
   }, [beats]);
 
-  /* Everything narration cannot work out for itself. The track is looked up
-     live rather than captured, because it CHANGES: Bödvar flips onto a second
-     board and a Fey Folk Character brings their own. */
+  /* Everything narration cannot work out for itself. The track comes from the
+     BEAT's own snapshot when it has one, because it CHANGES within a round:
+     Bödvar flips onto a second board and a Fey Folk Character brings their own,
+     so reading an early turn's indices off the round's final track reports the
+     wrong numbers. Falling back to live state covers beats saved before the
+     snapshot existed. */
   const narrCtx = useMemo(() => ({
     name: (seat, slot) => catalog?.fighters?.[teams?.[seat]?.[slot]]?.name || "",
-    track: (seat, slot) => {
-      const st = game?.fighters?.[seat]?.[slot];
+    track: (seat, slot, beat) => {
+      const st = beat?.state?.[seat]?.[slot] || game?.fighters?.[seat]?.[slot];
       const bd = catalog?.fighters?.[teams?.[seat]?.[slot]];
       return st && bd ? trackFor(st, bd) : [];
     },
@@ -932,15 +935,27 @@ export default function RagTag({ myId, authUser, onExit }) {
 
   const beatLines = useMemo(() => narrateBeat(shownBeat, narrCtx), [shownBeat, narrCtx]);
 
-  /* The log shows the turns ALREADY STEPPED PAST, not the one on the stage.
-     Showing both put the same four sentences on screen twice, ~700px apart,
-     which every reviewer called out independently. The exception is the last
-     turn of the round: once there is nothing further to step to, the log takes
-     it as well, so a round is never left with its final turn unrecorded. */
+  /* THE FIGHTER BOARDS STEP WITH THE CURSOR. A round is resolved server-side in one
+     go, so `game.fighters` is the state after the LAST turn of it: reading the boards
+     off that made every health bar, Power total and token jump to its end-of-round
+     value the moment the round landed, while the cards and the log walked through it
+     turn by turn. Each beat now carries the state as it stood when that turn finished.
+     Outside a fight -- draft, build, a reconnect before the first beat -- there is no
+     beat to read, and the live state is the right answer. */
+  const boardState = shownBeat?.state || game?.fighters;
+
+  /* The log runs UP TO AND INCLUDING the turn on the stage. It used to stop one
+     short, to avoid printing the same sentences in the ribbon and the log at
+     once -- but "the log is always one turn behind" is how that reads while you
+     are playing, and a log that omits what is on screen is not a record of the
+     fight. The duplication is handled by marking the live turn instead (`live`
+     below), so the log says "you are here" rather than repeating itself. */
+  const livePos = useMemo(
+    () => (over && atEnd ? beats.length - 1 : beatPosOf(beatIdx)),
+    [over, atEnd, beats.length, beatPosOf, beatIdx]);
   const roundRows = useMemo(
-    () => narrateRound(beats,
-      over && atEnd ? beats.length - 1 : beatPosOf(beatIdx) - 1, narrCtx),
-    [beats, beatIdx, atEnd, over, beatPosOf, narrCtx]);
+    () => narrateRound(beats, livePos, narrCtx, beatPosOf(beatIdx)),
+    [beats, livePos, beatPosOf, beatIdx, narrCtx]);
   const fullRows = useMemo(() => narrateRound(beats, beats.length - 1, narrCtx), [beats, narrCtx]);
 
   /* Finished rounds are kept as their NARRATED rows rather than as beats: the
@@ -991,7 +1006,8 @@ export default function RagTag({ myId, authUser, onExit }) {
       if (!bucket || ev.slot == null) continue;
       const cur = bucket[ev.slot] || {};
       if (ev.kind === "hp") {
-        const st = game?.fighters?.[ev.seat]?.[ev.slot];
+        const st = shownBeat?.state?.[ev.seat]?.[ev.slot]
+          || game?.fighters?.[ev.seat]?.[ev.slot];
         const bd = catalog?.fighters?.[teams?.[ev.seat]?.[ev.slot]];
         const tr = st && bd ? trackFor(st, bd) : [];
         const a = tr[ev.from], b = tr[ev.to];
@@ -1222,16 +1238,21 @@ export default function RagTag({ myId, authUser, onExit }) {
   const turnLabel = realTurns
     ? `Turn ${Math.min(beatIdx, lastIdx) + 1} of ${realTurns}` : "—";
 
+  /* `row.live` is the turn currently on the stage. The log includes it rather than
+     stopping one short, and marks it so the reader can see which entry the cards above
+     them belong to. */
   const logRow = (row) => (row.kind === "turn"
     ? (
-      <div className="rt-log-turn" key={row.key}>
+      <div className={`rt-log-turn${row.live ? " rt-log-now" : ""}`} key={row.key}>
         <span className="rt-log-turn-n">{row.turn == null ? "Setup" : `Turn ${row.turn}`}</span>
         {row.cards.filter(Boolean).length > 0 && (
           <span className="rt-log-turn-cards">{row.cards.filter(Boolean).join(" · ")}</span>
         )}
+        {row.live && <span className="rt-log-here">on screen</span>}
       </div>
     ) : (
-      <div className={`rt-log-line rt-tone-${row.tone}`} key={row.key}>
+      <div className={`rt-log-line rt-tone-${row.tone}${row.live ? " rt-log-now" : ""}`}
+        key={row.key}>
         <Icon name={row.icon} /><span>{row.text}</span>
       </div>
     ));
@@ -1258,7 +1279,7 @@ export default function RagTag({ myId, authUser, onExit }) {
             {teamsKnown && <TeamSide
               label={names[game?.seats?.[theirSeat]] || "Opponent"}
               team={theirTeam}
-              fighters={game?.fighters?.[theirSeat]}
+              fighters={boardState?.[theirSeat]}
               catalog={catalog}
               activeSlot={shownBeat?.active?.[theirSeat]}
               fxSlots={fxSlots[theirSeat]}
@@ -1350,7 +1371,7 @@ export default function RagTag({ myId, authUser, onExit }) {
             {teamsKnown && <TeamSide
               label={names[myId] || "You"} mine
               team={myTeam}
-              fighters={game?.fighters?.[mySeat]}
+              fighters={boardState?.[mySeat]}
               catalog={catalog}
               activeSlot={shownBeat?.active?.[mySeat]}
               fxSlots={fxSlots[mySeat]}

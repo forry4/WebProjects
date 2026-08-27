@@ -52,8 +52,11 @@ function joinNames(list) {
 
 /* `ctx` supplies everything board-shaped that narration cannot know:
  *   name(seat, slot)   -> the fighter's display name
- *   track(seat, slot)  -> that fighter's CURRENT health track (it changes when
- *                         Bödvar flips and when a Fey Folk Character is chosen)
+ *   track(seat, slot, beat) -> that fighter's health track AS OF THIS BEAT. It changes
+ *                         within a round -- Bödvar flips onto a second board and a Fey
+ *                         Folk Character brings their own -- so narrating an early turn
+ *                         against the round's FINAL track reads the indices off the wrong
+ *                         board and reports the wrong numbers.
  *   mine(seat)         -> is this my side
  */
 export function narrateBeat(beat, ctx) {
@@ -94,7 +97,7 @@ export function narrateBeat(beat, ctx) {
         break;
 
       case "hp": {
-        const track = ctx.track(ev.seat, ev.slot);
+        const track = ctx.track(ev.seat, ev.slot, beat);
         const down = ev.to < ev.from;
         const before = spaceHp(track, ev.from);
         const after = spaceLabel(track, ev.to);
@@ -178,7 +181,7 @@ function isTurnBeat(beat) {
   return !!beat && (beat.insts || []).some((x) => x != null);
 }
 
-export function narrateRound(beats, upto, ctx) {
+export function narrateRound(beats, upto, ctx, livePos) {
   const rows = [];
   let nth = 0;
   for (let i = 0; i <= Math.min(upto, (beats?.length ?? 0) - 1); i++) {
@@ -188,13 +191,17 @@ export function narrateRound(beats, upto, ctx) {
     // turns. `beat.turn` is the ENGINE's counter and starts at 0.
     const real = isTurnBeat(beat);
     if (real) nth += 1;
+    // `livePos` is the beat currently on the stage. The log includes it -- stopping one
+    // short reads as a log that is always a turn behind -- and marks it instead, so the
+    // reader can see which entry the cards above them belong to.
+    const live = livePos != null && i === livePos;
     rows.push({
-      kind: "turn", key: `t${i}`, turn: real ? nth : null,
+      kind: "turn", key: `t${i}`, turn: real ? nth : null, live,
       cards: (beat.cids || []).map((_, s) => ctx.cardName(beat.insts?.[s])),
     });
     const lines = narrateBeat(beat, ctx);
-    if (!lines.length) rows.push({ kind: "line", key: `t${i}-q`, tone: "info", icon: "dot", text: "Nothing lands." });
-    else for (const l of lines) rows.push({ kind: "line", ...l });
+    if (!lines.length) rows.push({ kind: "line", key: `t${i}-q`, tone: "info", icon: "dot", text: "Nothing lands.", live });
+    else for (const l of lines) rows.push({ kind: "line", ...l, live });
   }
   return rows;
 }
