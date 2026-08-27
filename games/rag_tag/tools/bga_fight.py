@@ -73,9 +73,12 @@ def bga_turns(events):
     encoding mismatch rather than a rules bug. Compare PRINTED HP on both sides.
 
     A marker that is not touched in a turn keeps its position, so the state is carried
-    forward rather than rebuilt; only markers of `type: "health"` count. `marker.id` is part
-    of the key because Bodvar's Bear and the Fey Folk's Characters put more than one health
-    marker on one fighter's board.
+    forward rather than rebuilt; only markers of `type: "health"` count.
+
+    The key carries the TRACK NUMBER off `marker.location` ("TheFeyFolk_track_2"), because
+    the Fey Folk have one health track per Character and Bodvar has a second for the Bear.
+    Their retired tracks sit on 0 forever, so comparing our live fighter against "whichever
+    marker moved" scored the Fey Folk wrong from the turn their first Character died.
     """
     state, out, cur = {}, [], None
     for (fight, _log), (kind, v) in _entries(events):
@@ -94,9 +97,10 @@ def bga_turns(events):
             m = v.get("marker") or {}
             if m.get("type") != "health":
                 continue
-            fid = BGA_TO_FID.get(str(m.get("location", "")).split("_track_")[0])
-            if fid is not None:
-                state[(fid, m.get("id"))] = m.get("locationArg")
+            where = str(m.get("location", "")).split("_track_")
+            fid = BGA_TO_FID.get(where[0])
+            if fid is not None and len(where) == 2 and where[1].isdigit():
+                state[(fid, int(where[1]))] = m.get("locationArg")
     return out
 
 
@@ -124,7 +128,8 @@ def our_turns(path, row):
     def spy(game, revealed, doubles=None):
         beat = real(game, revealed, doubles)
         snaps.append((game["round"], game["turn"],
-                      {(game["teams"][s][t], 0): engine.hp_value(game["fighters"][s][t])
+                      {(game["teams"][s][t], _track_no(game["fighters"][s][t])):
+                       engine.hp_value(game["fighters"][s][t])
                        for s in (0, 1) for t in (0, 1)}))
         return beat
 
@@ -134,6 +139,20 @@ def our_turns(path, row):
     finally:
         engine._resolve_turn = real
     return snaps, r
+
+
+def _track_no(f):
+    """Which of BGA's numbered health tracks this fighter's marker is on right now.
+
+    One for almost everyone. The Fey Folk get one per Character in board order, and Bodvar's
+    Bear gets a second -- matching `fighterSpecificState.activeTrack`, the same 1-based
+    numbering the replayer already reads Character choices from.
+    """
+    board = engine._board(f)
+    chars = board.get("characters") or []
+    if chars:
+        return next((i + 1 for i, c in enumerate(chars) if c["id"] == f.get("character")), 1)
+    return 2 if board.get("back") and f.get("flipped") else 1
 
 
 def compare(path, row):
@@ -153,16 +172,14 @@ def compare(path, row):
         got = mine.get((_f, _t))
         if got is None:
             continue
-        for (fid, _mid), hp in want.items():
-            if (fid, 0) not in got:              # a fighter we never had (parse divergence)
+        for key, hp in want.items():
+            if key not in got:                   # a track that is not the live one
                 continue
-            if sum(1 for k in want if k[0] == fid) > 1:
-                continue                         # multi-marker fighter: which track is live?
             total += 1
-            if got[(fid, 0)] == hp:
+            if got[key] == hp:
                 agreed += 1
             elif first_bad is None:
-                first_bad = (i + 1, fid, got[(fid, 0)], hp)
+                first_bad = (i + 1, key[0], got[key], hp)
     return agreed, total, first_bad, r, theirs, ours
 
 
@@ -179,9 +196,11 @@ def one(tid):
     for i, (f, t, want) in enumerate(theirs):
         got = mine.get((f, t)) or {}
         cells = []
-        for (fid, _m), hp in sorted(want.items()):
-            val = got.get((fid, 0), "?")
-            cells.append(f"{fid}:{val}" + ("" if val == hp else f"!={hp}"))
+        for key, hp in sorted(want.items()):
+            if key not in got:
+                continue
+            val = got[key]
+            cells.append(f"{key[0]}:{val}" + ("" if val == hp else f"!={hp}"))
         print(f"  f{f} t{t}  " + "  ".join(cells))
     for (f, t), kos in sorted(bga_kos(list(tt_inspect.events(f"{CORP}/logs/{tid}.json")))
                               .items()):

@@ -798,7 +798,11 @@ def _run_op(turn: Turn, seat: int, who: tuple[int, int], op: dict, phase: str) -
         return
 
     if name == "take_token":
-        _take_token(turn, who, op["token"])
+        if op.get("from"):
+            _move_token(turn, turn.resolve_target(seat, op["from"], who)[0], who,
+                        op["token"])
+        else:
+            _take_token(turn, who, op["token"])
         return
 
     if name == "flip_card":
@@ -987,27 +991,47 @@ def _declare(turn: Turn) -> None:
 
     _apply_blocks(turn)
 
-    # A WORKED BLOCK PAYS OUT BEFORE THE CONDITIONAL BRANCHES ARE READ, because its
-    # bonus is usually a counter-Attack and "if you are Attacked" has to see it. BGA's
-    # log is explicit about the order (902217634 f2t3): Milady attacks, Mordred blocks,
-    # "Mordred attacks" -- the riposte -- and only THEN "Milady activates WITH A STAB AND
-    # A SMILE". Reading the branches first made her riposte invisible to her own card, so
-    # the Intrigue that follows it never fired.
-    for block in turn.blocks:
-        if block["worked"] and block["success"]:
+    # BLOCKS, THEIR BONUSES AND THE CONDITIONAL BRANCHES SETTLE TOGETHER, by iterating.
+    # There is no fixed order that gets both of these right, and the corpus has both:
+    #
+    #   902217634 f2t3  Milady Attacks -> Mordred BLOCKS -> the Block's bonus is a riposte
+    #                   -> Milady's "if you are Attacked" must SEE that riposte.
+    #   902206465 f6t1  Mordred's "if neither Opponent Attacks" fires -> that Attack is
+    #                   what makes Milady's Block work -> only then does her Block pay out.
+    #
+    # Bonuses-first gets the second wrong; branches-first gets the first wrong. So each pass
+    # applies the Blocks, pays out any Block that has NOW caught something (once each), and
+    # only when nothing new came of that does it read the branches whose condition has
+    # become true. Whatever that adds starts another pass. A branch still undecided when
+    # the loop settles is false, and takes its else.
+    fired: set[int] = set()
+    pending = list(turn.late_conds)
+    for _ in range(MAX_ICON_PASSES):
+        _apply_blocks(turn)
+        progressed = False
+        for i, block in enumerate(turn.blocks):
+            if i in fired or not (block["worked"] and block["success"]):
+                continue
+            fired.add(i)
             for op in block["success"]:
                 _run_op(turn, block["seat"], block["source"], op, "declare")
-    if turn.blocks:
-        _apply_blocks(turn)
-
-    # SECOND PASS. Everything that had to wait for the other card is answered
-    # now, against a fully declared turn: "if neither Opponent Attacks", "if you
-    # are Attacked", "if the Attack is Blocked". Anything they add is then run
-    # through the block sweep again.
-    for cond_seat, cond_who, op in turn.late_conds:
-        _run_op(turn, cond_seat, cond_who, op, "late_cond")
-    if turn.late_conds:
-        _apply_blocks(turn)
+            progressed = True
+        if progressed:
+            continue
+        still = []
+        for cond_seat, cond_who, op in pending:
+            if _cond(turn, cond_seat, cond_who, op["cond"]):
+                _run_op(turn, cond_seat, cond_who, op, "late_cond")
+                progressed = True
+            else:
+                still.append((cond_seat, cond_who, op))
+        pending = still
+        if not progressed:
+            break
+    _apply_blocks(turn)
+    for cond_seat, cond_who, op in pending:
+        _run_op(turn, cond_seat, cond_who, op, "late_cond")   # settles false: the else branch
+    _apply_blocks(turn)
 
     # An Attack that nothing Blocked is knowable only once every Block is in.
     for atk in list(turn.attacks):
@@ -1155,17 +1179,28 @@ def _resolve_turn(game: dict, revealed: list, doubles=None) -> dict:
         again = Turn(game, revealed)
         again.beat = turn.beat
         again.cancelled = list(turn.cancelled)
+        # POWER IS STILL READ FROM THE START OF THE TURN. The second pass reads the state
+        # the first one left behind -- HP, stops, tokens -- but not Power, which every
+        # Attack takes from the turn's opening snapshot. A fresh Turn object makes its own
+        # snapshot, so the Golem's +1 icon fired by his own first Attack fed straight back
+        # into his second: BGA 888405016 f2t3 has him hit for 3 and 3, we hit for 3 and 4.
+        again.power_snapshot = dict(turn.power_snapshot)
         if not again.cancelled[seat]:
             f = fighter(game, seat, again.active[seat])
             again.note(kind="again", seat=seat, slot=again.active[seat])
+            # THE OPPOSING BLOCK IS STILL STANDING, so it catches the second pass too --
+            # "against an opposing Block both Attacks die but their bonus fires once",
+            # which this code said and did not do: `again` started with an empty block
+            # list, so the second Attack sailed past a Block that had just stopped the
+            # first (886317681 f4t2, where BGA logs it blocked and we dealt 4).
+            again.blocks = turn.blocks
             _run_ops(again, seat, _ops_of(game, revealed[seat], f), "declare")
+            _apply_blocks(again)
             for atk in again.attacks:
                 again.note(kind="attack", seat=atk["seat"], slot=atk["source"][1],
                            power=atk["power"], negated=bool(atk["negated"]),
                            targets=[[t[0], t[1]] for t in atk["targets"]])
-                if atk["power"] > 0:
-                    for tgt in atk["targets"]:
-                        again.add_hp(tgt, -atk["power"])
+                _land_attack(again, atk)
             _settle(again)
             while again.deferred:
                 d_seat, d_who, op = again.deferred.pop(0)

@@ -86,7 +86,7 @@ OPS = {
     "plant_scheme":   _op(),           # Milady: top token from the pile, face down
     "unleash_scheme": _op(),           # Milady: flip a random planted token
     "give_token":     _op("token", "to"),
-    "take_token":     _op("token"),
+    "take_token":     _op("token", **{"from": None}),
     "flip_card":      _op(),           # The Fey Folk's Summoning cards
     "spirit":         _op("n"),        # advance the Spirits track
 }
@@ -412,7 +412,12 @@ def _harder_they_fall(turn, seat, who, phase):
         # Their Power, not his -- and if the target gets redirected it is still
         # the ORIGINAL target's Power that is used.
         turn.add_attack(seat, who, [opp], turn.power(opp))
-        turn.deferred.append((seat, who, {"op": "take_token", "token": "concentration"}))
+        # TAKE IT BACK FROM THE FIGHTER HE JUST CASHED IN, not from whoever the scan finds
+        # first. Wong carries TWO Concentration tokens and routinely has one on each
+        # Opponent; a bare take_token grabbed the wrong one, so the marked Opponent stayed
+        # marked and the next play attacked instead of placing (886317681 f4t4).
+        turn.deferred.append((seat, who, {"op": "take_token", "token": "concentration",
+                                          "from": "opp"}))
         return
     if turn.f(who)["tokens"].get("concentration", 0) > 0:
         turn.move_token(who, opp, "concentration")

@@ -401,6 +401,87 @@ def test_an_attack_declared_after_the_declare_step_still_lands():
     assert hp(game, 1, 0) < joan_hp and hp(game, 1, 1) < mordred_hp,         "the Attack the Intrigue performed has to deal its damage"
 
 
+def test_a_conditional_branch_and_a_blocks_bonus_settle_together():
+    """Neither one can simply go first, so the declare step iterates until it stops moving.
+
+    The corpus has both directions. 902217634 f2t3: Milady Attacks, Mordred BLOCKS, the
+    Block's bonus is a riposte, and Milady's "if you are Attacked" has to see that riposte.
+    902206465 f6t1: Mordred's "if neither Opponent Attacks" fires, and it is THAT Attack
+    which makes Milady's Block work, so her Block pays out only afterwards. Bonuses-first
+    breaks the second; branches-first breaks the first.
+    """
+    # Milady attacks; Mordred blocks and ripostes; her `self_attacked` branch must see it.
+    game = rig(["milady", "golem"], ["mordred", "joan"], deck0=[91], deck1=[21])
+    milady = f(game, 0, 0)
+    milady["planted"], milady["scheme_pool"] = 1, ["gain_2_power"]
+    f(game, 1, 0)["power"] = 3
+    one_turn(game)
+    assert milady["scheme_pool"] == [], "the riposte counts as being Attacked"
+
+    # Mordred's Hidden Dagger fires because nobody attacked -- and that Attack is what
+    # makes Milady's So Predictable work, so her Block's Intrigue fires after it.
+    game = rig(["mordred", "joan"], ["milady", "golem"], deck0=[22], deck1=[94])
+    milady = f(game, 1, 0)
+    milady["planted"], milady["scheme_pool"] = 1, ["gain_2_power"]
+    f(game, 0, 0)["power"] = 3
+    one_turn(game)
+    assert milady["scheme_pool"] == [], "the Block worked, so its bonus is owed"
+
+
+def test_reanimations_second_pass_reads_power_from_the_start_of_the_turn():
+    """Two Attacks, the same Power. The first one's icon must not feed the second.
+
+    The second pass reads the state the first left behind -- HP, stops, tokens -- but every
+    Attack takes its Power from the turn's opening snapshot, and a fresh Turn object was
+    making a fresh snapshot. BGA 888405016 f2t3 has the Golem hit for 3 and 3; we hit for
+    3 and 4, because his own +1 Power icon had fired in between.
+    """
+    game = rig(["golem", "shango"], ["joan", "mordred"],
+               deck0=[14, 11],                    # Reanimation, then Fist of Clay
+               deck1=[30, 31])                    # Joan idles, then Attacks him
+    one_turn(game)                                # Reanimation arms the double
+    set_hp(game, 0, 0, 16)                        # his +1 Power icon sits at 15
+    f(game, 0, 0)["power"] = 4
+    f(game, 1, 0)["power"] = 2                    # enough to push him across it
+    was, target = 4, hp(game, 1, 0)
+    one_turn(game)
+    assert hp(game, 0, 0) < 15, "he has to cross his icon, or this proves nothing"
+    assert f(game, 0, 0)["power"] == was + 1, "and the icon has to pay him"
+    assert target - hp(game, 1, 0) == 2 * was, "both Attacks use the opening Power"
+
+
+def test_a_block_catches_reanimations_second_attack_too():
+    """"Against an opposing Block both Attacks die" -- which the code said and did not do.
+
+    The second pass started with an empty block list, so an Attack it declared sailed past
+    the Block that had just stopped the first (886317681 f4t2).
+    """
+    game = rig(["golem", "shango"], ["mordred", "joan"],
+               deck0=[14, 11], deck1=[20, 21])    # Reanimation, Fist of Clay vs a Block
+    one_turn(game)
+    was = hp(game, 1, 0)
+    one_turn(game)
+    assert hp(game, 1, 0) == was, "the Block negates the doubled Attack as well"
+
+
+def test_wong_takes_his_concentration_back_from_the_one_he_cashed_in():
+    """He carries TWO tokens and routinely has one on each Opponent.
+
+    A bare take-back grabbed whichever the scan reached first, so the marked Opponent
+    stayed marked and Wong's next play Attacked where BGA placed (886317681 f4t4).
+    """
+    game = rig(["wong_fei_hung", "shango"], ["mordred", "joan"],
+               deck0=[80], deck1=[20])
+    wong = f(game, 0, 0)
+    marked, other = f(game, 1, 0), f(game, 1, 1)
+    wong["tokens"]["concentration"] = 0
+    marked["tokens"]["concentration"] = 1
+    other["tokens"]["concentration"] = 1          # the decoy the old scan reached first
+    one_turn(game)
+    assert marked["tokens"]["concentration"] == 0, "the cashed-in Opponent is unmarked"
+    assert other["tokens"]["concentration"] == 1, "and the other Opponent keeps theirs"
+
+
 def test_the_wild_bunch_gives_its_partner_a_power_at_setup():
     """`setup_icons` must actually RESOLVE, not merely validate.
 
