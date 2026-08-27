@@ -175,8 +175,11 @@ def public_builds(events, fid_seat):
         seat = fid_seat.get(BGA_TO_FID.get(added.get("type")))
         if seat is None:
             continue
-        sig = (seat, tuple((c.get("type"), c.get("typeArg")) for c in (a.get("deck") or [])))
-        out[sig] = (tuple(sorted([_cid(added)] + [_cid(c) for c in disc])), _cid(added))
+        offer = tuple(sorted([_cid(added)] + [_cid(c) for c in disc]))
+        sig = (seat,
+               tuple((c.get("type"), c.get("typeArg")) for c in (a.get("deck") or [])),
+               offer)
+        out[sig] = (offer, _cid(added))
     return out
 
 
@@ -218,24 +221,29 @@ def _steps(events, fid_seat):
             # the two seats stop pairing up round by round, and the second submission comes
             # back with an EMPTY legal list — the tell for "this seat already moved".
             #
-            # THE KEY IS THE FIGHT DECK ITSELF, and nothing about the offer. One build
-            # emits up to three packets and the two private ones DISAGREE with each other --
-            # different kept card, different offer -- so any key built from the offer sees
-            # them as separate builds and replays both:
+            # THE KEY IS THE FIGHT DECK PLUS THE OFFER AS A MULTISET. One build emits up
+            # to three packets and the two private ones DISAGREE about which card was kept:
             #
             #   added=82 loc=2 drawn=[21,21] deck=[20,80]                private view A
             #   added=21 loc=0 drawn=[82,21] deck=[20,80]                private view B
             #   added=21 loc=0 drawn=[]      deck=[20,80] disc=[21,82]   PUBLIC, confirms B
             #
-            # `deck` is the Fight deck BEFORE the card goes in: identical across all three
-            # packets of one step, and necessarily different between a seat's consecutive
-            # builds because a card was just added to it. So it identifies the STEP, which is
-            # what we actually want to de-duplicate on.
+            # They disagree about the KEPT CARD, but `added + drawn` is the same three cards
+            # either way -- so the offer as an unordered multiset merges the views of one
+            # build, while the kept card alone would split them.
+            #
+            # `deck` alone is NOT enough, and this is the trap: it is the Fight deck before
+            # the insert, so it usually differs between a seat's consecutive builds -- but
+            # Wong's Crippling Touch REMOVES ITSELF FROM THE GAME, so a deck can come back
+            # to a state it has already been in. In 886302456 seat 1 builds a second
+            # Crippling Touch into the identical 2-card deck, and keying on the deck alone
+            # merged that build with the NEXT one and dropped it. The offer breaks the tie.
             #
             # This is also what keeps genuine repeats apart, and it has to: several cards have
             # 2-3 copies and are legitimately built more than once.
-            sig = (seat, tuple((c.get("type"), c.get("typeArg"))
-                               for c in (a.get("deck") or [])))
+            sig = (seat,
+                   tuple((c.get("type"), c.get("typeArg")) for c in (a.get("deck") or [])),
+                   tuple(sorted([_cid(c) for c in drawn] + [_cid(added)])))
             if sig in seen:
                 if _RESEND_WINS:            # measured; see the constant
                     out[seen[sig]] = (mid, seat, "build", a, drawn)
@@ -459,8 +467,14 @@ def parse_actions(events, manifest_row):
             plan.append({"op": "build_offer_cids", "seat": seat, "cids": offer,
                          "kept_cid": kept, "pos": a["addedCard"].get("locationArg")})
 
+    # A TIE ON RANK IS A DRAW, and `ranks.index("1")` quietly called it a win for seat 0.
+    # 54 of the 1738 tables in the manifest end "1,1" with scores "0,0" -- a double KO --
+    # and our engine reports those as `winner == "draw"`, so every one of them counted as a
+    # parity failure while the engine was right. 902200012 is the reproduction: 124 of 124
+    # turns exact, both fighters of one team on 0 HP, and the gate still scored it wrong.
     ranks = manifest_row["ranks"].split(",")
-    plan.append({"op": "result", "winner_seat": ranks.index("1")})
+    plan.append({"op": "result",
+                 "winner_seat": "draw" if ranks.count("1") > 1 else ranks.index("1")})
     return plan
 
 
@@ -544,7 +558,9 @@ def verify_against_public(events, manifest_row):
     for _m, seat, kind, a, drawn in _steps(events, fid_seat):
         if kind != "build":
             continue
-        sig = (seat, tuple((c.get("type"), c.get("typeArg")) for c in (a.get("deck") or [])))
+        sig = (seat,
+               tuple((c.get("type"), c.get("typeArg")) for c in (a.get("deck") or [])),
+               tuple(sorted([_cid(c) for c in drawn] + [_cid(a["addedCard"])])))
         want = pub.get(sig)
         if want is None:
             continue
