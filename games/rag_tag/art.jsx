@@ -167,17 +167,21 @@ export function Icon({ name, className = "", strokeWidth = 1.6 }) {
  * together. An unknown name still falls back to "Special" rather than to blank.
  */
 export const FX_TEXT = {
-  bodvar_transform: "Rage tops out: +3 Power, then become the Berserker Bear",
-  brijit_revive: "Return from beyond the KO spaces at the end of the turn",
+  // Board-icon only, and it sits BESIDE the +3 Power op on the same space --
+  // so saying the Power here printed it twice on Bödvar's Rage read-out.
+  bodvar_transform: "Turn over into the Berserker Bear",
+  // NOT "at the end of the turn" -- that was the bug the BGA corpus corrected
+  // in the engine, and the words here were never corrected with it.
+  brijit_revive: "Come straight back, the moment that movement settles",
   brijit_eternal_youth: "Steal the healing your opponents receive",
   brijit_redirect_attacks: "Every attack your Block caught turns onto their partner",
-  ching_terror_of_the_seas: "Three different cards, depending on your Fleet",
+  ching_terror_of_the_seas: "Three different cards, depending on how many Ships you have",
   feyfolk_all_legends_must_pass: "KO them if all three Characters are already Spirits",
   golem_reanimation: "Your next card resolves twice",
   mephisto_drag_you_to_hell: "Lose this turn for any reason and you win instead",
   mephisto_flip_serpent: "Turn the serpent over — the next card reads the new face",
   milady_poison: "Poison: half their current HP, rounded down",
-  milady_unleash_scheme: "Unleash an Intrigue, after every card action",
+  milady_unleash_scheme: "Unleash an Intrigue, once both cards have finished",
   mordred_execution: "A finisher, read after their card resolves",
   wb_corrupted_lawman: "The Sheriff changes sides",
   wb_keys_to_the_armory: "Whoever holds the Sheriff gains 2 Power — even them",
@@ -205,12 +209,85 @@ export const OP_GLOSSARY = {
   ignite: "Aflame — a burning token that stays. Five of them is Incineration, and that is an instant loss.",
   track: "A track advances a marker on this fighter's own board, separately from their health.",
   spirit: "Spirits are the Fey Folk's Characters after they fall. They still count, and some cards scale with how many there are.",
-  plant_scheme: "A planted Scheme waits on the health track. It fires later, when something reaches it.",
-  unleash_scheme: "Unleashing takes an Intrigue token off the pile — its effect is hidden until it resolves.",
+  plant_scheme: "A planted Intrigue waits on Milady's health track. It fires later, when her marker reaches the space it is on.",
+  unleash_scheme: "Unleashing takes an Intrigue off the face-down pile of eleven. Its effect is hidden until it resolves, and a spent one leaves the game — so the pile runs out.",
   give_token: "Passing a token can hand an opponent something they want. Check who ends up holding it.",
   take_token: "Taking a token pulls it from whoever holds it, including an opponent.",
   flip_card: "This card has two faces. Turning it over changes what it does next time it is revealed.",
   fx: "This one does not follow the usual pattern — read the note above.",
+};
+
+/* The words the BOARD uses for a track and a token, against the ids the data
+ * uses for them. Cards read "+1 navigation" and "Pass the presence token" —
+ * field names, straight out of the JSON, on the face of a card. */
+export const TRACK_WORD = {
+  divine_voice: ["Divine Voice", "Divine Voice"],
+  navigation: ["Ship", "Ships"],
+  rage: ["Rage", "Rage"],
+  spirits: ["Spirit", "Spirits"],
+};
+
+export const TOKEN_WORD = {
+  presence: "Presence",
+  aflame: "Aflame!",
+  sheriff: "Sheriff",
+  concentration: "Concentration",
+  scheme: "Intrigue",
+  serpent: "serpent",
+};
+
+export function trackWord(id, n) {
+  const w = TRACK_WORD[id];
+  if (!w) return String(id).replace(/_/g, " ");
+  return Math.abs(n) === 1 ? w[0] : w[1];
+}
+
+export function tokenWord(id) {
+  return TOKEN_WORD[id] || String(id).replace(/_/g, " ");
+}
+
+/* What a named track BESIDE the health track is for.
+ *
+ * The modal used to describe these straight from the data — "Has a divine voice
+ * track of 5 spaces" — which is a field name and a length. It never said what
+ * the track was for, never drew it, and never mentioned that two of Joan's five
+ * printed spaces pay out and three do not. A player who opens a board to find
+ * out what the dial does and reads its array length has been told nothing.
+ *
+ * Only the MEANING is written here. Every number the modal shows — how many
+ * spaces, which ones pay, the cap — is derived from the same data the strip is
+ * drawn from, so a corrected import cannot leave this disagreeing with the art.
+ */
+export const TRACK_GLOSSARY = {
+  divine_voice: "Joan's dial. Her cards step it round, and ONLY the space it lands on pays out — a space it steps over does nothing. The Halo in the middle is where it starts and it is never returned to, so from the first step on it is a ring of four.",
+  rage: "Bödvar's Rage. Each gain steps up one space. Reaching the top pays him 3 Power and then turns his board over to the Berserker Bear — a different fighter, with its own health track, and there is no way back.",
+  navigation: "Ching Shih's Navigation track, counted in Ships. It pays nothing by itself; her cards read the number off it, and the board rings 7, 10, 15 and 20 as the thresholds they ask about. Gains past the top are lost.",
+  spirits: "The Fey Folk's Spirits. It starts at 1 and steps up each time a Character falls, so it counts how far through the three they are. Several of their cards scale with it — and at the top all three are gone, which is the only way the Fey Folk can lose a fight.",
+};
+
+/* What each kind of space on a health track does. The modal printed this as a
+ * four-swatch key on EVERY board, including the nine with no revive space and
+ * the ten with no STOP — a legend for things that were not there. */
+export const SPACE_GLOSSARY = {
+  ko: "KO — a marker sitting here at the end of a turn loses the fight for its whole team.",
+  stop: "STOP — the marker halts the instant it reaches this space, going down or up. The rest of the movement is lost.",
+  revive: "Revive — below the KO spaces. Pushed all the way past them and the fighter comes back instead of falling.",
+  spirit: "Spirit — this Character's last space. Reaching it turns them into a Spirit and the next Character steps in.",
+  icon: "An icon fires when the marker lands on it or passes through it, once every marker has finished moving. Sitting on one and stepping off pays nothing.",
+};
+
+/* What a token is for.
+ *
+ * Keyed by the name in the board data, which is all the modal had: it said
+ * "Starts with 1 presence" and left the player to guess what a presence is.
+ */
+export const TOKEN_GLOSSARY = {
+  presence: "Whoever holds the Presence has one Attack aimed at them eaten whole, and the token goes home to the Golem to be spent again. A Block gets there first, and a 0-Power Attack does not spend it.",
+  aflame: "Shango's flames sit on the fighter they are put on and never come off. Two of his cards hit for 1 extra per flame already on the target. A fifth on one fighter is Incineration — that team loses on the spot.",
+  sheriff: "The Sheriff changes hands, and several Wild Bunch cards ask who is holding him — including one that pays the holder even when that is an opponent.",
+  concentration: "Wong Fei-Hung spends a Concentration to mark an opponent. A later card cashes the mark in and hits them with their OWN Power, and takes the token back off the fighter it cashed.",
+  scheme: "Milady's Intrigues, face down. Eleven of them, drawn without replacement, so the pile runs out; what one does is hidden until it resolves.",
+  serpent: "Mephisto's serpent shows one of two faces, chosen at random at setup. Some of his cards read the face that is showing; others turn it over — so the same card is two cards depending on when it comes up.",
 };
 
 /* Which icon fronts an op row on a card. Kept beside the icon table so adding

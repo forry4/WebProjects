@@ -11,6 +11,10 @@
  * can never disagree about what happened.
  */
 
+import { tokenWord, trackWord } from "./art.jsx";
+
+const cap = (s) => (s ? String(s)[0].toUpperCase() + String(s).slice(1) : "");
+
 /* HP events carry track INDICES, not hit points: a fighter's marker sits on a
  * space, and what that space is worth is a property of their board. Converting
  * here (rather than showing the raw index) is the difference between "Shango
@@ -122,18 +126,23 @@ export function narrateBeat(beat, ctx) {
         break;
 
       case "spirit":
-        push("big", "spirit", `${ev.character} passes into Spirit`, k);
+        // The Character id, which is lower case in the data and a proper noun
+        // on the board.
+        push("big", "spirit", `${cap(ev.character)} passes into Spirit`, k);
         break;
 
       case "track": {
-        const label = String(ev.track).replace(/_/g, " ");
+        // The name the board prints, not the JSON key: the log read
+        // "Ching Shih: navigation 3 -> 4". The plural is the track's name in
+        // all four cases (Ships, Spirits, Rage, Divine Voice).
+        const label = trackWord(ev.track, 2);
         push("info", "track",
           `${name(ev.seat, ev.slot)}: ${label} ${ev.from} → ${ev.to}`, k);
         break;
       }
 
       case "token": {
-        const label = String(ev.token).replace(/_/g, " ");
+        const label = tokenWord(ev.token);
         push("info", ev.token === "aflame" ? "ignite" : "give_token",
           ev.token === "aflame"
             ? `${name(ev.seat, ev.slot)} is set Aflame`
@@ -143,7 +152,7 @@ export function narrateBeat(beat, ctx) {
 
       case "scheme":
         push("info", "plant_scheme",
-          `${name(ev.seat, ev.slot)} plants a Scheme (${ev.planted} waiting)`, k);
+          `${name(ev.seat, ev.slot)} plants an Intrigue (${ev.planted} waiting)`, k);
         break;
 
       case "scheme_reveal":

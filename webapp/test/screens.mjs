@@ -4712,6 +4712,37 @@ try {
 			`modal title was "${infoTitle}"`);
 		check("...and the details name its cards",
 			await page.locator(".rt-modal-chip").count() > 0);
+		// Every sentence in this modal is GENERATED from op names, token ids and
+		// track ids, and every one of those lookups has a fallback that renders
+		// the raw JSON key. That is how "+1 navigation", "Starts with 1 presence"
+		// and a legend entry whose whole text was the word "icon" all shipped
+		// looking deliberate for months. A snake_case word in the visible text is
+		// the signature of all of them, and it is fighter-agnostic — which this
+		// has to be, because the draft here is random.
+		//
+		// SAMPLED, and deliberately so: it only sees the fighter that happened to
+		// be drafted, so it is the render-level net, not the coverage gate. The
+		// exhaustive one is `games/rag_tag/tests/test_words.py`, which holds the
+		// whole roster to the glossaries. This catches the other half — a raw key
+		// reaching the page through JSX rather than through a missing entry.
+		const boardText = await page.locator(".rt-modal-body").first()
+			.innerText().catch(() => "");
+		const leaked = boardText.match(/\b[a-z]+_[a-z_]+\b/g) || [];
+		check("...and it never prints a raw data key", leaked.length === 0,
+			`leaked ${JSON.stringify(leaked.slice(0, 4))} in "${infoTitle}"`);
+		// The key names only the kinds of space THIS board has, and each entry is
+		// a sentence rather than a label — the old one named all four kinds on
+		// every board and the longest entry was one word.
+		const keyRows = await page.locator(".rt-modal-key li").allInnerTexts()
+			.catch(() => []);
+		check("...and the board key explains each kind of space it draws",
+			keyRows.length > 0 && keyRows.every((t) => t.split(/\s+/).length > 4),
+			`key rows ${JSON.stringify(keyRows.map((t) => t.slice(0, 24)))}`);
+		const heads = await page.locator(".rt-modal h3").allInnerTexts().catch(() => []);
+		check("...and the health track is drawn under its own heading",
+			heads.some((h) => /health track/i.test(h))
+			&& await page.locator(".rt-modal .rt-strip .rt-cell").count() > 0,
+			`headings ${JSON.stringify(heads)}`);
 		await page.keyboard.press("Escape").catch(() => {});
 		await sleep(300);
 		check("Escape closes it", await page.locator(".rt-modal").count() === 0);
@@ -4721,6 +4752,13 @@ try {
 		const cardInfo = await page.locator(".rt-modal h2").first().innerText().catch(() => "");
 		check("right-click on a played card opens its details", cardInfo.length > 0,
 			`modal title was "${cardInfo}"`);
+		const cardText = await page.locator(".rt-modal-body").first()
+			.innerText().catch(() => "");
+		const cardLeak = cardText.match(/\b[a-z]+_[a-z_]+\b/g) || [];
+		check("...and the card text never prints a raw data key", cardLeak.length === 0,
+			`leaked ${JSON.stringify(cardLeak.slice(0, 4))} in "${cardInfo}"`);
+		check("...and it explains a mechanic the face does not",
+			/how it works/i.test(cardText), `text was "${cardText.slice(0, 90)}"`);
 		await page.locator(".rt-modal-close").click({ timeout: 5_000 }).catch(() => {});
 		await sleep(300);
 		check("the close button closes it", await page.locator(".rt-modal").count() === 0);

@@ -210,3 +210,29 @@ def test_the_catalog_ships_the_whole_roster_and_every_card():
     assert len(payload["cards"]) == len(CARDS)
     joan = payload["fighters"]["joan"]
     assert joan["base_power"] == 1 and joan["hp_track"], "boards ship with their tracks"
+
+
+def test_the_catalog_ships_the_board_rules_the_tracks_do_not_draw():
+    """The detail modal writes its own sentences, so it needs the fields to write from.
+
+    Each of these was on the board and not on the wire, so the modal could not say
+    it: the Wild Bunch's setup icon (their partner starts a Power up), the Golem's
+    shield token, the health Maman Brijit comes back on, and Bödvar's note about
+    what the Bear arrives with. A missing field is not an error here — the modal
+    simply renders one fewer line and reads like a complete description.
+    """
+    payload = run(m.catalog())
+    assert payload["fighters"]["the_wild_bunch"]["setup_icons"]
+    assert payload["fighters"]["golem"]["absorbs_attack"] == ["presence"]
+    assert payload["fighters"]["maman_brijit"]["revive_to_hp"] == 4
+    assert payload["fighters"]["bodvar"]["note"], "Bödvar's transformation note"
+    assert payload["fighters"]["joan"]["note"] is None, "a board with nothing extra to say"
+
+
+def test_an_instant_bonus_ships_as_its_ops_not_as_a_flag():
+    """It was `bool(...)`, so the modal could flag the card and not say what it paid."""
+    from games.rag_tag.fighters import CARDS
+
+    cid = next(c for c, card in CARDS.items() if card.get("instant_bonus"))
+    shipped = run(m.catalog())["cards"][str(cid)]["instant_bonus"]
+    assert isinstance(shipped, list) and shipped == CARDS[cid]["instant_bonus"]

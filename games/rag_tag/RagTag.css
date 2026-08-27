@@ -348,6 +348,7 @@
 .ragtag .rt-stat .rt-i { align-self: center; }
 .ragtag .rt-hp { color: var(--rt-hp); }
 .ragtag .rt-pw { color: var(--rt-power); }
+.ragtag .rt-cx { color: var(--rt-gold); }
 
 /* The health track.
    One bar, one fill, one colour chosen by how much health is left -- so a
@@ -1571,7 +1572,8 @@
 
 .ragtag .rt-modal-track-name {
   flex: none;
-  width: 5.2rem;
+  width: 6.4rem;
+  line-height: 1.25;
   font-size: var(--rt-fs-sm);
   color: var(--rt-dim);
 }
@@ -1598,18 +1600,122 @@
 .ragtag .rt-cell-revive,
 .ragtag .rt-cell-spirit { background: var(--rt-power); }
 
+/* The key is a LIST now, not a swatch run: it names only the kinds of space
+   this board has, and each one says what that space does. As a flex run of
+   swatch-then-word it fitted four one-word labels and nothing longer, which is
+   why "icon" was the label for "something happens here". */
 .ragtag .rt-modal-key {
-  display: flex;
-  align-items: center;
+  list-style: none;
+  margin: 0.55rem 0 0;
+  padding: 0;
+  display: grid;
   gap: 0.3rem;
-  flex-wrap: wrap;
-  margin-top: 0.5rem;
   font-size: var(--rt-fs-sm);
   color: var(--rt-dim);
 }
 
-.ragtag .rt-modal-key .rt-cell { flex: none; width: 0.7rem; height: 0.7rem; margin-left: 0.5rem; }
-.ragtag .rt-modal-key .rt-cell:first-child { margin-left: 0; }
+.ragtag .rt-modal-key li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  line-height: 1.45;
+}
+
+.ragtag .rt-modal-key .rt-cell {
+  flex: none;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin-top: 0.32em;
+}
+
+/* One health track and everything true about it, kept together — with three
+   Characters on the board the notes have to sit under the strip they belong to
+   or they read as facts about the fighter. */
+.ragtag .rt-modal-track-block { margin-top: 0.55rem; }
+.ragtag .rt-modal-track-block .rt-modal-track { margin-top: 0; }
+
+.ragtag .rt-modal-track-max {
+  flex: none;
+  min-width: 1.6rem;
+  text-align: right;
+  font-weight: 750;
+  color: var(--rt-hp);
+}
+
+.ragtag .rt-notes {
+  list-style: none;
+  margin: 0.3rem 0 0 6.9rem;
+  padding: 0;
+  display: grid;
+  gap: 0.18rem;
+  font-size: var(--rt-fs-sm);
+  color: var(--rt-dim);
+}
+
+.ragtag .rt-notes li { display: flex; gap: 0.5rem; line-height: 1.45; }
+.ragtag .rt-notes li b {
+  flex: none;
+  min-width: 5.4rem;
+  color: var(--f-ink);
+  font-weight: 700;
+}
+
+/* The track beside the health track. Drawn for the first time here: it used to
+   be one sentence giving its field name and how many spaces it had. */
+.ragtag .rt-special {
+  margin-top: 0.9rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--rt-line-soft);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.ragtag .rt-special-hd {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: var(--rt-fs-sm);
+  color: var(--rt-dim);
+}
+
+.ragtag .rt-special-hd b { color: var(--f-ink); }
+.ragtag .rt-special-hd .rt-i { color: var(--f-ink); flex: none; }
+
+.ragtag .rt-special-note {
+  margin: 0.45rem 0 0;
+  font-size: var(--rt-fs-sm);
+  line-height: 1.5;
+  color: var(--rt-dim);
+}
+
+.ragtag .rt-special .rt-notes { margin-left: 0; margin-top: 0.45rem; }
+
+.ragtag .rt-pips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.28rem;
+  margin-top: 0.45rem;
+}
+
+.ragtag .rt-pip {
+  min-width: 1.6rem;
+  padding: 0.14rem 0.34rem;
+  border: 1px solid var(--rt-line-soft);
+  border-radius: 5px;
+  text-align: center;
+  font-size: 0.66rem;
+  letter-spacing: 0.02em;
+  color: var(--rt-dim);
+  background: #2f231c;
+}
+
+/* A space that pays out, marked the same amber the health track uses for one. */
+.ragtag .rt-pip-on {
+  color: #2a1d13;
+  background: var(--rt-gold);
+  border-color: var(--rt-gold);
+  font-weight: 700;
+}
 
 .ragtag .rt-modal-start {
   margin-left: 0.32rem;
@@ -1827,6 +1933,13 @@
 
 @media (max-width: 460px) {
   .ragtag .rt-duel { grid-template-columns: 1fr; }
+  /* A 6.4rem name column, a strip and its number do not fit beside each other
+     on a phone. The name goes above the strip it labels, and the read-out under
+     it loses its indent and stacks place-over-effect instead of beside it. */
+  .ragtag .rt-modal-track { flex-wrap: wrap; }
+  .ragtag .rt-modal-track-name { width: 100%; }
+  .ragtag .rt-notes { margin-left: 0; }
+  .ragtag .rt-notes li { display: grid; gap: 0; }
   .ragtag .rt-clash { min-height: 1.6rem; }
   .ragtag .rt-clash-burst { width: 2.2rem; height: 2.2rem; }
   .ragtag .rt-card { min-height: 0; }

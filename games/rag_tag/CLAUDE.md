@@ -328,20 +328,50 @@ Because most of those faces are rendered inside `.map()`, they go through
 `<InfoTarget>` rather than calling the hook directly — a hook cannot be called
 in a loop, and the wrapper gives each element its own instance.
 
-The modal is where the rules text lives that will not fit on a face: the
-**per-card notes** from the data (20 cards have one, and they settle exactly the
-interactions a player stops and wonders about), `OP_GLOSSARY` in `art.jsx` — the
-non-obvious half of each mechanic the card uses, because without it a one-op
-card's modal printed the title, the fighter and the same effect line already on
-the face, which teaches nothing and trains the player to stop holding cards —
-and `boardFacts`, a fighter's oddities DERIVED from their track rather than
-written out, so a corrected import fixes the modal too. The health track itself
-is DRAWN (`TrackStrip`) rather than described: "1 STOP space, the marker halts
-the moment it lands on one" is a sentence about a spatial thing, and the strip
-comes off the same data so the two cannot disagree. Watch the three shapes `special_track` comes in: a real
-space list (Bödvar, Joan), a min/max range with `spaces: []` (Ching Shih, the
-Fey Folk), and **an empty object for a fighter that has none** — which is
-truthy, and printed a track Milady does not have.
+The modal is where the rules text lives that will not fit on a face. **Every
+sentence in it is GENERATED** — from op names, condition kinds, token ids, track
+ids and the shape of a health track — because the data is mechanics only and
+there is no publisher text to print. That is the whole design, and it is also
+the whole hazard: **every one of those lookups has a fallback, and every
+fallback renders the raw JSON key while looking completely deliberate.** An
+unglossed `fx` prints the literal word "Special"; an unmapped op prints `op.op`;
+an unmapped token prints `presence`; an unmapped track prints `+1 navigation` on
+the face of a card. Nothing throws, nothing goes blank, and no render test
+notices.
+
+Two layers, and the split is load-bearing. **What a mechanic MEANS is written
+once, in `art.jsx`**, keyed by the id the data uses — `OP_GLOSSARY`,
+`SPACE_GLOSSARY`, `TOKEN_GLOSSARY`, `TRACK_GLOSSARY`, plus `TOKEN_WORD` /
+`TRACK_WORD` for the names the board prints. **Where a thing is and how much of
+it there is is DERIVED** from the track, so a corrected import moves the modal
+with it. `games/rag_tag/tests/test_words.py` holds the first layer to the
+second: it derives its roster from `fighters.py` and fails on any op, condition,
+`fx`, token, track or kind of space the data uses and the UI cannot name.
+Verified non-vacuous against all seven.
+
+The health track is **DRAWN** (`TrackStrip`) rather than described — "1 STOP
+space, the marker halts the moment it lands on one" is a sentence about a
+spatial thing — and its spaces are read out by WHERE they are (`10 health — +1
+Power`), not counted ("4 spaces carry an icon"). The key under it names **only
+the kinds this board has**: it used to name KO, stop, icon and revive on all
+twelve, nine of which have no revive space, and its longest entry was the word
+"icon" — a legend meaning "something happens here, we are not saying what".
+
+What is left over is what a board does that its track cannot draw: `boardFacts`
+reads `characters`, `back`, `revive_to_hp`, `setup_icons` and the KO count off
+the fields, and a board-level `note` in `boards.json` carries the one thing that
+is genuinely un-derivable (the Bear's opening HP). **The catalog endpoint has to
+ship those fields or the modal silently renders one fewer line and still reads
+like a complete description** — `setup_icons`, `absorbs_attack`, `revive_to_hp`,
+`note` and the instant bonus's OPS (it shipped as a `bool`, so the modal could
+flag the bonus and not say what it paid) were all missing until 2026-08-27.
+`test_server.py` guards them.
+
+Watch the three shapes `special_track` comes in: a real space list (Bödvar,
+Joan), a min/max range with `spaces: []` (Ching Shih, the Fey Folk), and **an
+empty object for a fighter that has none** — which is truthy, and printed a
+track Milady does not have. `SpecialTrack` therefore keys off `track.id`, not
+the object.
 
 ### Everything visual is drawn in the bundle
 There is no licensed art in the repo (see *Where the data came from*), so `art.jsx`
@@ -372,7 +402,7 @@ media rules and pins a phone to three columns. Width and padding ARE fair game.
 
 ## Testing
 
-`pytest games/rag_tag/tests -n0 -q` — 118 tests.
+`pytest games/rag_tag/tests -n0 -q` — 130 tests.
 
 | File | Covers |
 |---|---|
@@ -383,6 +413,7 @@ media rules and pins a phone to three columns. Width and padding ARE fair game.
 | `test_ws_auth` | seat identity binding |
 | `test_redaction` | the whole serialized payload of a REAL played game |
 | `test_persist` | compaction round trip, structural proof it did something, resume mid-fight and mid-build |
+| `test_words` | every op, condition, `fx`, token, track and kind of space the DATA uses has words in the UI — the one gate over a layer whose every failure mode renders a plausible-looking sentence rather than throwing |
 
 Frontend: `webapp/test/screens.mjs` §`ragtagFight` (lane A) creates a vs-bot game
 and plays a full round in a browser. Mounting the route proves nothing about a

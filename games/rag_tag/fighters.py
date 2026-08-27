@@ -96,6 +96,10 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
             'complexity': 2,
             'tags': ['High Damage', 'Transformation'],
             'faces': ['bodvar', 'berserker_bear'],
+            'note': 'The Bear arrives on as much health as Bödvar had Power at that instant, '
+                    'capped at 15 — a starting point, not a ceiling, so he can Heal above it '
+                    'later. He takes no health change at all on the turn he transforms, and '
+                    'his tokens come with him.',
             'hp_track': [{'kind': 'ko'},
                          {'kind': 'hp', 'hp': 1},
                          {'kind': 'hp', 'hp': 2},

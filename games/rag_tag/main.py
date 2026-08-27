@@ -683,13 +683,23 @@ async def catalog():
                 "special_track": board.get("special_track"),
                 "tokens": board.get("tokens", {}),
                 "back": board.get("back"),
+                # The board rules the printed board carries but the tracks do
+                # not: an icon that fires before the first card, a token that
+                # eats an Attack, the health a revive comes back on. The modal
+                # had no way to say any of it, so it said nothing.
+                "note": board.get("note"),
+                "setup_icons": board.get("setup_icons"),
+                "absorbs_attack": board.get("absorbs_attack"),
+                "revive_to_hp": board.get("revive_to_hp"),
             }
             for fid, board in FIGHTERS.items()
         },
         "cards": {
             str(cid): {"name": card["name"], "fighter": card["fighter"],
                        "copies": card["copies"], "starting": card.get("starting", False),
-                       "instant_bonus": bool(card.get("instant_bonus")),
+                       # The OPS, not a bool: the modal flagged that a card had
+                       # an Instant Bonus and could not say what it was.
+                       "instant_bonus": card.get("instant_bonus"),
                        "two_faced": bool(card.get("two_faced")),
                        "ops": card["ops"], "ops_back": card.get("ops_back"),
                        "note": card.get("note")}

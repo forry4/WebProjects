@@ -10,7 +10,10 @@ import {
   readLobbyCache, writeLobbyCache,
 } from "../../shared/lobby.jsx";
 import { buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
-import { Sigil, Icon, sigilOf, iconForOp, FX_TEXT, OP_GLOSSARY } from "./art.jsx";
+import {
+  Sigil, Icon, sigilOf, iconForOp, FX_TEXT, OP_GLOSSARY,
+  TRACK_GLOSSARY, TOKEN_GLOSSARY, SPACE_GLOSSARY, TOKEN_WORD, trackWord, tokenWord,
+} from "./art.jsx";
 import { narrateBeat, narrateRound } from "./narrate.jsx";
 import { useCardInfoGesture } from "../../shared/gestures.js";
 
@@ -99,13 +102,26 @@ function valueWord(n) {
   return "?";
 }
 
+/* `after: true` is on four cards and was rendered by none of them: the op read
+   as if it happened with everything else, when the whole point of the card is
+   that it waits. Ching Shih's Terror of the Seas picks its branch on her Ships
+   BEFORE the step, and Twin Serpents turns the serpent over only once the card
+   that read it is done. */
 function opWords(op) {
   if (!op) return "";
+  const core = opCore(op);
+  return op.after ? `${core} (after their card resolves)` : core;
+}
+
+function opCore(op) {
   switch (op.op) {
     case "attack": {
       const who = op.target && op.target !== "opp" ? ` ${TARGET_WORD[op.target]}` : "";
-      const by = op.by === "partner" ? " (partner)" : "";
-      return `Attack${who}${by}`;
+      const by = op.by === "partner" ? ", thrown by your partner" : "";
+      // Two cards hit for more than your Power and said only "Attack".
+      const more = op.flamepower ? " (+1 per Aflame! on the target)"
+        : op.power_bonus ? ` (+${valueWord(op.power_bonus)})` : "";
+      return `Attack${who}${by}${more}`;
     }
     case "block": return "Block";
     case "damage": return `${valueWord(op.n)} damage to ${TARGET_WORD[op.target || "opp"]}`;
@@ -115,18 +131,25 @@ function opWords(op) {
       const sign = typeof op.n === "number" && op.n < 0 ? "" : "+";
       return `${sign}${n} Power — ${TARGET_WORD[op.target || "self"]}`;
     }
-    case "transfer_power": return `Move ${valueWord(op.n)} Power to ${TARGET_WORD[op.to]}`;
+    case "transfer_power": {
+      // `from` was dropped, so Thunder Stone — which takes a Power off your own
+      // partner — read as if it conjured one.
+      const src = op.from && op.from !== "self" ? ` from ${TARGET_WORD[op.from]}` : "";
+      return `Move ${valueWord(op.n)} Power${src} to ${TARGET_WORD[op.to]}`;
+    }
     case "cancel": return "Cancel their card";
-    case "track": return `+${valueWord(op.n)} ${op.track.replace(/_/g, " ")}`;
+    case "track": return `+${valueWord(op.n)} ${trackWord(op.track, op.n)}`;
     case "ignite": return "Set them Aflame";
-    case "plant_scheme": return "Plant a Scheme";
-    case "unleash_scheme": return "Unleash a Scheme";
-    case "give_token": return `Pass the ${op.token} token`;
-    case "take_token": return `Take the ${op.token} token`;
+    case "plant_scheme": return "Plant an Intrigue";
+    case "unleash_scheme": return "Unleash an Intrigue";
+    case "give_token": return `Pass the ${tokenWord(op.token)} to ${TARGET_WORD[op.to] || "them"}`;
+    case "take_token": return `Take the ${tokenWord(op.token)} back`;
     case "flip_card": return "Turn this card over";
     case "spirit": return "+1 Spirit";
+    // "A — else B" read as one branch with a dash in it. The two halves need a
+    // separator that cannot be mistaken for punctuation inside either of them.
     case "if": return `If ${condWords(op.cond)}: ${op.then.map(opWords).join(", ")}`
-      + (op.else ? ` — else ${op.else.map(opWords).join(", ")}` : "");
+      + (op.else ? ` · otherwise: ${op.else.map(opWords).join(", ")}` : "");
     case "fx": return FX_TEXT[op.name] || "Special";
     default: return op.op;
   }
@@ -144,8 +167,8 @@ function condWords(cond) {
     case "serpent": return `the ${cond.face} serpent shows`;
     case "face": return cond.face === "bodvar" ? "still human" : "transformed";
     case "ships": return `${cond.min}–${cond.max} Ships`;
-    case "has_token": return `you hold the ${cond.token}`;
-    case "token_on": return `${TARGET_WORD[cond.who]} holds the ${cond.token}`;
+    case "has_token": return `you hold the ${tokenWord(cond.token)}`;
+    case "token_on": return `${TARGET_WORD[cond.who]} holds the ${tokenWord(cond.token)}`;
     default: return cond.kind;
   }
 }
@@ -175,9 +198,6 @@ function trackFor(state, board) {
   return board.hp_track || [];
 }
 
-/* The biggest number on a fighter's health track. The Fey Folk have no track of
-   their own -- they have three Characters -- so theirs is the best of the three,
-   which is what "how much can this survive" means for them. */
 /* A round's beats include ones that are not TURNS: the instant-bonus beat at
    setup, and anything the engine records before the first card is flipped. They
    carry no revealed cards. Counting them made the stage read "Turn 1 of 1"
@@ -186,53 +206,212 @@ function isTurnBeat(beat) {
   return !!beat && (beat.insts || []).some((x) => x != null);
 }
 
-/* The things about a board that are true but not printed anywhere the player
-   can see them mid-fight. Derived from the track rather than written out, so a
-   corrected import fixes the modal too. */
+/* ── Reading a board out loud ─────────────────────────────────────────────
+ *
+ * All of this used to be one function that returned sentences, and the
+ * sentences were about the SHAPE of the data rather than about the game: "4
+ * spaces carry an icon", "Has a divine voice track of 5 spaces", "Starts with 1
+ * presence". A player who opens the Golem to find out what a Presence is and
+ * reads that he starts with one has been told the field name and the count.
+ *
+ * So the split below. What a mechanic MEANS is written once, in art.jsx, keyed
+ * by the same name the data uses. WHERE it is and HOW MUCH is derived here from
+ * the track, so a corrected import moves the modal with it and the two cannot
+ * disagree. Nothing is printed unless this board actually has it — the legend
+ * used to name KO, stop, icon and revive on all twelve boards, nine of which
+ * have no revive space and ten of which have no STOP.
+ */
+
+function spaceIcons(sp) {
+  return (sp?.icons || []).filter((ic) => ic && typeof ic === "object");
+}
+
+function isStop(sp) {
+  return (sp?.icons || []).some((ic) => ic === "stop" || ic?.op === "stop");
+}
+
+/* Where a space is, in the numbers printed on the board rather than an index
+   into an array. Health tracks are stored bottom-up, so index 0 is the KO. */
+function spaceWhere(sp) {
+  if (!sp) return "";
+  if (sp.kind === "hp") return `${sp.hp} health`;
+  if (sp.kind === "ko") return "the KO space";
+  if (sp.kind === "revive") return "the revive space";
+  if (sp.kind === "spirit") return "the Spirit space";
+  return String(sp.kind);
+}
+
+/* Which kinds of space this board actually uses, so the legend can name those
+   and only those. `icon` is not a kind — it is any space that pays out. */
+const KIND_ORDER = ["ko", "stop", "icon", "revive", "spirit"];
+
+function trackKinds(tracks) {
+  const kinds = new Set();
+  for (const tr of tracks) {
+    for (const sp of tr || []) {
+      if (sp.kind !== "hp") kinds.add(sp.kind);
+      if (isStop(sp)) kinds.add("stop");
+      // Only a plain health space earns the "icon" entry. The revive and Spirit
+      // spaces carry icons too, and naming both made Maman Brijit's key read
+      // "revive, icon, ko" — three entries for two kinds of space.
+      if (sp.kind === "hp" && spaceIcons(sp).length) kinds.add("icon");
+    }
+  }
+  // Track order put Brijit's revive space first, because it is index 0. Read the
+  // key in the order the rules meet them instead.
+  return KIND_ORDER.filter((k) => kinds.has(k));
+}
+
+/* What the spaces on ONE track do, said WHERE they are — `{at, text}` so the
+   place can be set in the accent colour beside the effect, the same shape the
+   dial's read-out uses. This replaces "4 spaces carry an icon", which is the
+   hardest possible way to describe a place. */
+function trackNotes(track, character) {
+  const out = [];
+  const stops = (track || []).filter(isStop);
+  if (stops.length === 1) {
+    out.push({ at: spaceWhere(stops[0]), text: "STOP." });
+  } else if (stops.length > 1) {
+    const hp = stops.filter((sp) => sp.kind === "hp").map((sp) => sp.hp);
+    out.push({
+      at: `${Math.min(...hp)}–${Math.max(...hp)} health`,
+      text: "STOP on every one of them, so the marker moves one space a turn and no"
+        + " further, however much lands on it.",
+    });
+  }
+  for (const sp of track || []) {
+    const ops = spaceIcons(sp);
+    if (!ops.length) continue;
+    // The Fey Folk's icons are all on the space a Character COMES IN on, which
+    // is the one fact that makes them make sense: the icon is a signing bonus,
+    // not something you climb to.
+    out.push({
+      at: spaceWhere(sp),
+      // Only a Character's top space pays as the marker is PLACED there
+      // (`choose_character` fires it). On an ordinary board the start space is
+      // just where you begin, and setup icons are a separate field entirely.
+      text: ops.map(opWords).join(", ")
+        + (character && sp.start ? " — the moment they step in" : ""),
+    });
+  }
+  return out;
+}
+
+/* The non-obvious half of every mechanic ONE CARD uses.
+ *
+ * Without it a one-op card's modal printed the title, the fighter, and the same
+ * effect line already on the face — a player who holds a card and learns nothing
+ * stops holding cards.
+ *
+ * Keyed by more than the op name, because the op name is not always the thing
+ * the reader does not know. "+1 Ship" is an `op: track`, and the generic line
+ * ("a track advances a marker on this fighter's own board") is true of every
+ * track in the game and says nothing about the Navigation one the card just
+ * stepped. Where the op names a specific track or token, that entry is used
+ * instead of / as well as the generic one.
+ */
+function cardGlossary(lists, note) {
+  const out = [];
+  const said = [];
+  const add = (k, text) => {
+    if (text && !out.some((g) => g.k === k)) out.push({ k, text });
+  };
+  const walk = (list) => {
+    for (const op of list || []) {
+      said.push(opWords(op));
+      if (op.op) add(op.op, OP_GLOSSARY[op.op]);
+      if (op.op === "track") add(`t:${op.track}`, TRACK_GLOSSARY[op.track]);
+      if (op.op === "spirit") add("t:spirits", TRACK_GLOSSARY.spirits);
+      if (op.token) add(`k:${op.token}`, TOKEN_GLOSSARY[op.token]);
+      if (op.cond?.token) add(`k:${op.cond.token}`, TOKEN_GLOSSARY[op.cond.token]);
+      if (op.cond?.kind === "ships") add("t:navigation", TRACK_GLOSSARY.navigation);
+      walk(op.then); walk(op.else); walk(op.success);
+    }
+  };
+  for (const list of lists) walk(list);
+  // A card that NAMES a token in its own words gets that token explained, even
+  // when it does so through an `fx` with no `token` field — which is most of
+  // them. Corrupted Lawman's whole text is "The Sheriff changes sides", and its
+  // only glossary line was "this one does not follow the usual pattern".
+  const text = said.concat(note || "").join(" ");
+  for (const [id, word] of Object.entries(TOKEN_WORD)) {
+    const bare = word.replace(/[^A-Za-z]/g, "");
+    if (bare && text.includes(bare)) add(`k:${id}`, TOKEN_GLOSSARY[id]);
+  }
+  return out;
+}
+
+/* The rules this board breaks, as opposed to the ones its track draws. Every
+   one is read off a field, so a board that gains one gains the sentence. */
 function boardFacts(board) {
   if (!board) return [];
   const out = [];
   const tr = board.hp_track || [];
   const kos = tr.filter((sp) => sp.kind === "ko").length;
-  const stops = tr.filter((sp) => (sp.icons || []).includes("stop")).length;
-  const iconed = tr.filter((sp) => sp.kind === "hp" && (sp.icons || []).length).length;
 
   if (board.characters) {
-    out.push(`Three Characters, one at a time — ${board.characters
-      .map((c) => c.id).join(", ")}. Each has its own health track.`);
-    out.push("Losing the last health on a Character turns them into a Spirit and the next one steps in.");
+    const names = board.characters.map((c) => c.name || c.id);
+    const hps = board.characters.map((c) => maxOfTrack(c.hp_track));
+    out.push(`${names.length} Characters, one on the board at a time — `
+      + names.map((n, i) => `${n} (${hps[i]} health)`).join(", ")
+      + ". Each has its own track, and its own icon on the space it starts on.");
+    out.push("A Character pushed to their Spirit space becomes a Spirit at the end of that"
+      + " turn, the Spirits track goes up, and only then do you pick which of the ones"
+      + " left steps in — at full health, so damage never carries across.");
+    if (!board.characters.some((c) => (c.hp_track || []).some((sp) => sp.kind === "ko"))) {
+      out.push("There is no KO space anywhere on this board, so the Fey Folk cannot be"
+        + " knocked out. They lose only if all three are already Spirits when All Legends"
+        + " Must Pass is revealed.");
+    }
   }
   if (board.back) {
-    out.push("Double-sided: this fighter transforms, and the other side has its own health track.");
+    out.push(`Two-sided: this board turns over to ${board.back.name}, which fights on a`
+      + " health track of its own.");
   }
-  if (kos > 1) out.push(`${kos} KO spaces, so there is further to fall than the number suggests.`);
-  if (tr.some((sp) => sp.kind === "revive")) {
-    out.push("A revive space BELOW the KO spaces — pushed past both, they come back.");
+  if (kos > 1) {
+    out.push(`${kos} KO spaces in a row, so there is further to fall than the top number`
+      + " suggests — and a marker only loses the fight once it is ON one at the end of a turn.");
   }
-  if (stops > 0) {
-    out.push(stops >= tr.length - 2
-      ? "A STOP on almost every space: the marker moves at most one space a turn, whatever the total."
-      : `${stops} STOP space${stops === 1 ? "" : "s"} — the marker halts the moment it lands on one.`);
+  if (board.revive_to_hp != null) {
+    out.push(`Pushed all the way past the KO spaces, the marker lands on the revive space`
+      + ` and comes straight back on ${board.revive_to_hp} health — the moment that movement`
+      + " settles, not at the end of the turn, so anything still to land this turn lands on"
+      + " the revived fighter.");
   }
-  if (iconed > 0) {
-    out.push(iconed === 1
-      ? "1 space carries an icon that fires when the marker passes it."
-      : `${iconed} spaces carry an icon that fires when the marker passes them.`);
-  }
-  const st = board.special_track;
-  if (st && st.id) {
-    const label = String(st.id).replace(/_/g, " ");
-    const spaces = (st.spaces || []).length;
-    out.push(spaces ? `Has a ${label} track of ${spaces} spaces.`
-      : st.max != null ? `Has a ${label} track running ${st.min ?? 0} to ${st.max}.`
-        : `Has a ${label} track.`);
-  }
-  for (const [t, n] of Object.entries(board.tokens || {})) {
-    if (n) out.push(`Starts with ${n} ${String(t).replace(/_/g, " ")}.`);
+  for (const op of board.setup_icons || []) {
+    out.push(`Before the first card of the game: ${opWords(op)}.`);
   }
   return out;
 }
 
+function maxOfTrack(track) {
+  let best = 0;
+  for (const sp of track || []) if (sp.kind === "hp" && sp.hp > best) best = sp.hp;
+  return best || null;
+}
+
+/* The health number on the modal's stat chip.
+ *
+ * It was the best track on the board, which is not what "how much can this
+ * survive" means for either fighter that has more than one. It read 5 for the
+ * Fey Folk, whose first Character has 3 and who never has more than one
+ * Character on the board; and 15 for Bödvar, who fights on 11 until he turns
+ * over. Both now show every track, in the order they are met, which lines up
+ * one-to-one with the strips drawn below. */
+function healthLabel(board) {
+  if (!board) return "?";
+  const tracks = board.characters
+    ? board.characters.map((c) => c.hp_track)
+    : [board.hp_track, board.back?.hp_track];
+  const maxes = tracks.filter(Boolean).map(maxOfTrack).filter(Boolean);
+  return maxes.length ? maxes.join(" / ") : "?";
+}
+
+/* The biggest number ANYWHERE on this fighter's boards. This is the bar-scale
+   denominator and nothing else: it answers "how long should this fighter's bar
+   be against the toughest in the game", which is a question about the widest
+   track. It is NOT the fighter's health — for a board with more than one track
+   that is `healthLabel`, and this used to be used for both. */
 function maxHpOf(board) {
   if (!board) return null;
   const tracks = board.characters ? board.characters.map((c) => c.hp_track)
@@ -331,7 +510,7 @@ function FighterCard({ fid, state, board, active, fx, beatKey, scale, onInfo }) 
       chips.push(
         <span className={`rt-chip${name === "aflame" ? " rt-chip-fire" : ""}`} key={name}>
           {name === "aflame" && <Icon name="ignite" />}
-          {name.replace(/_/g, " ")} <b>{n}</b>
+          {tokenWord(name)} <b>{n}</b>
         </span>);
     }
   }
@@ -510,18 +689,76 @@ function PlayCard({ card, catalog, flipKey, side, onInfo }) {
 function TrackStrip({ track }) {
   if (!track || track.length < 2) return null;
   return (
-    <div className="rt-strip" role="img" aria-label={`${track.length} spaces`}>
+    <div className="rt-strip" role="img"
+      aria-label={`${maxOfTrack(track) ?? "?"} health over ${track.length} spaces`}>
       {track.map((sp, i) => {
-        const stop = (sp.icons || []).includes("stop");
+        const stop = isStop(sp);
+        const ops = spaceIcons(sp);
         const cls = ["rt-cell"];
         if (sp.kind !== "hp") cls.push(`rt-cell-${sp.kind}`);
         else if (stop) cls.push("rt-cell-stop");
-        else if ((sp.icons || []).length) cls.push("rt-cell-icon");
-        return (
-          <i key={i} className={cls.join(" ")}
-            title={sp.kind !== "hp" ? sp.kind : stop ? "stop" : (sp.icons || []).length ? "icon" : String(sp.hp)} />
-        );
+        else if (ops.length) cls.push("rt-cell-icon");
+        // The tooltip used to read "icon", which is the word the reader opened
+        // the modal to have explained.
+        const title = [spaceWhere(sp), stop ? "STOP" : null,
+          ops.length ? ops.map(opWords).join(", ") : null].filter(Boolean).join(" — ");
+        return <i key={i} className={cls.join(" ")} title={title} />;
       })}
+    </div>
+  );
+}
+
+/* The track BESIDE the health track — Joan's dial, Bödvar's Rage, Ching Shih's
+ * Fleet, the Fey Folk's Spirits.
+ *
+ * Never drawn before. The modal said "Has a divine voice track of 5 spaces" and
+ * stopped, which is why a player could watch Joan's marker go round all game and
+ * never learn that two of the five positions pay and three do not.
+ *
+ * Two shapes: a track whose spaces DO something is drawn and then read out, and
+ * a track that is only a number cards ask about (Ships, Spirits) has no
+ * spaces in the data at all, so it shows its range instead of a fake strip.
+ */
+function SpecialTrack({ track }) {
+  if (!track || !track.id) return null;
+  const spaces = track.spaces || [];
+  const label = String(track.id).replace(/_/g, " ");
+  const gloss = TRACK_GLOSSARY[track.id];
+  // A circular track's first space is where the marker STARTS and, for Joan, is
+  // never returned to; the rest are the ring. Numbering from the start space
+  // rather than from 1 is what makes the read-out below line up with the strip.
+  const ring = track.shape === "circular";
+  const pipName = (i) => (ring ? (i === 0 ? "start" : String(i))
+    : spaces[i]?.name || String(i));
+
+  return (
+    <div className="rt-special">
+      <div className="rt-special-hd">
+        <Icon name="track" />
+        <b className="rt-cap">{label}</b>
+        {spaces.length
+          ? <span>{ring ? `${spaces.length - 1} spaces, in a ring` : `${spaces.length} spaces`}</span>
+          : <span>{`runs ${track.min ?? 0} to ${track.max}`}</span>}
+      </div>
+      {spaces.length > 0 && (
+        <div className="rt-pips">
+          {spaces.map((sp, i) => (
+            <span key={i} className={`rt-pip${(sp.icons || []).length ? " rt-pip-on" : ""}`}>
+              {pipName(i)}
+            </span>
+          ))}
+        </div>
+      )}
+      {gloss && <p className="rt-special-note">{gloss}</p>}
+      {spaces.some((sp) => (sp.icons || []).length) && (
+        <ul className="rt-notes">
+          {spaces.map((sp, i) => (sp.icons || []).length ? (
+            <li key={i}>
+              <b>{pipName(i)}</b><span>{sp.icons.map(opWords).join(", ")}</span>
+            </li>
+          ) : null)}
+        </ul>
+      )}
     </div>
   );
 }
@@ -564,8 +801,32 @@ function InfoModal({ info, catalog, onClose }) {
   }
 
   const facts = isCard ? [] : boardFacts(board);
+  /* Every health track this fighter can end up on, in the order they are met.
+     The Fey Folk have three and no track of their own; Bödvar has a second one
+     he can never go back from. Both used to draw an unlabelled strip with the
+     number that matters -- how much it can take -- nowhere on it. */
+  const tracks = isCard ? [] : (board.characters
+    ? board.characters.map((c) => ({
+      key: c.id, name: c.name || c.id, track: c.hp_track,
+      max: maxOfTrack(c.hp_track), notes: trackNotes(c.hp_track, true),
+    }))
+    : [{
+      // The fighter's own name is already the modal's title -- it only earns
+      // the column when there is a second track to tell it apart from.
+      key: "hp", name: board.back ? board.name : "health", track: board.hp_track,
+      max: maxOfTrack(board.hp_track), notes: trackNotes(board.hp_track),
+    }]).concat(!isCard && board.back?.hp_track ? [{
+      key: "back", name: board.back.name, track: board.back.hp_track,
+      max: maxOfTrack(board.back.hp_track), notes: trackNotes(board.back.hp_track),
+    }] : []);
+  const kinds = isCard ? [] : trackKinds(tracks.map((t) => t.track));
+  const tokenRows = isCard ? []
+    : Object.entries(board.tokens || {}).filter(([, n]) => n > 0);
+  const absorbs = (!isCard && board.absorbs_attack) || [];
   const ops = isCard ? (card.ops || []) : [];
   const backOps = isCard && card.two_faced ? (card.ops_back || []) : [];
+  const instantOps = isCard && Array.isArray(card.instant_bonus) ? card.instant_bonus : [];
+  const gloss = isCard ? cardGlossary([ops, backOps, instantOps], card.note) : [];
 
   return (
     <div className="rt-backdrop" onClick={onClose} role="presentation">
@@ -594,11 +855,16 @@ function InfoModal({ info, catalog, onClose }) {
             ) : (
               <>
                 <span className="rt-stat rt-hp">
-                  <Icon name="hp" /><b>{maxHpOf(board) ?? "?"}</b><small>health</small>
+                  <Icon name="hp" /><b>{healthLabel(board)}</b><small>health</small>
                 </span>
                 <span className="rt-stat rt-pw">
                   <Icon name="power" /><b>{board.base_power}</b><small>Power</small>
                 </span>
+                {board.complexity != null && (
+                  <span className="rt-stat rt-cx">
+                    <Icon name="fx" /><b>{board.complexity}</b><small>of 5 to learn</small>
+                  </span>
+                )}
               </>
             )}
           </p>
@@ -619,59 +885,115 @@ function InfoModal({ info, catalog, onClose }) {
               {backOps.map((op, i) => (
                 <li key={`b${i}`}><Icon name={iconForOp(op)} /><span>{opWords(op)}</span></li>
               ))}
+              {/* The Instant Bonus was a WORD in the tag line and nothing else,
+                  so a card whose whole value is what it pays on the way in
+                  showed the reader a label and hid the payment. */}
+              {instantOps.length > 0 && (
+                <li className="rt-modal-sep"><Icon name="again" /><span>On the way in:</span></li>
+              )}
+              {instantOps.map((op, i) => (
+                <li key={`i${i}`}><Icon name={iconForOp(op)} /><span>{opWords(op)}</span></li>
+              ))}
+            </ul>
+          )}
+
+          {isCard && (card.starting || instantOps.length > 0 || card.two_faced) && (
+            <ul className="rt-modal-facts">
+              {card.starting && (
+                <li>
+                  Starting Card — set aside at setup rather than shuffled in. Your two
+                  Fighters&apos; Starting Cards, in an order you pick, are your whole opening
+                  Fight Deck, so this one is guaranteed to come up in round 1.
+                </li>
+              )}
+              {instantOps.length > 0 && (
+                <li>
+                  Instant Bonus — fires the moment you slide this card into your Fight Deck at
+                  the end of a BUILD, before the next round starts. Once, on the way in; it
+                  does nothing on the turns the card is actually revealed.
+                </li>
+              )}
+              {card.two_faced && (
+                <li>
+                  Two-faced — it starts on the front and stays on whichever face it was left,
+                  so what it does next round depends on what turned it over.
+                </li>
+              )}
             </ul>
           )}
 
           {isCard && card.note && <p className="rt-modal-note">{card.note}</p>}
 
-          {isCard && (() => {
-            // The non-obvious half of each mechanic this card uses. Without it a
-            // one-op card's modal repeated its own face and taught nothing.
-            const seen = [];
-            const walk = (list) => {
-              for (const op of list || []) {
-                if (op.op && OP_GLOSSARY[op.op] && !seen.includes(op.op)) seen.push(op.op);
-                walk(op.then); walk(op.else); walk(op.success);
-              }
-            };
-            walk(ops); walk(backOps);
-            if (!seen.length) return null;
-            return (
-              <>
-                <h3 className="rt-modal-h3">How it works</h3>
-                <ul className="rt-modal-facts">
-                  {seen.map((k) => <li key={k}>{OP_GLOSSARY[k]}</li>)}
-                </ul>
-              </>
-            );
-          })()}
+          {isCard && gloss.length > 0 && (
+            <>
+              <h3 className="rt-modal-h3">How it works</h3>
+              <ul className="rt-modal-facts">
+                {gloss.map((g) => <li key={g.k}>{g.text}</li>)}
+              </ul>
+            </>
+          )}
 
           {!isCard && (
             <>
-              <h3 className="rt-modal-h3">Board</h3>
-              {board.characters
-                ? board.characters.map((c) => (
-                  <div className="rt-modal-track" key={c.id}>
-                    <span className="rt-modal-track-name rt-cap">{c.id}</span>
-                    <TrackStrip track={c.hp_track} />
-                  </div>))
-                : <div className="rt-modal-track"><TrackStrip track={board.hp_track} /></div>}
-              {board.back?.hp_track && (
-                <div className="rt-modal-track">
-                  <span className="rt-modal-track-name">transformed</span>
-                  <TrackStrip track={board.back.hp_track} />
+              <h3 className="rt-modal-h3">Health track</h3>
+              {tracks.map((t) => (
+                <div className="rt-modal-track-block" key={t.key}>
+                  <div className="rt-modal-track">
+                    <span className="rt-modal-track-name rt-cap">{t.name}</span>
+                    <TrackStrip track={t.track} />
+                    {t.max != null && <b className="rt-modal-track-max">{t.max}</b>}
+                  </div>
+                  {t.notes.length > 0 && (
+                    <ul className="rt-notes">
+                      {t.notes.map((n, i) => (
+                        <li key={i}><b>{n.at}</b><span>{n.text}</span></li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
-              )}
-              <p className="rt-modal-key">
-                <span className="rt-cell rt-cell-ko" /> KO
-                <span className="rt-cell rt-cell-stop" /> stop
-                <span className="rt-cell rt-cell-icon" /> icon
-                <span className="rt-cell rt-cell-revive" /> revive
-              </p>
-              {facts.length > 0 && (
-                <ul className="rt-modal-facts">
-                  {facts.map((f, i) => <li key={i}>{f}</li>)}
+              ))}
+              {/* Only the kinds of space this board actually has. The old key
+                  named all four on every fighter, so nine boards advertised a
+                  revive space they do not own and the word "icon" was a legend
+                  entry meaning "something happens, we are not saying what". */}
+              {kinds.length > 0 && (
+                <ul className="rt-modal-key">
+                  {kinds.map((k) => (
+                    <li key={k}>
+                      <span className={`rt-cell rt-cell-${k}`} />
+                      <span>{SPACE_GLOSSARY[k]}</span>
+                    </li>
+                  ))}
                 </ul>
+              )}
+
+              {board.special_track && <SpecialTrack track={board.special_track} />}
+
+              {tokenRows.length > 0 && (
+                <>
+                  <h3 className="rt-modal-h3">Tokens</h3>
+                  <ul className="rt-modal-facts">
+                    {tokenRows.map(([t, n]) => (
+                      <li key={t}>
+                        <b className="rt-cap">{tokenWord(t)}</b>
+                        {n > 1 ? ` ×${n}` : ""} — {TOKEN_GLOSSARY[t]
+                          || (absorbs.includes(t)
+                            ? `Eats one Attack aimed at whoever is holding it, then returns to ${board.name} to be spent again.`
+                            : "Read the cards that name it — nothing else moves it.")}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+
+              {(facts.length > 0 || board.note) && (
+                <>
+                  <h3 className="rt-modal-h3">What this board does differently</h3>
+                  <ul className="rt-modal-facts">
+                    {facts.map((f, i) => <li key={i}>{f}</li>)}
+                    {board.note && <li>{board.note}</li>}
+                  </ul>
+                </>
               )}
             </>
           )}
@@ -1413,7 +1735,10 @@ export default function RagTag({ myId, authUser, onExit }) {
                   {(game.draft_hand || []).map((fid) => {
                     const b = catalog?.fighters?.[fid];
                     const sg = sigilOf(fid);
-                    const hp = maxHpOf(b);
+                    // The same number the detail modal shows, for the same
+                    // reason: "5 HP" for the Fey Folk is the Elf, and you draft
+                    // them knowing only that the Fairy comes in on 3.
+                    const hp = b ? healthLabel(b) : null;
                     return (
                       <InfoTarget as="button" type="button" className="rt-pick rt-draft-card" key={fid}
                         style={{ "--f-ink": sg.ink, "--f-deep": sg.deep }}
@@ -1425,7 +1750,7 @@ export default function RagTag({ myId, authUser, onExit }) {
                           <span className="rt-pick-name">{b?.name || fid}</span>
                           <span className="rt-draft-stats">
                             <span className="rt-stat rt-hp">
-                              <Icon name="hp" /><b>{hp ?? "—"}</b><small>HP</small>
+                              <Icon name="hp" /><b>{hp || "—"}</b><small>HP</small>
                             </span>
                             <span className="rt-stat rt-pw">
                               <Icon name="power" /><b>{b ? b.base_power : "?"}</b><small>Power</small>
