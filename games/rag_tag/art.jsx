@@ -217,6 +217,18 @@ export const OP_GLOSSARY = {
   fx: "This one does not follow the usual pattern — read the note above.",
 };
 
+/* How hard a fighter is to play, in words.
+ *
+ * The board data carries a 1-5 rating and the modal rendered it as the number
+ * plus "of 5 to learn", which is a scale nobody has been shown either end of.
+ * A word needs no scale.
+ */
+export const COMPLEXITY_WORD = ["", "Simple", "Easy", "Moderate", "Complex", "Expert"];
+
+export function complexityWord(n) {
+  return COMPLEXITY_WORD[n] || "";
+}
+
 /* The words the BOARD uses for a track and a token, against the ids the data
  * uses for them. Cards read "+1 navigation" and "Pass the presence token" —
  * field names, straight out of the JSON, on the face of a card. */

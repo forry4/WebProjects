@@ -102,6 +102,59 @@ def test_every_special_track_is_named_and_explained():
     assert ids <= _keys(ART, "TRACK_GLOSSARY"), "track the modal cannot explain"
 
 
+def test_every_complexity_rating_has_a_word():
+    """The number alone was "N of 5 to learn" — a scale nobody is shown the ends of.
+
+    Derived from the data, so a sixth tier fails here rather than rendering an
+    empty chip with a label and no value in it.
+    """
+    m = re.search(r"^export const COMPLEXITY_WORD = \[(.*?)\];$", ART, re.M)
+    assert m, "COMPLEXITY_WORD is gone from art.jsx — this guard has rotted"
+    words = re.findall(r'"([^"]*)"', m.group(1))
+    rated = {b["complexity"] for b in FIGHTERS.values() if b.get("complexity") is not None}
+    for n in sorted(rated):
+        assert 0 <= n < len(words) and words[n], f"complexity {n} has no word"
+
+
+def test_a_circular_track_is_drawn_as_a_circle():
+    """Joan's dial rendered as a row of boxes — the one shape a ring is not.
+
+    A straight line cannot show that the last space leads back to the first, nor
+    that the centre is entered once and never returned to. The browser gate can
+    only check this when Joan happens to be drafted, so the structural half is
+    here: the data says a track is circular, the UI must have something that
+    draws one, and `SpecialTrack` must actually branch to it.
+    """
+    shapes = {(b.get("special_track") or {}).get("shape") for b in FIGHTERS.values()}
+    if "circular" not in shapes:
+        raise AssertionError(
+            "no fighter has a circular track any more — delete this guard rather "
+            "than letting it pass over nothing")
+    assert "function DialRing(" in UI, "a circular track in the data and nothing to draw it"
+    special = re.search(r"^function SpecialTrack\(.*?^\}$", UI, re.M | re.S)
+    assert special, "SpecialTrack() is gone from RagTag.jsx — this guard has rotted"
+    assert "<DialRing" in special.group(0), (
+        "SpecialTrack no longer reaches DialRing — a ring would draw as a row of pips")
+
+
+def test_a_board_of_characters_shows_all_of_them_on_the_fighting_card():
+    """The card showed only the Character on the board.
+
+    So the Fey Folk read "3/3" while carrying nine more health in two Characters
+    nobody could see, and there was no way to tell which had already gone. Same
+    shape as the guard above: sampled in the browser, structural here.
+    """
+    if not any(b.get("characters") for b in FIGHTERS.values()):
+        raise AssertionError(
+            "no fighter has Characters any more — delete this guard rather than "
+            "letting it pass over nothing")
+    assert "function CharacterRoster(" in UI, "Characters in the data and nothing to list them"
+    card = re.search(r"^function FighterCard\(.*?^\}$", UI, re.M | re.S)
+    assert card, "FighterCard() is gone from RagTag.jsx — this guard has rotted"
+    assert "<CharacterRoster" in card.group(0), (
+        "the fighting card no longer lists the Characters behind the one on the board")
+
+
 def test_every_kind_of_space_is_in_the_key_and_the_key_is_ordered():
     kinds = set()
     for board in FIGHTERS.values():

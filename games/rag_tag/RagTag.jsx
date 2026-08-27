@@ -12,7 +12,7 @@ import {
 import { buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 import {
   Sigil, Icon, sigilOf, iconForOp, FX_TEXT, OP_GLOSSARY,
-  TRACK_GLOSSARY, TOKEN_GLOSSARY, SPACE_GLOSSARY, TOKEN_WORD, trackWord, tokenWord,
+  TRACK_GLOSSARY, TOKEN_GLOSSARY, SPACE_GLOSSARY, TOKEN_WORD, trackWord, tokenWord, complexityWord,
 } from "./art.jsx";
 import { narrateBeat, narrateRound } from "./narrate.jsx";
 import { useCardInfoGesture } from "../../shared/gestures.js";
@@ -473,6 +473,39 @@ function HealthTrack({ track, at, scale }) {
   );
 }
 
+/* The Fey Folk's three Characters, all of them, on the fighting card.
+ *
+ * The card showed only the one on the board — so a fighter with the Fairy up
+ * read "3/3" while carrying nine more health in two Characters nobody could
+ * see, and there was no way to tell which of the three had already gone. Both
+ * matter every turn: how much is left in the team, and how much is left in the
+ * one you can actually hit.
+ *
+ * A waiting Character shows its FULL health because that is what it comes in
+ * on — damage never carries across.
+ */
+function CharacterRoster({ board, state }) {
+  const chars = board.characters;
+  if (!chars) return null;
+  const track = trackFor(state, board);
+  return (
+    <div className="rt-roster">
+      {chars.map((c) => {
+        const at = state.chars?.[c.id] || "waiting";
+        const max = maxOfTrack(c.hp_track);
+        return (
+          <span className={`rt-rost rt-rost-${at}`} key={c.id}>
+            <b className="rt-cap">{c.name || c.id}</b>
+            <i>{at === "spirit" ? "spirit"
+              : at === "active" ? `${spaceValue(track, state.hp)}/${max}`
+                : `${max}/${max}`}</i>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 function FighterCard({ fid, state, board, active, fx, beatKey, scale, onInfo }) {
   const gesture = useCardInfoGesture(board ? onInfo : null);
   if (!state || !board) return <div className="rt-fighter rt-fighter-ghost" />;
@@ -526,8 +559,10 @@ function FighterCard({ fid, state, board, active, fx, beatKey, scale, onInfo }) 
     const shown = name === "divine_voice" ? (n === 0 ? "halo" : n) : n;
     if (shown === 0) continue;
     chips.push(
+      // The name the board prints. This one was missed when the modal's keys
+      // were fixed, because it is on the board rather than in the modal.
       <span className="rt-chip" key={`t-${name}`}>
-        {name.replace(/_/g, " ")} <b>{shown}</b>
+        {trackWord(name, 2)} <b>{shown}</b>
       </span>);
   }
 
@@ -573,6 +608,7 @@ function FighterCard({ fid, state, board, active, fx, beatKey, scale, onInfo }) 
       {spent
         ? <div className="rt-track rt-track-gone" role="img" aria-label="no health track" />
         : <HealthTrack track={track} at={state.hp} scale={scale} />}
+      <CharacterRoster board={board} state={state} />
       {/* Reserved so a chip appearing mid-round does not shift the whole
           column below it. */}
       <div className="rt-chips">{chips}</div>
@@ -708,6 +744,66 @@ function TrackStrip({ track }) {
   );
 }
 
+/* A circular track, drawn as a circle.
+ *
+ * Joan's dial was a row of five boxes, which is the one shape it is not: the
+ * rules call it a ring, the marker goes round it, and a straight line cannot
+ * show that space 4 leads back to space 1. It also cannot show the thing that
+ * catches every player once — the Halo in the middle is where the marker STARTS
+ * and is never returned to, so the ring is four long, not five.
+ *
+ * Drawn rather than described, and drawn from the data: the node count, which
+ * nodes pay and where the marker enters all come off `spaces`, so a corrected
+ * import turns the dial with it. Index 0 is the start; the rest are the ring, in
+ * travel order, which is why they are laid out clockwise from the top right.
+ */
+function DialRing({ spaces }) {
+  const ring = spaces.slice(1);
+  if (!ring.length) return null;
+  const C = 62, R = 40, NODE = 12;
+  const at = (i) => {
+    const deg = -45 + (360 / ring.length) * i;
+    const a = (deg * Math.PI) / 180;
+    return [C + R * Math.cos(a), C + R * Math.sin(a)];
+  };
+  const [ex, ey] = at(0);
+  // The travel arrow sits on the ring midway between the first two nodes,
+  // pointing the way the marker goes.
+  const mid = ((-45 + 180 / ring.length) * Math.PI) / 180;
+  const [ax, ay] = [C + R * Math.cos(mid), C + R * Math.sin(mid)];
+  const tan = mid + Math.PI / 2;                       // clockwise tangent
+  const tip = (d, w) => [ax + d * Math.cos(tan) + w * Math.cos(tan + Math.PI / 2),
+    ay + d * Math.sin(tan) + w * Math.sin(tan + Math.PI / 2)];
+
+  return (
+    <svg className="rt-dial" viewBox="0 0 124 124" role="img"
+      aria-label={`a ring of ${ring.length}, entered from the centre`}>
+      <circle className="rt-dial-ring" cx={C} cy={C} r={R} />
+      {/* The one-way step out of the centre. Dashed because it is travelled
+          once in the whole game. */}
+      <line className="rt-dial-in" x1={C} y1={C} x2={ex} y2={ey} />
+      <polygon className="rt-dial-arrow"
+        points={[tip(7, 0), tip(-2, 4.5), tip(-2, -4.5)]
+          .map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ")} />
+      <circle className="rt-dial-node rt-dial-start" cx={C} cy={C} r={NODE + 1} />
+      <text className="rt-dial-t rt-dial-t-start" x={C} y={C}>start</text>
+      {ring.map((sp, i) => {
+        const [x, y] = at(i);
+        const pays = (sp.icons || []).length > 0;
+        return (
+          <g key={i}>
+            <circle className={`rt-dial-node${pays ? " rt-dial-on" : ""}`}
+              cx={x} cy={y} r={NODE} />
+            <text className={`rt-dial-t${pays ? " rt-dial-t-on" : ""}`} x={x} y={y}>
+              {i + 1}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 /* The track BESIDE the health track — Joan's dial, Bödvar's Rage, Ching Shih's
  * Fleet, the Fey Folk's Spirits.
  *
@@ -740,15 +836,17 @@ function SpecialTrack({ track }) {
           ? <span>{ring ? `${spaces.length - 1} spaces, in a ring` : `${spaces.length} spaces`}</span>
           : <span>{`runs ${track.min ?? 0} to ${track.max}`}</span>}
       </div>
-      {spaces.length > 0 && (
-        <div className="rt-pips">
-          {spaces.map((sp, i) => (
-            <span key={i} className={`rt-pip${(sp.icons || []).length ? " rt-pip-on" : ""}`}>
-              {pipName(i)}
-            </span>
-          ))}
-        </div>
-      )}
+      {ring
+        ? <DialRing spaces={spaces} />
+        : spaces.length > 0 && (
+          <div className="rt-pips">
+            {spaces.map((sp, i) => (
+              <span key={i} className={`rt-pip${(sp.icons || []).length ? " rt-pip-on" : ""}`}>
+                {pipName(i)}
+              </span>
+            ))}
+          </div>
+        )}
       {gloss && <p className="rt-special-note">{gloss}</p>}
       {spaces.some((sp) => (sp.icons || []).length) && (
         <ul className="rt-notes">
@@ -860,9 +958,10 @@ function InfoModal({ info, catalog, onClose }) {
                 <span className="rt-stat rt-pw">
                   <Icon name="power" /><b>{board.base_power}</b><small>Power</small>
                 </span>
-                {board.complexity != null && (
+                {complexityWord(board.complexity) && (
                   <span className="rt-stat rt-cx">
-                    <Icon name="fx" /><b>{board.complexity}</b><small>of 5 to learn</small>
+                    <Icon name="fx" /><b>{complexityWord(board.complexity)}</b>
+                    <small>to learn</small>
                   </span>
                 )}
               </>

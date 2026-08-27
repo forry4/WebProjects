@@ -371,7 +371,22 @@ Watch the three shapes `special_track` comes in: a real space list (Bödvar,
 Joan), a min/max range with `spaces: []` (Ching Shih, the Fey Folk), and **an
 empty object for a fighter that has none** — which is truthy, and printed a
 track Milady does not have. `SpecialTrack` therefore keys off `track.id`, not
-the object.
+the object. A `shape: "circular"` one is DRAWN as a ring (`DialRing`, an SVG
+generated from the same `spaces`): a row of boxes is the one shape a ring is
+not, and it cannot show either the wrap or the fact that the centre is entered
+once and never returned to.
+
+**A fighter with `characters` needs BOTH numbers on the fighting card** — how
+much is left in the Character you can hit, and how much is left in the team.
+`CharacterRoster` lists all three with the active one accented and a Spirit
+struck through; without it the Fey Folk read "3/3" while carrying nine more
+health nobody could see. Their `chars` map already reaches the client, so this
+is client-side only.
+
+**A rating is not a scale.** `complexity` shipped as its raw 1–5 beside the
+words "of 5 to learn", which tells a reader neither end of the range; it is a
+word now (`COMPLEXITY_WORD`). Two of the three things a player reads on a board
+were numbers that needed a legend nobody had.
 
 ### Everything visual is drawn in the bundle
 There is no licensed art in the repo (see *Where the data came from*), so `art.jsx`
@@ -402,7 +417,7 @@ media rules and pins a phone to three columns. Width and padding ARE fair game.
 
 ## Testing
 
-`pytest games/rag_tag/tests -n0 -q` — 130 tests.
+`pytest games/rag_tag/tests -n0 -q` — 133 tests.
 
 | File | Covers |
 |---|---|
@@ -413,7 +428,7 @@ media rules and pins a phone to three columns. Width and padding ARE fair game.
 | `test_ws_auth` | seat identity binding |
 | `test_redaction` | the whole serialized payload of a REAL played game |
 | `test_persist` | compaction round trip, structural proof it did something, resume mid-fight and mid-build |
-| `test_words` | every op, condition, `fx`, token, track and kind of space the DATA uses has words in the UI — the one gate over a layer whose every failure mode renders a plausible-looking sentence rather than throwing |
+| `test_words` | every op, condition, `fx`, token, track, complexity rating and kind of space the DATA uses has words in the UI — the one gate over a layer whose every failure mode renders a plausible-looking sentence rather than throwing. Also the two SHAPE guards (a circular track is drawn as a circle; a board of Characters lists them all on the fighting card), which exist because the browser can only check those when Joan or the Fey Folk happen to be drafted |
 
 Frontend: `webapp/test/screens.mjs` §`ragtagFight` (lane A) creates a vs-bot game
 and plays a full round in a browser. Mounting the route proves nothing about a

@@ -4705,44 +4705,96 @@ try {
 		// not fire `contextmenu` on a long press. What matters here is that the
 		// gesture reaches a fighter AND a card, and that it does not also trigger
 		// whatever the plain click on that element was wired to do.
+		// ALL FOUR fighters on the board, not just the first. Every sentence in
+		// this modal is GENERATED from op names, token ids and track ids, and every
+		// one of those lookups has a fallback that renders the raw JSON key -- that
+		// is how "+1 navigation", "Starts with 1 presence" and a legend entry whose
+		// whole text was the word "icon" all shipped looking deliberate for months.
+		// Which fighters are on the board is random, so sweeping the four is what
+		// turns one sample into four; the checks below are written to hold for any
+		// fighter, and the exhaustive per-roster gate is the Python
+		// `games/rag_tag/tests/test_words.py`. This is the render-level half: a raw
+		// key reaching the page through JSX rather than through a missing entry.
+		const seenBoards = [];
+		const boardFails = { leak: [], key: [], rate: [], head: [], dial: [], roster: [] };
+		// Which fighters get drafted is random, so the two CONDITIONAL checks below
+		// (a ring must be drawn as one; a board with Characters must show them all)
+		// see nothing at all unless Joan or the Fey Folk turn up. A conditional that
+		// nothing reached is a green tick over an untested claim, so the run SAYS how
+		// many boards each one actually looked at rather than leaving it to be
+		// assumed. The unconditional checks above hold for all four every run.
+		const exercised = { ring: 0, roster: 0 };
+		const nFighters = await page.locator(".rt-fighter").count();
+		for (let i = 0; i < nFighters; i++) {
+			await page.locator(".rt-fighter").nth(i).click({ button: "right" }).catch(() => {});
+			await sleep(350);
+			const who = await page.locator(".rt-modal h2").first().innerText().catch(() => "");
+			if (!who) continue;
+			seenBoards.push(who);
+			const body = await page.locator(".rt-modal-body").first().innerText().catch(() => "");
+			const leak = body.match(/\b[a-z]+_[a-z_]+\b/g) || [];
+			if (leak.length) boardFails.leak.push(`${who}: ${leak.slice(0, 3).join()}`);
+			// The key names only the kinds of space THIS board has, and each entry is
+			// a sentence rather than a label -- the old one named all four kinds on
+			// every board and its longest entry was one word.
+			const rows = await page.locator(".rt-modal-key li").allInnerTexts().catch(() => []);
+			if (!rows.length || !rows.every((t) => t.split(/\s+/).length > 4)) {
+				boardFails.key.push(`${who}: ${JSON.stringify(rows.map((t) => t.slice(0, 18)))}`);
+			}
+			// Every board carries a complexity rating, so this one is never vacuous.
+			// It used to render the raw 1-5 beside "of 5 to learn" -- a scale the
+			// reader has never been shown either end of.
+			const stats = await page.locator(".rt-modal-stats").first().innerText().catch(() => "");
+			if (!/to learn/.test(stats) || /\d\s*(of 5|\/\s*5)/.test(stats)) {
+				boardFails.rate.push(`${who}: ${stats.replace(/\n/g, " ")}`);
+			}
+			const heads = await page.locator(".rt-modal h3").allInnerTexts().catch(() => []);
+			if (!heads.some((h) => /health track/i.test(h))
+				|| await page.locator(".rt-modal .rt-strip .rt-cell").count() === 0) {
+				boardFails.head.push(`${who}: ${JSON.stringify(heads)}`);
+			}
+			// CONDITIONAL, and that is the point: a fighter without a ring or without
+			// Characters cannot fail these, but one WITH them cannot pass by omission
+			// either. Joan's dial rendered as a row of boxes -- the one shape a ring
+			// is not -- and the Fey Folk's three Characters had their health nowhere.
+			const ringHd = await page.locator(".rt-special-hd", { hasText: "in a ring" }).count();
+			if (ringHd > 0) {
+				exercised.ring += 1;
+				if (await page.locator(".rt-dial").count() === 0) boardFails.dial.push(who);
+			}
+			const tracks = await page.locator(".rt-modal-track-block").count();
+			const onBoard = await page.locator(".rt-fighter").nth(i)
+				.locator(".rt-rost").count();
+			if (onBoard > 0) {
+				exercised.roster += 1;
+				if (onBoard !== tracks) {
+					boardFails.roster.push(`${who}: ${onBoard} on the card, ${tracks} tracks`);
+				}
+			}
+			await page.keyboard.press("Escape").catch(() => {});
+			await sleep(150);
+		}
+		check("right-click opens the details of every fighter on the board",
+			seenBoards.length === nFighters && nFighters === 4,
+			`opened ${seenBoards.length} of ${nFighters}: ${JSON.stringify(seenBoards)}`);
 		await page.locator(".rt-fighter").first().click({ button: "right" }).catch(() => {});
-		await sleep(400);
-		const infoTitle = await page.locator(".rt-modal h2").first().innerText().catch(() => "");
-		check("right-click on a fighter opens its details", infoTitle.length > 0,
-			`modal title was "${infoTitle}"`);
+		await sleep(350);
 		check("...and the details name its cards",
 			await page.locator(".rt-modal-chip").count() > 0);
-		// Every sentence in this modal is GENERATED from op names, token ids and
-		// track ids, and every one of those lookups has a fallback that renders
-		// the raw JSON key. That is how "+1 navigation", "Starts with 1 presence"
-		// and a legend entry whose whole text was the word "icon" all shipped
-		// looking deliberate for months. A snake_case word in the visible text is
-		// the signature of all of them, and it is fighter-agnostic — which this
-		// has to be, because the draft here is random.
-		//
-		// SAMPLED, and deliberately so: it only sees the fighter that happened to
-		// be drafted, so it is the render-level net, not the coverage gate. The
-		// exhaustive one is `games/rag_tag/tests/test_words.py`, which holds the
-		// whole roster to the glossaries. This catches the other half — a raw key
-		// reaching the page through JSX rather than through a missing entry.
-		const boardText = await page.locator(".rt-modal-body").first()
-			.innerText().catch(() => "");
-		const leaked = boardText.match(/\b[a-z]+_[a-z_]+\b/g) || [];
-		check("...and it never prints a raw data key", leaked.length === 0,
-			`leaked ${JSON.stringify(leaked.slice(0, 4))} in "${infoTitle}"`);
-		// The key names only the kinds of space THIS board has, and each entry is
-		// a sentence rather than a label — the old one named all four kinds on
-		// every board and the longest entry was one word.
-		const keyRows = await page.locator(".rt-modal-key li").allInnerTexts()
-			.catch(() => []);
-		check("...and the board key explains each kind of space it draws",
-			keyRows.length > 0 && keyRows.every((t) => t.split(/\s+/).length > 4),
-			`key rows ${JSON.stringify(keyRows.map((t) => t.slice(0, 24)))}`);
-		const heads = await page.locator(".rt-modal h3").allInnerTexts().catch(() => []);
-		check("...and the health track is drawn under its own heading",
-			heads.some((h) => /health track/i.test(h))
-			&& await page.locator(".rt-modal .rt-strip .rt-cell").count() > 0,
-			`headings ${JSON.stringify(heads)}`);
+		check("...and none of them prints a raw data key", boardFails.leak.length === 0,
+			JSON.stringify(boardFails.leak));
+		check("...and each board key explains the kinds of space it draws",
+			boardFails.key.length === 0, JSON.stringify(boardFails.key));
+		check("...and each rates the fighter in words, not on an unexplained scale",
+			boardFails.rate.length === 0, JSON.stringify(boardFails.rate));
+		check("...and each draws its health track under its own heading",
+			boardFails.head.length === 0, JSON.stringify(boardFails.head));
+		check("...and a track the panel calls a ring is DRAWN as one",
+			boardFails.dial.length === 0, JSON.stringify(boardFails.dial));
+		check("...and a fighter with Characters shows every one of them on its card",
+			boardFails.roster.length === 0, JSON.stringify(boardFails.roster));
+		log(`  ..   boards opened: ${seenBoards.join(", ")}`
+			+ ` (${exercised.ring} with a ring, ${exercised.roster} with Characters)`);
 		await page.keyboard.press("Escape").catch(() => {});
 		await sleep(300);
 		check("Escape closes it", await page.locator(".rt-modal").count() === 0);

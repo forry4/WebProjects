@@ -409,6 +409,42 @@
 /* min-height reserves one row: chips appear and disappear as tokens move, and
    without it every fighter panel changed height mid-round and shunted the whole
    column below it. */
+/* The three Fey Folk Characters under the bar. One line, because the card is a
+   column in a four-card grid and a second row of anything pushes the chips —
+   and therefore every card beside it — down. */
+.ragtag .rt-roster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.24rem 0.4rem;
+  margin-top: 0.35rem;
+  font-size: var(--rt-fs-sm);
+  line-height: 1.2;
+}
+
+.ragtag .rt-rost {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.24rem;
+  padding: 0.1rem 0.34rem;
+  border: 1px solid var(--rt-line-soft);
+  border-radius: 5px;
+  color: var(--rt-dim);
+}
+
+.ragtag .rt-rost b { font-weight: 600; }
+.ragtag .rt-rost i { font-style: normal; font-weight: 750; }
+
+/* The one actually on the board takes the fighter's accent; the ones still to
+   come stay quiet; a Spirit is struck through, because it is spent and not
+   merely inactive. */
+.ragtag .rt-rost-active {
+  color: var(--f-ink);
+  border-color: color-mix(in srgb, var(--f-ink) 55%, transparent);
+  background: color-mix(in srgb, var(--f-ink) 12%, transparent);
+}
+
+.ragtag .rt-rost-spirit { opacity: 0.5; text-decoration: line-through; }
+
 .ragtag .rt-chips {
   display: flex;
   flex-wrap: wrap;
@@ -1708,6 +1744,51 @@
   color: var(--rt-dim);
   background: #2f231c;
 }
+
+/* Joan's dial, drawn as the ring it is. Sized in rem so it scales with the
+   modal's type rather than being pinned to a pixel count. */
+.ragtag .rt-dial {
+  display: block;
+  width: 8.6rem;
+  height: 8.6rem;
+  margin: 0.5rem auto 0.1rem;
+  overflow: visible;
+}
+
+.ragtag .rt-dial-ring {
+  fill: none;
+  stroke: var(--rt-line);
+  stroke-width: 1.5;
+}
+
+.ragtag .rt-dial-in {
+  stroke: var(--rt-line);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+}
+
+.ragtag .rt-dial-arrow { fill: var(--rt-line); }
+
+.ragtag .rt-dial-node {
+  fill: #2f231c;
+  stroke: var(--rt-line-soft);
+  stroke-width: 1.5;
+}
+
+.ragtag .rt-dial-start { fill: #241a14; stroke-dasharray: 3 3; }
+
+.ragtag .rt-dial-on { fill: var(--rt-gold); stroke: var(--rt-gold); }
+
+.ragtag .rt-dial-t {
+  fill: var(--rt-dim);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+.ragtag .rt-dial-t-start { font-size: 0.52rem; font-weight: 600; }
+.ragtag .rt-dial-t-on { fill: #2a1d13; }
 
 /* A space that pays out, marked the same amber the health track uses for one. */
 .ragtag .rt-pip-on {
