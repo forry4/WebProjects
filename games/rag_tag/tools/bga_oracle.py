@@ -36,14 +36,31 @@ from games.rag_tag import engine, fighters as F
 BGA_TO_FID = {v["bga_id"]: k for k, v in F.FIGHTERS.items()}
 
 
+def _hp_marker(st):
+    """The fighter's health-track index, or None when it is not unambiguous.
+
+    BGA's marker `locationArg` IS our hp-track index -- verified for every fighter, whose
+    start slot matches ours exactly (wild_bunch 5, mordred 19, golem 25, wong 17...), which
+    follows from every health track matching slot-for-slot. So no mapping is needed.
+
+    Returns None when a fighter has more than one health marker on the board, which is how
+    Bodvar (human + Bear) and the Fey Folk (three Characters) present. Comparing those needs
+    to know which track is live, and a wrong guess manufactures divergences -- so they are
+    skipped rather than guessed at.
+    """
+    marks = [m for track in (st.get("trackMarkers") or {}).values() for m in (track or [])
+             if isinstance(m, dict) and m.get("type") == "health"]
+    return marks[0].get("locationArg") if len(marks) == 1 else None
+
+
 def snapshot_of(d):
-    """One updateCardAndFighterData event -> {fid: (power, is_ko)}."""
+    """One updateCardAndFighterData event -> {fid: (power, is_ko, hp)}."""
     snap = {}
     for f in (d["args"].get("allFighters") or []):
         fid = BGA_TO_FID.get(f.get("typeArg"))
         st = f.get("fighterState") or {}
         if fid is not None and isinstance(st, dict):
-            snap[fid] = (f.get("power"), bool(st.get("isKnockedOut")))
+            snap[fid] = (f.get("power"), bool(st.get("isKnockedOut")), _hp_marker(st))
     return snap
 
 
@@ -53,13 +70,7 @@ def snapshots(events):
     for _mid, d in events:
         if d["type"] != "updateCardAndFighterData":
             continue
-        snap = {}
-        for f in (d["args"].get("allFighters") or []):
-            fid = BGA_TO_FID.get(f.get("typeArg"))
-            st = f.get("fighterState") or {}
-            if fid is None or not isinstance(st, dict):
-                continue
-            snap[fid] = (f.get("power"), bool(st.get("isKnockedOut")))
+        snap = snapshot_of(d)          # ONE codec -- a second copy is how they drift
         if snap:
             # BGA re-sends identical snapshots; only keep transitions.
             if not out or out[-1] != snap:
@@ -67,14 +78,57 @@ def snapshots(events):
     return out
 
 
+def our_slot(f):
+    """Our fighter's health position expressed as a BGA SLOT id.
+
+    Our track is indexed from the bottom; BGA numbers its slots by the HP printed on them,
+    and the two coincide only for a track whose bottom space is 0. Maman Brijit's runs
+    16 down to -2 (her two knock-out spaces and the revive below them), so our index 18 is
+    her BGA slot 16 -- a constant +2. Reading our raw index as a slot reported her two
+    spaces too healthy in EVERY game she appeared in, which looked like eight independent
+    engine bugs and was one missing conversion.
+
+    The offset is derived from the track itself (index - printed hp), never hardcoded, so a
+    fighter whose track gains a space below zero needs no change here.
+    """
+    idx = f.get("hp")
+    track = engine.track_of(f)
+    if idx is None or not track:
+        return None
+    for i, space in enumerate(track):
+        if space.get("kind") == "hp" and space.get("hp") is not None:
+            return idx - (i - space["hp"])
+    return idx
+
+
 def our_state(game):
-    """{fid: (power, is_ko)} for all four fighters in our engine."""
-    return {f["id"]: (f["power"], engine.is_ko(f))
+    """{fid: (power, is_ko, hp_slot)} for all four fighters in our engine.
+
+    `hp_slot` is a BGA slot id, which is what BGA's health marker reports.
+    """
+    return {f["id"]: (f["power"], engine.is_ko(f), our_slot(f))
             for side in game["fighters"] for f in side}
 
 
+#: What each slot of the state tuple means, for readable failures.
+FIELDS = ("power", "ko", "hp")
+
+
+def disagrees(ours, theirs):
+    """Field-wise, skipping anything BGA did not report.
+
+    A missing field is NOT a mismatch. `hp` is None whenever a fighter has more than one
+    health marker (Bodvar's Bear, the Fey Folk's Characters); comparing None against a real
+    index would invent a divergence for every one of them, which is exactly the kind of
+    self-inflicted noise that made the first oracle useless.
+    """
+    if ours is None:
+        return True
+    return any(t is not None and o != t for o, t in zip(ours, theirs))
+
+
 def diff(game, snap):
-    """[(fid, ours, theirs)] for every fighter whose (power, ko) disagrees."""
+    """[(fid, ours, theirs)] for every fighter whose reported state disagrees."""
     ours = our_state(game)
     return [(fid, ours.get(fid), theirs)
-            for fid, theirs in snap.items() if ours.get(fid) != theirs]
+            for fid, theirs in snap.items() if disagrees(ours.get(fid), theirs)]

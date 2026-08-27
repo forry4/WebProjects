@@ -111,6 +111,33 @@ def _reconstruct_hands(picks):
     return [hands[0], hands[1]]
 
 
+# When BGA re-sends a build at a DIFFERENT insert position, which packet is the real one?
+# Settled by measurement, not by argument: winner parity is 15/30 either way, so it cannot
+# break the tie, but oracle agreement over the corpus reads 0.7247 keeping the re-send
+# against 0.7120 keeping the first. Small, and pointing the way the reading suggests -- the
+# re-send is the server's settled view of where the card landed.
+_RESEND_WINS = True
+
+# BGA's addedCard.locationArg counts from the OPPOSITE END of the Fight deck to our insert
+# index, so it has to be flipped: our_pos = len(legal) - 1 - locationArg.
+#
+# Settled by measurement, and it is the single biggest correction in the harness. Three
+# independent measures move together, which is what makes it believable rather than a
+# coincidence that flattered one game:
+#
+#                       winner parity   power agreement   hp agreement
+#     flipped (this)        19/30           0.7405           0.5424
+#     as-is                 15/30           0.7247           0.5068
+#
+# It was invisible for a long time because EVERY position stayed in range either way
+# (246/246), so nothing ever threw -- the cards simply went into the deck in the wrong order
+# and the fight played out differently. The tell was in the HP oracle: in a game that
+# reproduced the winner, ching_shih tracked exactly while joan and mordred were wrong in
+# OPPOSITE directions -- our damage landing on the other side, which is what a reordered
+# deck does, and what no amount of per-card rules reading would have suggested.
+_POS_FROM_TOP = True
+
+
 def _steps(events, fid_seat):
     """The real per-seat step sequence, in log order.
 
@@ -132,7 +159,7 @@ def _steps(events, fid_seat):
 
     Yields (mid, seat, kind, args, drawn) in log order.
     """
-    ordered, out, seen = set(), [], set()
+    ordered, out, seen = set(), [], {}
     for mid, d in events:
         if d["type"] != "updateBuildDeckArgs":
             continue
@@ -148,12 +175,26 @@ def _steps(events, fid_seat):
             # BGA re-sends identical packets. Without this the same build is replayed twice,
             # the two seats stop pairing up round by round, and the second submission comes
             # back with an EMPTY legal list — the tell for "this seat already moved".
+            #
+            # locationArg is DELIBERATELY NOT in the signature. The re-send often carries a
+            # DIFFERENT insert position for the same build (table 886355216: card 14 arrives
+            # at loc 2 and again at loc 3, same drawn pair, same deck length), so keying on it
+            # let the duplicate through and the replay tried to build a one-copy card twice --
+            # surfacing as "card 14 not in offer+deck", which reads like a deck-state bug and
+            # is really a de-duplication miss.
+            #
+            # `deck` LENGTH is what keeps genuine repeats apart, and it has to: several cards
+            # have 2-3 copies and are legitimately built more than once. Every real repeat in
+            # the corpus differs in deck length (card 64 at 2 then 8, card 65 at 4 then 5)
+            # because the Fight deck grows underneath it; a re-send never does.
             sig = (seat, tuple(sorted((c.get("type"), c.get("typeArg")) for c in drawn)),
                    (added.get("type"), added.get("typeArg")),
-                   added.get("locationArg"), len(a.get("deck") or []))
+                   len(a.get("deck") or []))
             if sig in seen:
+                if _RESEND_WINS:            # measured; see the constant
+                    out[seen[sig]] = (mid, seat, "build", a, drawn)
                 continue
-            seen.add(sig)
+            seen[sig] = len(out)
             out.append((mid, seat, "build", a, drawn))
         elif CARDS[_cid(added)].get("starting") and seat not in ordered:
             ordered.add(seat)
@@ -328,9 +369,11 @@ def replay(path, manifest_row, verbose=False, on_move=None):
             checked += 1
             trace.append({"round": prev_step["round"],
                           "ours": {k: v[0] for k, v in prev_ours.items()},
-                          "bga": {k: v[0] for k, v in snap.items()}})
-            bad = [(fid, prev_ours.get(fid), theirs)
-                   for fid, theirs in snap.items() if prev_ours.get(fid) != theirs]
+                          "bga": {k: v[0] for k, v in snap.items()},
+                          "ours_hp": {k: v[2] for k, v in prev_ours.items()},
+                          "bga_hp": {k: v[2] for k, v in snap.items()}})
+            bad = [(fid, prev_ours.get(fid), theirs) for fid, theirs in snap.items()
+                   if tt_oracle.disagrees(prev_ours.get(fid), theirs)]
             if bad and divergence is None:
                 divergence = {"mid": step["mid"], "round": prev_step["round"],
                               "phase": prev_step["phase"], "fighters": bad}
@@ -344,7 +387,8 @@ def replay(path, manifest_row, verbose=False, on_move=None):
         insts = force_build_offer(game, seat, step["cids"])
         kept = next(i for i in insts if game["instances"][i]["cid"] == step["kept_cid"])
         legal_pos = engine.legal_build_positions(game, seat)
-        pos = step["pos"] if step["pos"] in legal_pos else (legal_pos[-1] if legal_pos else 0)
+        want = (len(legal_pos) - 1 - step["pos"]) if _POS_FROM_TOP else step["pos"]
+        pos = want if want in legal_pos else (legal_pos[-1] if legal_pos else 0)
         move = {"kind": "build", "inst": kept, "pos": pos}
         if move not in engine.legal_moves(game, seat):
             raise ValueError(f"illegal {move} (phase={game['phase']})")
