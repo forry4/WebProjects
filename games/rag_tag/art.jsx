@@ -239,6 +239,14 @@ export const TRACK_TITLE = {
   spirits: "Spirit",
 };
 
+/* The numbers a range-only track's own cards ask about, notched onto the bar so
+   the next one you are playing toward is visible rather than remembered. Ching
+   Shih's board rings these four; the Fey Folk's Spirit track has no thresholds
+   because every step of it counts. */
+export const TRACK_MARKS = {
+  navigation: [7, 10, 15, 20],
+};
+
 /* The UNIT a track counts, which is not always its name: Ching Shih's is the
    Fleet track and it counts Ships. */
 export const TRACK_WORD = {

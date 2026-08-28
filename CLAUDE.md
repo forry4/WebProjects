@@ -330,6 +330,17 @@ covers the logic; each game's wiring is one line).
   changed → applies → saves + broadcasts outside the lock. **OUTAGE LESSON (do not regress): never loop
   heavy synchronous engine work under `ROOM_LOCK` on the event-loop thread** — a CoC rewrite that did
   ~12 sync bot turns + ~12 DB saves under the lock hung the loop and took prod down.
+- **A dropped socket must RETRY, or "Reconnecting…" is just a word.** Four of the six
+  socket games rendered that label off `!connected` and did nothing about it, so a blip
+  left the game frozen until the player reloaded — and in a vs-bot room it is worse than a
+  stale view, because the bot's turn is only re-driven when a client reconnects
+  (`_handle_reconnect` re-triggers the scheduler), so the BOT stops too. The retry must use
+  the `reconnect` action (not `join`), back off (2s, 4s, … capped at 8s) and never give up —
+  a Render cold start alone is 30–50s — and must also fire on `visibilitychange`, because
+  iOS kills a backgrounded socket WITHOUT firing `onclose`, leaving `connected` a stale
+  `true` that no backoff loop will ever notice. One implementation:
+  **`shared/useAutoReconnect.js`**, extracted from CoC (which had it inline) and wired into
+  Rag Tag. **Duel, Dontminion and Dissonance still have the gap.**
 - **Stale-socket disconnect guard**: the WS `finally` only removes a socket / deletes a room if
   `r["sockets"].get(pid) is websocket` (the exact object for this handler) — prevents a reconnect race
   (WS1→WS2) from deleting the live room.

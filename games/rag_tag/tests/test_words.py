@@ -143,6 +143,64 @@ def test_the_rating_bars_the_ui_draws_are_the_ones_the_data_carries():
     assert set(re.findall(r'"([a-z]+)"', m.group(1))) == set(RATED)
 
 
+def test_every_fighter_carries_its_guide_entry():
+    """The Fighters' Guide rules that the tracks and tokens cannot be read off.
+
+    Every one is a rule a player gets wrong once — the Wild Bunch moving ONE
+    space when hit and healed together, Incineration not being health loss, a
+    Scheme from the Health track resolving in a mini-phase after the cards. The
+    modal derives what it can and would otherwise say nothing at all about these.
+    """
+    for fid, board in FIGHTERS.items():
+        guide = board.get("guide")
+        assert guide, f"{fid} has no guide entry"
+        for line in guide:
+            assert len(line) > 40, f"{fid}: {line!r} is a stub"
+
+
+def test_the_game_surface_cannot_be_text_selected():
+    """A long press is Rag Tag's READ gesture, and selection fights it.
+
+    Dragging across the board painted it blue; on a phone the press-and-hold
+    that opens a Fighter raised the selection handles and the copy callout
+    instead. Inputs stay selectable — the lobby's room code is typed and pasted.
+    """
+    css = (HERE / "RagTag.css").read_text(encoding="utf-8")
+    root = re.search(r"^\.ragtag \{(.*?)^\}", css, re.M | re.S)
+    assert root, ".ragtag root rule is gone — this guard has rotted"
+    for prop in ("user-select: none", "-webkit-user-select: none",
+                 "-webkit-touch-callout: none"):
+        assert prop in root.group(1), f".ragtag does not set {prop}"
+    assert re.search(r"\.ragtag input[^{]*\{[^}]*user-select: text", css), (
+        "inputs are not exempted — a room-code field you cannot select is broken")
+
+
+def test_a_dropped_socket_actually_retries():
+    """"Reconnecting…" was rendered from `!connected` and nothing retried.
+
+    Worse in a vs-bot fight: the bot's turn is only re-driven when a client
+    reconnects, so the fight froze until the page was reloaded.
+    """
+    assert "useAutoReconnect" in UI, "nothing retries a dropped socket"
+    hook = (HERE.parent.parent / "shared" / "useAutoReconnect.js")
+    assert hook.exists(), "the shared reconnect hook is gone"
+    src = hook.read_text(encoding="utf-8")
+    assert "visibilitychange" in src, (
+        "no focus nudge — iOS kills a backgrounded socket WITHOUT firing onclose, "
+        "so `connected` stays a stale true and the backoff never starts")
+    # `join` would not resume the server-side bot scheduler; `reconnect` does.
+    assert '"reconnect"' in UI, "the retry must use the reconnect action, not join"
+
+
+def test_abandoning_asks_first():
+    """Every other game confirms. Rag Tag fired on the click that opened the menu."""
+    assert "confirmAbandon" in UI, "abandon has no confirmation step"
+    menu = re.search(r"menu=\{<GameMenu items=\{\[(.*?)\]\.filter", UI, re.S)
+    assert menu, "the game menu is gone — this guard has rotted"
+    assert 'send({ action: "abandon" })' not in menu.group(1), (
+        "the menu still abandons directly instead of opening the confirmation")
+
+
 def test_a_circular_track_is_drawn_as_a_circle():
     """Joan's dial rendered as a row of boxes — the one shape a ring is not.
 
@@ -162,6 +220,21 @@ def test_a_circular_track_is_drawn_as_a_circle():
     assert special, "SpecialTrack() is gone from RagTag.jsx — this guard has rotted"
     assert "<DialRing" in special.group(0), (
         "SpecialTrack no longer reaches DialRing — a ring would draw as a row of pips")
+
+
+def test_a_special_track_is_drawn_on_the_fighting_card():
+    """They were CHIPS — "Fleet 7", "Spirit 1". A number says where the marker is
+    and nothing about where it is going, which is the whole point of a track:
+    Ching Shih's deck reads thresholds at 7/10/15/20 and Bodvar's Rage ends the
+    moment it tops out. Neither is legible from an integer.
+    """
+    assert any(b.get("special_track", {}).get("id") for b in FIGHTERS.values()), (
+        "no fighter has a special track any more — delete this guard")
+    assert "function SpecialOnCard(" in UI, "special tracks have nothing to draw them"
+    card = re.search(r"^function FighterCard\(.*?^\}$", UI, re.M | re.S)
+    assert card, "FighterCard() is gone from RagTag.jsx — this guard has rotted"
+    assert "<SpecialOnCard" in card.group(0), (
+        "the fighting card no longer draws the special track")
 
 
 def test_a_board_of_characters_shows_all_of_them_on_the_fighting_card():

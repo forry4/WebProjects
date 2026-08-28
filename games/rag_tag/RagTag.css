@@ -22,7 +22,19 @@
  * both get proportionate text instead of the same 0.72rem.
  */
 
+/* NOTHING HERE IS SELECTABLE. Dragging across the board painted the fighters
+   and the log blue and left a caret behind, and on a phone the long press that
+   is supposed to OPEN A FIGHTER'S DETAILS raised the selection handles and the
+   copy callout instead — so the game's own read gesture fought the browser's.
+   This is a game surface, not a document. `-webkit-` for iOS Safari, which
+   still needs the prefix, and `-webkit-touch-callout` for the long-press menu
+   specifically. Same rule and same reasoning as Dissonance.
+   INPUTS ARE EXEMPT and must stay so: the lobby's room-code field is typed and
+   pasted into, and a field whose text cannot be selected is broken. */
 .ragtag {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
   min-height: 100dvh;
   background:
     radial-gradient(120% 62% at 50% 0%, rgba(232, 102, 60, 0.15), transparent 62%),
@@ -409,6 +421,94 @@
 /* min-height reserves one row: chips appear and disappear as tokens move, and
    without it every fighter panel changed height mid-round and shunted the whole
    column below it. */
+/* A special track on the FIGHTING card. One line, like the roster, because the
+   card is a column in a four-card grid and a second row pushes every card
+   beside it down. */
+.ragtag .rt-sp {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.32rem;
+  font-size: var(--rt-fs-sm);
+  line-height: 1.2;
+}
+
+.ragtag .rt-sp-n {
+  flex: none;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rt-dim);
+}
+
+.ragtag .rt-sp-pips { display: flex; gap: 2px; flex: 0 1 auto; min-width: 0; }
+
+.ragtag .rt-sp-p {
+  width: 0.46rem;
+  height: 0.46rem;
+  border-radius: 50%;
+  border: 1px solid var(--rt-line);
+  background: transparent;
+}
+
+/* A space that pays, so the next payout is countable rather than remembered. */
+.ragtag .rt-sp-pay { border-color: var(--rt-gold); }
+.ragtag .rt-sp-done { background: color-mix(in srgb, var(--f-ink) 40%, transparent); }
+
+/* Where the marker IS — the one thing a number did convey, kept. */
+.ragtag .rt-sp-here {
+  background: var(--f-ink);
+  border-color: var(--f-ink);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--f-ink) 28%, transparent);
+}
+
+.ragtag .rt-sp-bar {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 2.5rem;
+  height: 0.42rem;
+  border-radius: 3px;
+  background: #2f231c;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.ragtag .rt-sp-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--f-ink);
+  transition: width 220ms ease;
+}
+
+/* The numbers this Fighter's own cards ask about. */
+.ragtag .rt-sp-mark {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 1px;
+  background: var(--rt-gold);
+  opacity: 0.75;
+}
+
+.ragtag .rt-sp-v { flex: none; font-weight: 750; color: var(--f-ink); }
+
+/* The abandon confirmation — the same ask every other game makes. */
+.ragtag .rt-confirm {
+  width: min(92vw, 22rem);
+  padding: 1.1rem 1.2rem 1rem;
+  border: 1px solid var(--rt-line);
+  border-radius: var(--rt-radius);
+  background: var(--rt-panel);
+  box-shadow: var(--rt-shadow);
+  text-align: center;
+}
+
+.ragtag .rt-confirm h3 { margin: 0 0 0.4rem; font-size: var(--rt-fs-lg); color: var(--rt-ink); }
+.ragtag .rt-confirm p { margin: 0 0 0.9rem; font-size: var(--rt-fs-sm); color: var(--rt-dim); }
+.ragtag .rt-confirm-acts { display: flex; gap: 0.5rem; justify-content: center; }
+
 /* The three Fey Folk Characters under the bar. One line, because the card is a
    column in a four-card grid and a second row of anything pushes the chips —
    and therefore every card beside it — down. */
@@ -856,6 +956,19 @@
 }
 
 /* The one button the player is meant to press, so it pulls the eye. */
+/* AFTER `.rt-ctl`, not before it: same specificity, so the base rule's colour
+   and border win from wherever they are written last. This sat 400 lines above
+   and the danger button came out looking exactly like the safe one. */
+.ragtag .rt-ctl-danger {
+  border-color: color-mix(in srgb, var(--rt-hit) 60%, transparent);
+  color: var(--rt-hit);
+}
+
+.ragtag .rt-ctl-danger:hover:not([disabled]) {
+  background: color-mix(in srgb, var(--rt-hit) 16%, transparent);
+  color: var(--rt-hit);
+}
+
 .ragtag .rt-ctl-go {
   position: relative;
   overflow: hidden;
@@ -1077,6 +1190,11 @@
 }
 .ragtag .rt-pick-plain { align-items: center; min-height: 2.6rem; }
 .ragtag .rt-cap::first-letter { text-transform: uppercase; }
+
+.ragtag input, .ragtag textarea, .ragtag [contenteditable] {
+  user-select: text;
+  -webkit-user-select: text;
+}
 
 .ragtag .rt-pick-tags em {
   font-style: normal;

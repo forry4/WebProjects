@@ -36,6 +36,8 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
                      'heals well enough that she is rarely the wrong card to have drawn. The '
                      'straightforward one, and none the weaker for it.',
           'rating': {'health': 4, 'offense': 3, 'defense': 3, 'heal': 4, 'special': 1},
+          'guide': ['Each Divine Voice gain moves the marker ONE space clockwise, and only the '
+                    'space it lands on pays. Two of the four pay; two do nothing.'],
           'hp_track': [{'kind': 'ko'},
                        {'kind': 'hp', 'hp': 1},
                        {'kind': 'hp', 'hp': 2},
@@ -80,6 +82,11 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
                            'track and does something different above each threshold. Reach '
                            'twenty and Terror of the Seas ends the Fight where it stands.',
                 'rating': {'health': 2, 'offense': 4, 'defense': 3, 'heal': 3, 'special': 3},
+                'guide': ['Ships gained past 20 are ignored — the marker stops at the top of '
+                          'the Fleet track.',
+                          'Reaching exactly 20 is what arms Terror of the Seas. At 16–19 it '
+                          'does nothing at all, so the last few Ships are worth holding a card '
+                          'for.'],
                 'hp_track': [{'kind': 'ko'},
                              {'kind': 'hp', 'hp': 1},
                              {'kind': 'hp', 'hp': 2},
@@ -113,6 +120,10 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
                        'hits as hard as what comes out the other side. The catch is the eleven '
                        'health he has to stay standing on long enough to get there.',
             'rating': {'health': 1, 'offense': 5, 'defense': 4, 'heal': 2, 'special': 2},
+            'guide': ['His two-section cards read only the side matching the face-up board — '
+                      'the human half while he is Bödvar, the Bear half after.',
+                      'On the Turn he transforms he ignores ALL health loss and healing, from '
+                      'every source. Tokens sitting on him come across to the Bear.'],
             'faces': ['bodvar', 'berserker_bear'],
             'note': 'The Bear arrives on as much health as Bödvar had Power at that instant, '
                     'capped at 15 — a starting point, not a ceiling, so he can Heal above it '
@@ -177,6 +188,9 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
                               'from the game for good — the only thing in Tag Team that makes '
                               'a deck smaller.',
                    'rating': {'health': 3, 'offense': 3, 'defense': 2, 'heal': 1, 'special': 5},
+                   'guide': ['He holds two Concentration tokens, so both opponents can be '
+                             'marked at once — and cashing one in takes it back from the '
+                             'Fighter it was cashed against.'],
                    'hp_track': [{'kind': 'ko'},
                                 {'kind': 'hp', 'hp': 1},
                                 {'kind': 'hp', 'hp': 2},
@@ -213,6 +227,12 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
                                'defense': 3,
                                'heal': 3,
                                'special': 3},
+                    'guide': ['Every space on their Health track is a Stop, so the marker '
+                              'moves one space a Turn and no further. Hit and healed on the '
+                              'same Turn, they move ONE space in whichever direction is larger '
+                              '— not the difference.',
+                              'The Sheriff pays whoever is holding him, opponents included, so '
+                              'passing him away at the wrong moment arms the other team.'],
                     'setup_icons': [{'op': 'power', 'n': 1, 'target': 'partner'}],
                     'hp_track': [{'kind': 'ko'},
                                  {'kind': 'hp', 'hp': 1, 'icons': ['stop']},
@@ -235,6 +255,14 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
                        'to do the work, and getting them onto the right Fighter is the whole '
                        'trick.',
             'rating': {'health': 3, 'offense': 4, 'defense': 2, 'heal': 1, 'special': 5},
+            'guide': ['Aflame! goes on the opposing ACTIVE Fighter. If they have none, every '
+                      "Aflame! on their Partner returns to Shango's supply first — the flames "
+                      'jump rather than spread.',
+                      'Five Aflame! on one Fighter is Incineration and that team loses on the '
+                      'spot. It is not health loss, so nothing on a Health track can save '
+                      'them, and it beats a Double KO rather than drawing with it.',
+                      'Flamepower is always on, including when his Partner is the one throwing '
+                      'his Attack.'],
             'hp_track': [{'kind': 'ko'},
                          {'kind': 'hp', 'hp': 1},
                          {'kind': 'hp', 'hp': 2},
@@ -266,6 +294,11 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
                              '— pushed past both, she comes back on 4 health with a Power in '
                              'hand.',
                   'rating': {'health': 3, 'offense': 2, 'defense': 3, 'heal': 2, 'special': 4},
+                  'guide': ['She has TWO KO spaces. On either at the end of a Turn she is '
+                            "KO'd; pushed past both onto the space below, she revives instead.",
+                            'Once her marker is on the last space she loses no further health '
+                            '— unassigned loss does not carry over to the 4 health she comes '
+                            'back on.'],
                   'hp_track': [{'kind': 'revive',
                                 'icons': [{'op': 'power', 'n': 1, 'target': 'self'},
                                           {'op': 'fx', 'name': 'brijit_revive'}]},
@@ -302,6 +335,11 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
                          'Partner, set against some of the nastiest single cards in the box, '
                          'including one that turns any loss this Turn into a win.',
               'rating': {'health': 2, 'offense': 4, 'defense': 1, 'heal': 3, 'special': 5},
+              'guide': ['The Serpent token is flipped at random during setup, so which face he '
+                        'opens on is not yours to choose.',
+                        'The Health-track icon flips the Serpent as the marker lands on OR '
+                        "passes through it, and neither face's effect applies at that moment — "
+                        'only the flip.'],
               'hp_track': [{'kind': 'ko'},
                            {'kind': 'hp', 'hp': 1},
                            {'kind': 'hp', 'hp': 2},
@@ -332,6 +370,8 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
                         'moment he reaches 8. Nineteen health to do it on, and no healing to '
                         'speak of.',
              'rating': {'health': 4, 'offense': 3, 'defense': 5, 'heal': 1, 'special': 2},
+             'guide': ['No special track, no tokens, no setup. Everything he does is on his '
+                       'cards.'],
              'hp_track': [{'kind': 'ko'},
                           {'kind': 'hp', 'hp': 1},
                           {'kind': 'hp', 'hp': 2},
@@ -366,6 +406,13 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
                        'marker reaches them. You cannot plan around what you cannot see — and '
                        'neither can she.',
             'rating': {'health': 3, 'offense': 2, 'defense': 3, 'heal': 3, 'special': 4},
+            'guide': ['Her 11 Schemes are shuffled face down at setup. Plant one and it waits '
+                      'above her board; Unleash it and it is turned face up, applied, and '
+                      'removed from the Fight.',
+                      'Schemes Unleashed from her HEALTH TRACK resolve after every card '
+                      'Action, in a mini-phase of their own — which is how they can move a '
+                      'marker that is sitting on a Stop. Poison always resolves last of all.',
+                      'Run out of Schemes and a Plant does nothing.'],
             'hp_track': [{'kind': 'ko'},
                          {'kind': 'hp', 'hp': 1, 'icons': ['stop']},
                          {'kind': 'hp',
@@ -402,6 +449,11 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
                       'the hits, and his Presence can eat an Attack aimed at his Partner. '
                       'Slow, obvious, and very hard to put down.',
            'rating': {'health': 5, 'offense': 3, 'defense': 1, 'heal': 2, 'special': 4},
+           'guide': ['The Presence stops ATTACKS only. Direct Damage, and anything else that '
+                     'costs health, goes straight through it.',
+                     'Reanimation makes the next card resolve twice, and the second pass reads '
+                     'the state the first one left — so a token assigned on the first pass is '
+                     'already there for the second.'],
            'hp_track': [{'kind': 'ko'},
                         {'kind': 'hp', 'hp': 1},
                         {'kind': 'hp', 'hp': 2},
@@ -443,13 +495,26 @@ FIGHTERS = {'joan': {'bga_id': 'JoanOfArc',
                   'complexity': 4,
                   'tags': ['Support', 'Elusive'],
                   'title': 'The People of the Forest',
-                  'profile': 'Three Forest Sprites who are worth something on the way down. '
-                             'Each Character that falls becomes a Spirit and steps the Spirit '
-                             'track up, and their cards pay by the Spirit, so losing '
-                             'Characters is part of the plan rather than the end of it. With '
-                             'all three gone they are still in the Fight, and there is only '
-                             'one card in the game that can finish them.',
+                  'profile': 'Three Characters — Fairy, Gnome and Elf — but only one is ever '
+                             'on the board, and only that one can be hurt or healed. Lose the '
+                             "last of a Character's health and they become a Spirit; you then "
+                             'choose who steps in, at full health. The Spirit track counts '
+                             'them and starts at 1 before anyone has fallen, so their cards '
+                             'are already paying from the first Turn. No Character has a KO '
+                             'space: the only way the Fey Folk lose is All Legends Must Pass '
+                             'being revealed while all three are Spirits.',
                   'rating': {'health': 2, 'offense': 1, 'defense': 3, 'heal': 4, 'special': 4},
+                  'guide': ['Only the Character on the board can lose health or be Healed. The '
+                            'other two are waiting, untouchable, at full health.',
+                            'The Spirit track starts at 1 before anyone has fallen, so a card '
+                            "that pays 'per Spirit' is already paying on Turn 1. Each "
+                            'Character that falls adds one.',
+                            'A Character becomes a Spirit at the END of the Turn: the Spirit '
+                            'track goes up, then you choose who comes in, then their Start '
+                            'space icon fires. That icon can fire many times over a Fight.',
+                            'With all three gone they still play their cards — they simply '
+                            'cannot lose or recover health. Cards count the Spirits as they '
+                            'stood at the START of the Turn.'],
                   'hp_track': None,
                   'characters': [{'id': 'fairy',
                                   'name': 'Fairy',

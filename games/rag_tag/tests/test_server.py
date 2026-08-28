@@ -236,6 +236,7 @@ def test_the_catalog_ships_the_fighter_profile():
     assert joan["title"] == "The Divine Shield"
     assert joan["profile"] and joan["rating"]["health"] == 4
     assert all(f.get("rating") for f in fighters.values()), "a board with no ratings"
+    assert all(f.get("guide") for f in fighters.values()), "a board with no guide entry"
 
 
 def test_an_instant_bonus_ships_as_its_ops_not_as_a_flag():

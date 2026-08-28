@@ -449,13 +449,37 @@ the CSS token test only looks at tokens. Guarded now by
 (Rag Tag was the only offender) and by a `screens` check that the fact boxes
 contain TEXT rather than merely existing.
 
+### What has to be ON THE CARD, and what the modal is for
+A player reported it exactly: *"Everything I need should be visible, with the modal
+there to explain things if you're new."* So the fighting card carries every
+number a decision depends on, and the modal explains what those numbers MEAN.
+
+Three things were only in the modal and are now on the card:
+
+* **the special track, drawn** (`SpecialOnCard`). These were chips — "Fleet 7",
+  "Divine Voice 2", "Spirit 1". An integer says where the marker is and nothing
+  about where it is GOING, which is the entire purpose of these tracks: Ching
+  Shih's deck reads thresholds at 7/10/15/20, Bödvar's Rage ends the moment it
+  tops out, Joan's dial pays on two spaces of four. A track with real spaces
+  draws a pip each; a short range (the Spirit track, 1–4) draws pips derived
+  from the range; a long range (the Fleet, 0–20) draws a bar with `TRACK_MARKS`
+  notched on it.
+* **every Character's health** (`CharacterRoster`), not just the one on the board.
+* **the health track itself**, which was already there.
+
+`guide` in `boards.json` is the other half: the Fighters' Guide rules that the
+tracks and tokens cannot be read off — the Wild Bunch moving ONE space when hit
+and healed on the same Turn, Incineration not being health loss, a Scheme from
+the Health track resolving in a mini-phase after the cards. Everything the modal
+CAN derive still is; `guide` is only what it cannot.
+
 ### Everything visual is drawn in the bundle
 There is no licensed art in the repo (see *Where the data came from*), so `art.jsx`
 carries a hand-authored emblem and accent colour per fighter plus the mechanical
 icon set. Hand-drawn beats a hash — a hashed hue puts the pirate and the devil on
 neighbouring reds. No file is fetched, so nothing can 404 or need a cache-bust.
 
-### Two layout traps, both paid for twice
+### Three layout traps, all paid for twice
 * **`baseCss` is not optional.** Rag Tag shipped without it. The shared lobby kit is
   written against the site theme tokens (`--surface`, `--border`, `--radius`), so
   every `border: 1px solid var(--border)` in that kit was invalid at
@@ -469,6 +493,25 @@ neighbouring reds. No file is fetched, so nothing can 404 or need a cache-bust.
   explicit `width: 100%`. Dontminion hit this and fixed it the same way;
   **Spender Duel still has it** (`.duel-lobby-cols`, measured 851px of 1440).
 
+* **A variant written ABOVE its base rule loses.** `.rt-ctl-danger` and `.rt-ctl`
+  are equal specificity, so whichever is written last wins — and the danger
+  variant sat 400 lines above the base rule, so the Abandon button came out
+  painted identically to Keep playing. Same family as the media-query trap below:
+  in this sheet, order IS the cascade. Keep a `rt-ctl-*` variant next to the
+  others, after `.rt-ctl`.
+
+**NOTHING ON THE SURFACE IS SELECTABLE** (`user-select: none` on `.ragtag`, with
+`input`/`textarea`/`[contenteditable]` exempted). This matters more here than in
+the other games because **press-and-hold IS Rag Tag's read gesture**: on a phone
+a long press raised the browser's selection handles and copy callout instead of
+opening the Fighter, so the game's own gesture was fighting the platform's. Same
+rule and reasoning as Dissonance.
+
+**The game menu is the shared one, and abandon ASKS.** Return / rules / abandon,
+in that order, with icons — and abandon opens a confirmation rather than firing
+on the click. Rag Tag was the last game that did it directly, so one stray tap in
+the menu ended the fight.
+
 CSS is a real `.css` file imported `?inline` — never a JS template literal. The
 sheet must not set `display`/`grid-template-columns`/`gap` on `.rt-lobby-cols`: it
 is concatenated after the shared one, so a base rule there out-orders the shared
@@ -478,7 +521,7 @@ media rules and pins a phone to three columns. Width and padding ARE fair game.
 
 ## Testing
 
-`pytest games/rag_tag/tests -n0 -q` — 136 tests.
+`pytest games/rag_tag/tests -n0 -q` — 141 tests.
 
 | File | Covers |
 |---|---|

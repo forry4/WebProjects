@@ -4739,7 +4739,7 @@ try {
 		// nothing reached is a green tick over an untested claim, so the run SAYS how
 		// many boards each one actually looked at rather than leaving it to be
 		// assumed. The unconditional checks above hold for all four every run.
-		const exercised = { ring: 0, roster: 0 };
+		const exercised = { ring: 0, roster: 0, special: 0 };
 		const nFighters = await page.locator(".rt-fighter").count();
 		for (let i = 0; i < nFighters; i++) {
 			await page.locator(".rt-fighter").nth(i).click({ button: "right" }).catch(() => {});
@@ -4804,6 +4804,12 @@ try {
 			await page.keyboard.press("Escape").catch(() => {});
 			await sleep(150);
 		}
+		// A Fighter with a special track must DRAW it on the card. It used to be a
+		// chip with an integer in it, which says where the marker is and nothing
+		// about where it is going -- the whole point of a track. Conditional on the
+		// draft, so it reports what it saw.
+		const withTrack = await page.locator(".rt-fighter .rt-sp").count();
+		exercised.special = withTrack;
 		check("right-click opens the details of every fighter on the board",
 			seenBoards.length === nFighters && nFighters === 4,
 			`opened ${seenBoards.length} of ${nFighters}: ${JSON.stringify(seenBoards)}`);
@@ -4826,7 +4832,8 @@ try {
 		check("...and a fighter with Characters shows every one of them on its card",
 			boardFails.roster.length === 0, JSON.stringify(boardFails.roster));
 		log(`  ..   boards opened: ${seenBoards.join(", ")}`
-			+ ` (${exercised.ring} with a ring, ${exercised.roster} with Characters)`);
+			+ ` (${exercised.ring} with a ring, ${exercised.roster} with Characters,`
+			+ ` ${exercised.special} drawing a special track)`);
 		await page.keyboard.press("Escape").catch(() => {});
 		await sleep(300);
 		check("Escape closes it", await page.locator(".rt-modal").count() === 0);
@@ -4882,6 +4889,36 @@ try {
 		await page.locator(".rt-ctl-go").click({ timeout: 8_000 }).catch(() => {});
 		await sleep(600);
 		const rounds = await page.locator(".rt-log-round h4").allInnerTexts().catch(() => []);
+		// ABANDON ASKS FIRST. Rag Tag fired it straight off the menu item, so the
+		// click that opened the menu could end the fight; every other game confirms.
+		// Driven rather than read because the whole point is the interaction: the
+		// menu opens, the item opens a dialog, and BACKING OUT leaves you playing.
+		await page.locator(".gm-btn").first().click({ timeout: 10_000 }).catch(() => {});
+		await sleep(200);
+		// The item's own text includes its icon span, so an anchored match misses
+		// it. Select the menu item by class and filter on the label.
+		const abItem = page.locator(".gm-item.gm-danger", { hasText: "Abandon game" }).first();
+		const hasItem = await abItem.count() > 0;
+		await abItem.click({ timeout: 5_000 }).catch(() => {});
+		await sleep(250);
+		const asked = await page.locator(".rt-confirm").count() > 0;
+		check("abandoning asks before it ends the fight",
+			hasItem && asked, `menu item ${hasItem}, dialog ${asked}`);
+		// the danger action has to LOOK like one -- this variant was written above
+		// the base rule at equal specificity and came out painted like Keep playing
+		const dangerCol = await page.locator(".rt-confirm .rt-ctl-danger").first()
+			.evaluate((e) => getComputedStyle(e).color).catch(() => "");
+		check("...and the destructive button is painted as one",
+			!!dangerCol && dangerCol !== await page.locator(".rt-confirm .rt-ctl:not(.rt-ctl-danger)")
+				.first().evaluate((e) => getComputedStyle(e).color).catch(() => ""),
+			`danger colour ${dangerCol}`);
+		await page.locator(".rt-confirm .rt-ctl", { hasText: "Keep playing" }).first()
+			.click({ timeout: 5_000 }).catch(() => {});
+		await sleep(300);
+		check("...and backing out leaves the fight running",
+			await page.locator(".rt-confirm").count() === 0
+			&& await page.locator(".rt-side").count() > 0);
+
 		check("the log keeps the finished round and starts the live one",
 			rounds.length >= 2 && /1/.test(rounds[0]), JSON.stringify(rounds));
 

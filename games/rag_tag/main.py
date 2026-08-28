@@ -693,6 +693,9 @@ async def catalog():
                 "title": board.get("title"),
                 "profile": board.get("profile"),
                 "rating": board.get("rating"),
+                # The Fighters' Guide's own per-Fighter rules — the ones the
+                # tracks and tokens cannot be read off.
+                "guide": board.get("guide"),
                 "note": board.get("note"),
                 "setup_icons": board.get("setup_icons"),
                 "absorbs_attack": board.get("absorbs_attack"),

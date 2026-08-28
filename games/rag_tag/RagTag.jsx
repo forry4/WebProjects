@@ -12,10 +12,12 @@ import {
 import { buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 import {
   Sigil, Icon, sigilOf, iconForOp, FX_TEXT, OP_GLOSSARY,
-  TRACK_GLOSSARY, TOKEN_GLOSSARY, SPACE_GLOSSARY, TOKEN_WORD, TRACK_TITLE, trackWord, tokenWord, complexityWord,
+  TRACK_GLOSSARY, TOKEN_GLOSSARY, SPACE_GLOSSARY, TOKEN_WORD, TRACK_TITLE, TRACK_MARKS, trackWord, tokenWord,
+  complexityWord,
 } from "./art.jsx";
 import { narrateBeat, narrateRound } from "./narrate.jsx";
 import { useCardInfoGesture } from "../../shared/gestures.js";
+import { useAutoReconnect } from "../../shared/useAutoReconnect.js";
 
 /* Rag Tag — a two-player auto battler.
  *
@@ -73,11 +75,13 @@ function useSocket(onMessage) {
     ws.onmessage = (e) => { try { onMsg.current(JSON.parse(e.data)); } catch {} };
   }, []);
   const send = useCallback((obj) => { try { wsRef.current?.send(JSON.stringify(obj)); } catch {} }, []);
+  // The retry loop must not abort a socket that is already CONNECTING.
+  const socketReady = useCallback(() => wsRef.current?.readyState ?? 3, []);
   const disconnect = useCallback(() => {
     try { wsRef.current?.close(); } catch {}
     wsRef.current = null; setConnected(false);
   }, []);
-  return { connected, connect, send, disconnect };
+  return { connected, connect, send, disconnect, socketReady };
 }
 
 /* ── Rendering the mechanics ──────────────────────────────────────────────
@@ -473,6 +477,79 @@ function HealthTrack({ track, at, scale }) {
   );
 }
 
+/* A Fighter's special track, ON THE CARD, drawn as a track.
+ *
+ * These were chips: "Fleet 7", "Divine Voice 2", "Spirit 1". A number tells you
+ * where the marker is and nothing about where it is GOING — how far to the next
+ * payout, how far to the top, whether the top is close enough to plan around.
+ * That is the whole of what these tracks are for. Ching Shih's deck reads
+ * thresholds at 7, 10, 15 and 20; Bödvar's Rage ends the moment it tops out;
+ * Joan's dial pays on two of its four spaces. None of that is legible from an
+ * integer, and it is exactly what a player needs while deciding where to slide
+ * their next card.
+ *
+ * Drawn from the same `special_track` the modal uses, so a corrected import
+ * moves both. A track with real spaces gets a pip per space with the marker on
+ * one; a track that is only a range (the Fleet) gets a proportional bar with its
+ * thresholds notched.
+ */
+function SpecialOnCard({ board, state }) {
+  const spec = board.special_track;
+  if (!spec || !spec.id) return null;
+  const at = state.tracks?.[spec.id] ?? spec.start ?? 0;
+  const spaces = spec.spaces || [];
+  const name = TRACK_TITLE[spec.id] || String(spec.id).replace(/_/g, " ");
+
+  if (spaces.length) {
+    return (
+      <div className="rt-sp" title={`${name}: ${at} of ${spaces.length - 1}`}>
+        <span className="rt-sp-n">{name}</span>
+        <span className="rt-sp-pips" role="img"
+          aria-label={`${name}, on space ${at} of ${spaces.length - 1}`}>
+          {spaces.map((sp, i) => {
+            const cls = ["rt-sp-p"];
+            if ((sp.icons || []).length) cls.push("rt-sp-pay");
+            if (i === at) cls.push("rt-sp-here");
+            return <i key={i} className={cls.join(" ")} />;
+          })}
+        </span>
+      </div>
+    );
+  }
+
+  const max = spec.max ?? 0;
+  const min = spec.min ?? 0;
+  if (max - min > 0 && max - min <= 8) {
+    // Short enough to count at a glance — the Fey Folk's 1-to-4 Spirit track.
+    const steps = [];
+    for (let v = min; v <= max; v++) steps.push(v);
+    return (
+      <div className="rt-sp" title={`${name}: ${at} of ${max}`}>
+        <span className="rt-sp-n">{name}</span>
+        <span className="rt-sp-pips" role="img" aria-label={`${name} ${at} of ${max}`}>
+          {steps.map((v) => (
+            <i key={v} className={`rt-sp-p${v === at ? " rt-sp-here" : ""}${v < at ? " rt-sp-done" : ""}`} />
+          ))}
+        </span>
+      </div>
+    );
+  }
+  const pct = max > min ? Math.max(0, Math.min(100, ((at - min) / (max - min)) * 100)) : 0;
+  return (
+    <div className="rt-sp" title={`${name}: ${at} of ${max}`}>
+      <span className="rt-sp-n">{name}</span>
+      <span className="rt-sp-bar" role="img" aria-label={`${name} ${at} of ${max}`}>
+        <span className="rt-sp-fill" style={{ width: `${pct}%` }} />
+        {(TRACK_MARKS[spec.id] || []).map((v) => (
+          <i key={v} className="rt-sp-mark"
+            style={{ left: `${((v - min) / (max - min)) * 100}%` }} />
+        ))}
+      </span>
+      <b className="rt-sp-v">{at}</b>
+    </div>
+  );
+}
+
 /* The Fey Folk's three Characters, all of them, on the fighting card.
  *
  * The card showed only the one on the board — so a fighter with the Fairy up
@@ -553,18 +630,8 @@ function FighterCard({ fid, state, board, active, fx, beatKey, scale, onInfo }) 
         <Icon name="plant_scheme" />planted <b>{state.planted}</b>
       </span>);
   }
-  // Name then value, everywhere, and never a chip whose whole message is that
-  // the player has none of something.
-  for (const [name, n] of Object.entries(state.tracks || {})) {
-    const shown = name === "divine_voice" ? (n === 0 ? "halo" : n) : n;
-    if (shown === 0) continue;
-    chips.push(
-      // The name the board prints. This one was missed when the modal's keys
-      // were fixed, because it is on the board rather than in the modal.
-      <span className="rt-chip" key={`t-${name}`}>
-        {trackWord(name, 2)} <b>{shown}</b>
-      </span>);
-  }
+  // Special tracks used to be chips here — a bare number. They are DRAWN now,
+  // by `SpecialOnCard` below the health bar, so the chip row is tokens only.
 
   const cls = ["rt-fighter"];
   if (active && !ko && !spirit && !spent) cls.push("rt-active");
@@ -609,6 +676,7 @@ function FighterCard({ fid, state, board, active, fx, beatKey, scale, onInfo }) 
         ? <div className="rt-track rt-track-gone" role="img" aria-label="no health track" />
         : <HealthTrack track={track} at={state.hp} scale={scale} />}
       <CharacterRoster board={board} state={state} />
+      <SpecialOnCard board={board} state={state} />
       {/* Reserved so a chip appearing mid-round does not shift the whole
           column below it. */}
       <div className="rt-chips">{chips}</div>
@@ -1148,12 +1216,16 @@ function InfoModal({ info, catalog, onClose }) {
                 </>
               )}
 
-              {(facts.length > 0 || board.note) && (
+              {(facts.length > 0 || board.note || (board.guide || []).length > 0) && (
                 <>
                   <h3 className="rt-modal-h3">What this board does differently</h3>
                   <ul className="rt-modal-facts">
                     {facts.map((f, i) => <li key={i}>{f}</li>)}
                     {board.note && <li>{board.note}</li>}
+                    {/* The Fighters' Guide's own entry for this Fighter: the
+                        rules that are printed beside the board rather than on
+                        it, so nothing in the modal can derive them. */}
+                    {(board.guide || []).map((g, i) => <li key={`g${i}`}>{g}</li>)}
                   </ul>
                 </>
               )}
@@ -1200,6 +1272,7 @@ export default function RagTag({ myId, authUser, onExit }) {
   const [lobbyTab, setLobbyTab] = useState("open");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showRules, setShowRules] = useState(false);
+  const [confirmAbandon, setConfirmAbandon] = useState(false);
   const [createOpp, setCreateOpp] = useState("ai");
 
   // Local build-step selection, before it is submitted.
@@ -1260,7 +1333,7 @@ export default function RagTag({ myId, authUser, onExit }) {
     }
   }, [myId, roomId, screen]);
 
-  const { connected, connect, send, disconnect } = useSocket(handleMessage);
+  const { connected, connect, send, disconnect, socketReady } = useSocket(handleMessage);
 
   /* Static card + board tables, once. Cached so a reconnect renders instantly. */
   useEffect(() => {
@@ -1340,6 +1413,22 @@ export default function RagTag({ myId, authUser, onExit }) {
       method: "DELETE", headers: { Authorization: `Bearer ${authUser.session_token}` },
     }).then(() => fetchGames()).catch(() => {});
   }, [authUser, fetchGames]);
+
+  /* A dropped socket used to render "Reconnecting…" and then do nothing about
+     it — the word was the whole of the feature. Worse in a vs-bot fight: the
+     bot's turn is only re-driven when a client reconnects, so the fight froze
+     until the page was reloaded. */
+  const reconnectNow = useCallback(() => {
+    let tok = null;
+    try { tok = localStorage.getItem(`ragtag_token_${roomId}_${myId}`); } catch {}
+    if (!tok) return;
+    connect(`${RT_WS}/${roomId}/${myId}`, { action: "reconnect", token: tok });
+  }, [roomId, myId, connect]);
+
+  useAutoReconnect({
+    enabled: !!roomId && screen === "game" && roomData?.status !== "over",
+    connected, connect: reconnectNow, socketReady,
+  });
 
   const leaveToLobby = useCallback(() => {
     disconnect(); setRoomId(""); setRoomData(null); setScreen("lobby");
@@ -1746,14 +1835,17 @@ export default function RagTag({ myId, authUser, onExit }) {
       <style>{ragtagStyles}</style>
       <LobbyHeader
         title="Rag Tag"
+        /* Same wording, same order, same icons as every other game: return /
+           rules / abandon — and abandon ASKS. Rag Tag was the odd one out: no
+           icons, no confirmation, and one stray click ended the fight. */
         menu={<GameMenu items={[
-          { label: "Return to lobby", onClick: leaveToLobby },
-          { label: "How to play (rules)", onClick: () => setShowRules(true) },
-          {
-            label: "Abandon fight", danger: true,
-            onClick: () => { if (!over) send({ action: "abandon" }); },
+          { label: "Return to menu", icon: "←", onClick: leaveToLobby },
+          { label: "View rules", icon: "📖", onClick: () => setShowRules(true) },
+          !over && {
+            label: "Abandon game", icon: "⚑", danger: true,
+            onClick: () => setConfirmAbandon(true),
           },
-        ]} />}
+        ].filter(Boolean)} />}
       />
       <div className="rt-wrap">
         {!connected && <div className="rt-waitline rt-warn">Reconnecting…</div>}
@@ -2122,6 +2214,23 @@ export default function RagTag({ myId, authUser, onExit }) {
           </aside>
         </div>
       </div>
+      {confirmAbandon && (
+        <div className="rt-backdrop" onClick={() => setConfirmAbandon(false)} role="presentation">
+          <div className="rt-confirm" role="dialog" aria-modal="true"
+            aria-label="Abandon this game?" onClick={(e) => e.stopPropagation()}>
+            <h3>Abandon this game?</h3>
+            <p>Your opponent wins the fight, and it moves to your history.</p>
+            <div className="rt-confirm-acts">
+              <button type="button" className="rt-ctl rt-ctl-danger"
+                onClick={() => { send({ action: "abandon" }); setConfirmAbandon(false); }}>
+                Abandon
+              </button>
+              <button type="button" className="rt-ctl"
+                onClick={() => setConfirmAbandon(false)}>Keep playing</button>
+            </div>
+          </div>
+        </div>
+      )}
       {info && <InfoModal info={info} catalog={catalog} onClose={() => setInfo(null)} />}
       {toast && <div className="rt-toast">{toast}</div>}
       {showRules && (
