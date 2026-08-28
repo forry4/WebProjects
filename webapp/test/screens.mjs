@@ -2969,9 +2969,30 @@ try {
 			return [...seen];
 		});
 		const ALL = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"];
-		check("the full deck's low ranks render as themselves",
-			ranks.some((r) => ["2", "3", "4"].includes(r)), JSON.stringify(ranks));
-		check("...and no card renders with an unknown rank",
+		// COMMENTED OUT, deliberately, 2026-08-27 — do not restore as-is.
+		//
+		//   check("the full deck's low ranks render as themselves",
+		//     ranks.some((r) => ["2", "3", "4"].includes(r)), JSON.stringify(ranks));
+		//
+		// It is a SAMPLED assertion over a random deal: it needs a 2, 3 or 4 to
+		// land in the hands this seat can see, and when none does it fails while
+		// nothing is wrong. Observed failing deals include
+		// ["J","Q","5","A","6","K","8","9","7"] and
+		// ["5","7","10","9","J","Q","K","6","A","8"]. It was failing often enough
+		// to block three consecutive pushes, and a gate that cries wolf is worse
+		// than no gate — it trains everyone to reach for --no-verify.
+		//
+		// Little is lost: the check below is what actually guards the thing this
+		// pair exists for. A client still decoding on the OLD block boundaries
+		// draws the 2/3/4 (ids 40..51) with a blank glyph and an undefined rank,
+		// and `every(r => ALL.includes(r))` catches exactly that — on ANY deal,
+		// not just one that happened to contain a low card. The commented line
+		// only added "and we specifically saw one".
+		//
+		// TO RESTORE IT PROPERLY it needs a deterministic deal rather than a
+		// bigger sample: seed the room, or assert against the DEALT hand from the
+		// server payload instead of what this seat can see.
+		check("no card renders with an unknown rank",
 			ranks.length > 0 && ranks.every((r) => ALL.includes(r)), JSON.stringify(ranks));
 
 		// A QUARTET ROOM HAS NO TALON -- its four out-cards are pure secrecy and
