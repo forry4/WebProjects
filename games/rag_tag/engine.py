@@ -410,15 +410,21 @@ def _ops_of(game: dict, inst: int, f: dict) -> list[dict]:
 # Health-track movement
 # ==========================================================================
 
-def _move_marker(game: dict, seat: int, slot: int, delta: int,
-                 beat: dict) -> list[dict]:
+def _move_marker(turn, seat: int, slot: int, delta: int) -> list[dict]:
     """Move one marker by `delta` and return the spaces it landed on or passed.
 
     STOP halts movement the instant the marker lands on it, up or down alike. A
     fighter already on KO can never be Healed. The bottom space of the track is
     the floor: further losses there are simply ignored, which is exactly how
     Maman Brijit survives on her revive space.
+
+    Takes the TURN rather than the beat because the hp event has to go through
+    `Turn.note`, which is what stamps each event with the board as it stood the
+    instant it happened. Appending straight to `beat["events"]` -- which this
+    used to do -- produced an event the client could not place in time, and it
+    was the one event kind the whole health animation is about.
     """
+    game = turn.game
     f = fighter(game, seat, slot)
     track = track_of(f)
     if not track or f["hp"] is None or delta == 0:
@@ -443,8 +449,7 @@ def _move_marker(game: dict, seat: int, slot: int, delta: int,
     if pos == start:
         return []
     f["hp"] = pos
-    beat["events"].append({"kind": "hp", "seat": seat, "slot": slot,
-                           "from": start, "to": pos})
+    turn.note(kind="hp", seat=seat, slot=slot, **{"from": start, "to": pos})
     return passed
 
 
@@ -474,7 +479,11 @@ class Turn:
         # icon on Milady's own health track resolved as her PARTNER and found no planted
         # Schemes -- silently nothing, in eight games.
         self.deferred: list[tuple[int, tuple[int, int], dict]] = []
-        self.beat: dict = {"events": []}
+        # `pre` is the board as the cards flip -- before a single event of this
+        # turn has landed. The client walks forward from it one event at a time,
+        # so there is a moment where the two cards are on the table and nothing
+        # has happened yet.
+        self.beat: dict = {"events": [], "pre": _fighter_snapshot(game)}
         self.power_snapshot: dict[tuple[int, int], int] = {}
         self.immune: set[tuple[int, int]] = set()
         self.ignore_hp: set[tuple[int, int]] = set()
@@ -583,6 +592,26 @@ class Turn:
         return atk
 
     def note(self, **event) -> None:
+        """Record one event, with whatever it moved on the board.
+
+        A turn used to arrive as one lump: every event of it, and ONE snapshot of
+        the board taken after the last of them. So the log printed four sentences
+        at once and every health bar, Power total and token jumped to its
+        end-of-turn value in the same frame -- the card said "attack, then heal,
+        then burn" and the table showed the sum. Each event now carries the board
+        as it stood the instant IT happened, so the client can play them out one
+        at a time.
+
+        The full snapshot is taken here and REDUCED to a delta later, by
+        `_finish_beat`, rather than diffed against a trailing copy as it is
+        recorded. That is not tidiness: the Golem's Reanimation resolves a card a
+        second time through a fresh `Turn` that ADOPTS this one's beat
+        (`again.beat = turn.beat`), so two Turn objects write into one event list
+        and a trailing snapshot kept per Turn goes stale the moment the other one
+        moves the board. The event list is the only thing both of them share, so
+        it is the only safe place to read the order off.
+        """
+        event["st"] = _fighter_snapshot(self.game)
         self.beat["events"].append(event)
 
     def move_token(self, src, dst, token: str) -> None:
@@ -1154,7 +1183,7 @@ def _apply_hp_and_icons(turn: Turn) -> None:
         for who, delta in sorted(pending.items()):
             if delta == 0 or who in turn.immune:
                 continue
-            for space in _move_marker(turn.game, who[0], who[1], delta, turn.beat):
+            for space in _move_marker(turn, who[0], who[1], delta):
                 passed.append((who, space))
         pending = {}
 
@@ -1212,6 +1241,32 @@ def _fighter_snapshot(game: dict) -> list[list[dict]]:
               for k, v in f.items() if k not in _BEAT_HIDDEN}
              for f in side]
             for side in game["fighters"]]
+
+
+def _finish_beat(game: dict, beat: dict) -> dict:
+    """Close a beat: its end state, and its events reduced to what each MOVED.
+
+    `note` stamps every event with a full board snapshot so the client can play a
+    turn out one action at a time. Shipping four fighter dicts per event is
+    wasteful -- typically one of the four has changed -- so each is reduced here
+    to just the fighters that differ from the event before it, and the client
+    merges forward from `pre`. It still never has to model an event kind: what a
+    `poison` or a `transform` DID to the board is the engine's answer, exactly as
+    it was back when a beat carried a single snapshot.
+    """
+    prev = beat.get("pre") or _fighter_snapshot(game)
+    for ev in beat["events"]:
+        now = ev.pop("st", None)
+        if now is None:
+            continue
+        delta = [[seat, slot, now[seat][slot]]
+                 for seat in (0, 1) for slot in (0, 1)
+                 if now[seat][slot] != prev[seat][slot]]
+        if delta:
+            ev["st"] = delta
+        prev = now
+    beat["state"] = _fighter_snapshot(game)
+    return beat
 
 
 def _resolve_turn(game: dict, revealed: list, doubles=None) -> dict:
@@ -1275,8 +1330,7 @@ def _resolve_turn(game: dict, revealed: list, doubles=None) -> dict:
     _become_spirits(turn)
     _check_end_of_turn(turn)
     _pend_fey_folk_setup(game)
-    turn.beat["state"] = _fighter_snapshot(game)
-    return turn.beat
+    return _finish_beat(game, turn.beat)
 
 
 def _do_revives(turn: Turn) -> None:
@@ -1319,10 +1373,15 @@ def _become_spirits(turn: Turn) -> None:
                 continue
             if track[f["hp"]]["kind"] != "spirit":
                 continue
-            f["chars"][f["character"]] = "spirit"
-            turn.note(kind="spirit", seat=seat, slot=slot, character=f["character"])
+            gone = f["character"]
+            f["chars"][gone] = "spirit"
+            # Noted AFTER the Character steps off, not before. The event MEANS
+            # "they are gone", and its board snapshot has to say the same thing --
+            # noting first left the marker still standing on the Spirit space in
+            # the one frame the sentence appears.
             f["character"] = None
             f["hp"] = None
+            turn.note(kind="spirit", seat=seat, slot=slot, character=gone)
 
 
 def _check_end_of_turn(turn: Turn) -> None:
@@ -1440,8 +1499,7 @@ def _finish_build(game: dict) -> None:
                 _run_op(turn, seat, who, op, "late")
         _settle(turn)
         _check_end_of_turn(turn)
-        turn.beat["state"] = _fighter_snapshot(game)
-        game["beats"].append(turn.beat)
+        game["beats"].append(_finish_beat(game, turn.beat))
 
     if game["winner"] is None:
         game["round"] += 1
@@ -1501,7 +1559,7 @@ def choose_character(game: dict, pid: str, character: str) -> None:
     _settle(turn)
     if turn.beat["events"]:
         turn.beat.setdefault("turn", game["turn"])
-        game["beats"].append(turn.beat)
+        game["beats"].append(_finish_beat(game, turn.beat))
 
     _pend_fey_folk_setup(game)
     advance(game)

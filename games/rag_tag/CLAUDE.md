@@ -320,7 +320,7 @@ Its wording follows the fx docstrings in `effects.py`.
 off the phase; a client that re-derives it shows the wrong prompt the moment the two
 disagree, which the first draft of this file did.
 
-### THE FIGHT IS STEPPED BY HAND
+### THE FIGHT IS STEPPED BY HAND, AND EACH TURN PLAYS OUT ONE ACTION AT A TIME
 The FIGHT! step arrives as `beats` — one entry per turn with both revealed cards and
 every delta. It used to play itself at a fixed 900ms a turn, which meant the only
 thing worth watching was gone before it could be read. **Every turn now waits for a
@@ -329,18 +329,71 @@ whole round is resolved and saved before the first card is shown, so stepping is
 pure replay and a reconnect just restarts it. Beats live in game state and are
 **replaced each round, never appended**.
 
-Two consequences worth knowing:
-* **The next prompt is held until the last turn is on screen** (`owes` returns null
-  while `!atEnd`). Otherwise the round's outcome arrives as a question before the
-  player has seen what happened.
+**There are TWO cursors and they are paced differently on purpose.** `beatIdx` walks
+the TURNS and only ever moves on a click: a turn is a decision the player made a round
+ago and it deserves to be read. `stepIdx` walks the ACTIONS inside one turn and moves
+on a timer (`STEP_MS` 700, after a `REVEAL_MS` 520 beat where the cards are face up and
+nothing has landed) — because a card that attacks, heals and burns is one decision and
+three things to watch, and the whole turn used to land in a single frame: four
+sentences at once, and every health bar, Power total and token jumping to its
+end-of-turn value together, so the table showed the SUM of the card rather than the
+card. `prefers-reduced-motion` skips straight to the resolved turn; the stepping is
+pacing rather than decoration, so honouring it means not pacing at all.
+
+**A STEP is one event that narrates, plus the silent events that ran up to it.**
+`beatSteps` in `narrate.jsx` cuts a beat up, and its `upto` is an exclusive index into
+`beat.events` that serves as the narration cutoff AND the board cutoff, so the sentence
+and the numbers cannot disagree. A Block that worked says nothing (the attack it
+swallowed is narrated from the other side) but still happened, so it rides with the next
+thing that speaks instead of becoming an empty action to sit through; trailing silent
+events stretch the last step's `upto` to the end so no event is left unapplied.
+
+**The board state per action comes from the ENGINE, not from replaying events on the
+client.** Each beat carries `pre` (the board as the cards flip) and each event carries
+`st` — the fighters THAT event moved. `beatStateAt` merges forward. The client models no
+event kind, which is the same reason a beat carried a whole snapshot before this existed:
+what a `poison` or a `transform` did to the board is the engine's answer. `Turn.note` is
+the single funnel that stamps it, `_finish_beat` reduces the stamps to deltas, and
+`_move_marker` had to be re-routed through `note` — it appended straight to
+`beat["events"]`, which made the hp event the one event the animation is about and the
+one event with no state on it. The reduction is deliberately NOT done as each event is
+recorded: the Golem's Reanimation resolves a card again through a fresh `Turn` that
+adopts this one's beat (`again.beat = turn.beat`), so two Turn objects write into one
+event list and a trailing snapshot kept per Turn goes stale the moment the other moves
+the board. Cost, measured on the worst round in 80 random games (45 events): beats raw
+7.1KB → 16.9KB, zlib 870B → 1143B.
+
+Consequences worth knowing:
+* **The next prompt is held until the last ACTION of the last turn is on screen**
+  (`owes` returns null while `!atEnd`, and `atEnd` now folds in the step cursor).
+  Otherwise the round's outcome arrives as a question before the player has seen what
+  happened — which used to mean a whole turn early, and now would mean a sentence early.
+* **Back and "To the end" REVIEW; clicking the turn you are on REPLAYS it.** You press
+  Back to see what happened, not to watch it again, so it lands on a turn already
+  resolved — which is also why neither needs waiting for. The middle button is the only
+  one that changes what it says: while a turn is still playing it finishes THAT turn, and
+  only once the turn is over does it become the next one, so a click never costs you an
+  action you had not seen. It is dropped on the last turn, where "To the end" says the
+  same thing.
+* **`.rt-actno` is a separate element from `.rt-turnno` on purpose.** The render gate
+  proves the fight does not advance on its own by watching `.rt-turnno` hold still for
+  2.2s, and an action counter ticking inside it would move for a reason that is not a
+  turn. `.rt-actno` is present for the whole time a turn is playing — including the
+  reveal beat and a turn with only ONE action, where the count is not worth printing but
+  `.rt-actno-live` still has to say "still resolving" — and `screens.mjs` polls exactly
+  that to know when a board is safe to read.
 * **A beat is not always a turn.** Setup and instant-bonus beats carry no revealed
   cards, and counting them made the stage read "Turn 1 of 1" over two empty card
   slots before anything had been played. `isTurnBeat` is the test, in both
   `RagTag.jsx` and `narrate.jsx`.
+* **"Nothing lands." waits for the turn to be over.** Printing it while a turn is still
+  revealing passes a verdict on the turn a beat before the turn has one.
 
 ### The log is history, the stage is the moment
 `narrate.jsx` turns a beat's events into sentences, and the SAME function feeds the
-ribbon under the cards and the battle log — so the two cannot disagree. The log
+ribbon under the cards and the battle log — so the two cannot disagree, and both are
+cut off at the same `upto`, so a turn reaches the log one sentence at a time exactly as
+it reaches the ribbon. The log
 shows the turns **already stepped past**, not the one on the stage; rendering both
 put the same four sentences on screen twice, ~700px apart, which three independent
 reviewers each called out. Finished rounds are archived as their NARRATED ROWS, not

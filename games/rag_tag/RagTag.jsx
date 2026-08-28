@@ -15,7 +15,7 @@ import {
   TRACK_GLOSSARY, TOKEN_GLOSSARY, SPACE_GLOSSARY, TOKEN_WORD, TRACK_TITLE, TRACK_MARKS, trackWord, tokenWord,
   complexityWord,
 } from "./art.jsx";
-import { narrateBeat, narrateRound } from "./narrate.jsx";
+import { beatStateAt, beatSteps, narrateBeat, narrateRound } from "./narrate.jsx";
 import { useCardInfoGesture } from "../../shared/gestures.js";
 import { useAutoReconnect } from "../../shared/useAutoReconnect.js";
 
@@ -30,12 +30,30 @@ import { useAutoReconnect } from "../../shared/useAutoReconnect.js";
  * entry per turn with both revealed cards and every delta. This component plays
  * them back with a dwell so the fight reads as a fight rather than a diff. The
  * beats live in GAME STATE, so a reconnect mid-animation re-ships them.
+ *
+ * Playback has TWO cursors, and they are paced differently on purpose. `beatIdx`
+ * walks the TURNS and only ever moves on a click — a turn is a decision the
+ * player made a round ago and it deserves to be read. `stepIdx` walks the
+ * ACTIONS inside one turn and moves on a timer, because a card that attacks,
+ * heals and burns is one decision and three things to watch: it used to land in
+ * a single frame, four sentences at once with every bar, total and token jumping
+ * to its end-of-turn value together, so the table showed the sum of the card
+ * rather than the card.
  */
 
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const WS_BASE = WS_RAW.replace(/\/ws$/, "");
 const RT_WS = `${WS_BASE}/ragtag/ws`;
 const RT_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/ragtag");
+
+/* How long one action of a turn holds the stage, and how long the two cards sit
+   there before the first of them lands. The reveal dwell is `rt-clash`'s own
+   520ms, so the VS burst finishes before anything starts moving. */
+const STEP_MS = 700;
+const REVEAL_MS = 520;
+/* "Show me the whole turn" — clamped against the step count wherever it is read,
+   so it survives a beat whose length is not known yet. */
+const STEP_DONE = 1e9;
 
 /* baseCss FIRST, and it is not optional: the shared lobby kit is written
  * against the site theme tokens (--surface, --border, --radius, --text...).
@@ -1280,6 +1298,9 @@ export default function RagTag({ myId, authUser, onExit }) {
   const [buildPos, setBuildPos] = useState(null);
   // Playback cursor through this round's beats, advanced by hand.
   const [beatIdx, setBeatIdx] = useState(0);
+  // ...and through the ACTIONS of the turn on the stage, advanced by a timer.
+  // -1 is "the cards are face up and nothing has happened yet".
+  const [stepIdx, setStepIdx] = useState(-1);
   // Rounds already fought, kept so the log is the whole fight and not just now.
   const [pastRounds, setPastRounds] = useState([]);
   // The fighter or card being read in full (press-and-hold / right-click).
@@ -1466,8 +1487,16 @@ export default function RagTag({ myId, authUser, onExit }) {
     (inst) => (inst == null ? null : cards[String(instances[inst]?.cid)] || null),
     [cards, instances]);
 
-  useEffect(() => { setBeatIdx(0); }, [game?.round]);
-  useEffect(() => { setPastRounds([]); setBeatIdx(0); }, [roomId]);
+  useEffect(() => { setBeatIdx(0); setStepIdx(-1); }, [game?.round]);
+  useEffect(() => { setPastRounds([]); setBeatIdx(0); setStepIdx(-1); }, [roomId]);
+
+  /* Moving to a turn and moving WITHIN one are one gesture each, so they are one
+     function each -- a `setBeatIdx` that forgot its `setStepIdx` would leave the
+     new turn showing the old turn's cursor, which reads as a turn that skipped
+     its first few actions. `showTurn` replays; `reviewTurn` shows a turn already
+     resolved, which is what Back and "To the end" mean. */
+  const showTurn = useCallback((n) => { setBeatIdx(n); setStepIdx(-1); }, []);
+  const reviewTurn = useCallback((n) => { setBeatIdx(n); setStepIdx(STEP_DONE); }, []);
 
   /* The cursor walks the TURNS, not the beats. A round's beats also include
      setup and instant-bonus entries with no revealed cards, and stepping onto
@@ -1477,7 +1506,6 @@ export default function RagTag({ myId, authUser, onExit }) {
   const turnBeats = useMemo(() => beats.filter(isTurnBeat), [beats]);
   const lastIdx = Math.max(0, turnBeats.length - 1);
   const shownBeat = turnBeats.length ? turnBeats[Math.min(beatIdx, lastIdx)] : null;
-  const atEnd = turnBeats.length === 0 || beatIdx >= lastIdx;
 
   /* Where turn `n` sits in the full beat list, so the log can include whatever
      preceded it. */
@@ -1506,16 +1534,51 @@ export default function RagTag({ myId, authUser, onExit }) {
     cardName: (inst) => cardOf(inst)?.name || null,
   }), [catalog, teams, game?.fighters, mySeat, cardOf]);
 
-  const beatLines = useMemo(() => narrateBeat(shownBeat, narrCtx), [shownBeat, narrCtx]);
+  /* THE TURN ON THE STAGE, CUT INTO ITS ACTIONS. One step per event that has
+     something to say, in causal order; `upto` is how far through the beat's events
+     that step has got, and it is both the narration cutoff and the board cutoff so
+     the sentence and the numbers cannot disagree. */
+  const steps = useMemo(() => beatSteps(shownBeat, narrCtx), [shownBeat, narrCtx]);
+  const lastStep = steps.length - 1;
+  const stepNow = Math.max(-1, Math.min(stepIdx, lastStep));
+  const stepUpto = stepNow < 0 ? 0 : steps[stepNow].upto;
+  /* Whether this TURN has finished playing, and whether the ROUND has. The next
+     decision waits on the second one -- it used to wait only on the turn cursor,
+     which now lands a whole turn before that turn has finished happening. */
+  const atStepEnd = stepIdx >= lastStep;
+  const atEnd = turnBeats.length === 0 || (beatIdx >= lastIdx && atStepEnd);
 
-  /* THE FIGHTER BOARDS STEP WITH THE CURSOR. A round is resolved server-side in one
-     go, so `game.fighters` is the state after the LAST turn of it: reading the boards
-     off that made every health bar, Power total and token jump to its end-of-round
-     value the moment the round landed, while the cards and the log walked through it
-     turn by turn. Each beat now carries the state as it stood when that turn finished.
-     Outside a fight -- draft, build, a reconnect before the first beat -- there is no
-     beat to read, and the live state is the right answer. */
-  const boardState = shownBeat?.state || game?.fighters;
+  /* THE TIMER. It only ever walks the actions WITHIN a turn: a turn boundary is a
+     click, deliberately, so the fight cannot run away from the player. Reduced
+     motion skips straight to the resolved turn -- the stepping is pacing rather
+     than decoration, so honouring it means not pacing at all. */
+  const stillMotion = useMemo(() => typeof window !== "undefined"
+    && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches, []);
+  const hasBeat = !!shownBeat;
+  useEffect(() => {
+    if (!hasBeat || atStepEnd) return undefined;
+    if (stillMotion) { setStepIdx(STEP_DONE); return undefined; }
+    const t = setTimeout(() => setStepIdx((n) => Math.max(-1, Math.min(n, lastStep)) + 1),
+      stepNow < 0 ? REVEAL_MS : STEP_MS);
+    return () => clearTimeout(t);
+    // Deliberately NOT keyed on the beat OBJECT. `beats` is re-parsed on every
+    // broadcast, so the beat on the stage is a new object each time one arrives
+    // and depending on it restarted the dwell whenever anything at all happened
+    // in the room -- an action could hold the stage indefinitely.
+  }, [game?.round, beatIdx, hasBeat, atStepEnd, stepNow, lastStep, stillMotion]);
+
+  const beatLines = useMemo(
+    () => narrateBeat(shownBeat, narrCtx, stepUpto), [shownBeat, narrCtx, stepUpto]);
+
+  /* THE FIGHTER BOARDS STEP WITH THE CURSOR -- with the ACTION cursor, not just the
+     turn one. A round is resolved server-side in one go, so `game.fighters` is the
+     state after the LAST turn of it: reading the boards off that made every health
+     bar, Power total and token jump to its end-of-round value the moment the round
+     landed. Each beat carries the state as it stood when the cards flipped and each
+     of its events carries what THAT event moved, so the boards now walk the fight at
+     the same rate as the sentences do. Outside a fight -- draft, build, a reconnect
+     before the first beat -- there is no beat to read, and the live state is right. */
+  const boardState = (shownBeat ? beatStateAt(shownBeat, stepUpto) : null) || game?.fighters;
 
   /* The log runs UP TO AND INCLUDING the turn on the stage. It used to stop one
      short, to avoid printing the same sentences in the ribbon and the log at
@@ -1527,8 +1590,8 @@ export default function RagTag({ myId, authUser, onExit }) {
     () => (over && atEnd ? beats.length - 1 : beatPosOf(beatIdx)),
     [over, atEnd, beats.length, beatPosOf, beatIdx]);
   const roundRows = useMemo(
-    () => narrateRound(beats, livePos, narrCtx, beatPosOf(beatIdx)),
-    [beats, livePos, beatPosOf, beatIdx, narrCtx]);
+    () => narrateRound(beats, livePos, narrCtx, beatPosOf(beatIdx), stepUpto),
+    [beats, livePos, beatPosOf, beatIdx, narrCtx, stepUpto]);
   const fullRows = useMemo(() => narrateRound(beats, beats.length - 1, narrCtx), [beats, narrCtx]);
 
   /* Finished rounds are kept as their NARRATED rows rather than as beats: the
@@ -1569,18 +1632,25 @@ export default function RagTag({ myId, authUser, onExit }) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [roundRows.length, pastRounds.length]);
 
-  /* What each fighter should show for THIS beat: the number that floats off
-     them, and whether the board shakes. Summed per fighter, because two
-     sources hitting one marker is one movement. */
+  /* What each fighter should show for THIS ACTION: the number that floats off
+     them, and whether the board shakes. Scoped to the step rather than to the
+     whole turn -- summing the turn made a card that hit for 3 and healed 2 float
+     a single "−1", which is the arithmetic of the turn and not a thing that
+     happened. Still summed WITHIN a step, because two sources reaching one marker
+     in one action really is one movement. */
   const fxSlots = useMemo(() => {
     const out = { 0: {}, 1: {} };
-    for (const ev of shownBeat?.events || []) {
+    const evs = shownBeat?.events || [];
+    const from = stepNow > 0 ? steps[stepNow - 1].upto : 0;
+    for (const ev of stepNow < 0 ? [] : evs.slice(from, stepUpto)) {
       const bucket = out[ev.seat];
       if (!bucket || ev.slot == null) continue;
       const cur = bucket[ev.slot] || {};
       if (ev.kind === "hp") {
-        const st = shownBeat?.state?.[ev.seat]?.[ev.slot]
-          || game?.fighters?.[ev.seat]?.[ev.slot];
+        // The track as it stands AT THIS STEP, not at the end of the turn:
+        // Bödvar flips onto a second board mid-turn, so reading his indices off
+        // the turn's final track prices the hit against the wrong board.
+        const st = boardState?.[ev.seat]?.[ev.slot];
         const bd = catalog?.fighters?.[teams?.[ev.seat]?.[ev.slot]];
         const tr = st && bd ? trackFor(st, bd) : [];
         const a = tr[ev.from], b = tr[ev.to];
@@ -1592,7 +1662,7 @@ export default function RagTag({ myId, authUser, onExit }) {
       }
     }
     return out;
-  }, [shownBeat, catalog, teams, game?.fighters]);
+  }, [shownBeat, steps, stepNow, stepUpto, boardState, catalog, teams]);
 
   /* What the round actually cost, totalled across every turn in it. The fight
      used to just stop -- the only sign it had ended was a button going grey. */
@@ -1810,6 +1880,11 @@ export default function RagTag({ myId, authUser, onExit }) {
 
   const turnLabel = realTurns
     ? `Turn ${Math.min(beatIdx, lastIdx) + 1} of ${realTurns}` : "—";
+  /* Kept OUT of `.rt-turnno`: that element is how the render gate proves the fight
+     does not advance on its own, and a counter ticking inside it would move for a
+     reason that is not a turn. */
+  const stepLabel = steps.length > 1
+    ? `action ${Math.max(0, stepNow) + 1} of ${steps.length}` : "";
 
   /* `row.live` is the turn currently on the stage. The log includes it rather than
      stopping one short, and marks it so the reader can see which entry the cards above
@@ -1859,7 +1934,7 @@ export default function RagTag({ myId, authUser, onExit }) {
               catalog={catalog}
               activeSlot={shownBeat?.active?.[theirSeat]}
               fxSlots={fxSlots[theirSeat]}
-              beatKey={`${game?.round}-${beatIdx}`}
+              beatKey={`${game?.round}-${beatIdx}-${stepNow}`}
               scale={hpScale}
               onInfo={setInfo}
             />}
@@ -1871,7 +1946,22 @@ export default function RagTag({ myId, authUser, onExit }) {
                     Round <b>{game?.round}</b>
                     <span className="rt-round-sep">·</span>
                     <span className="rt-turnno">{turnLabel}</span>
+                    {/* Present for the whole time a turn is playing out, INCLUDING the
+                        beat where the cards are face up and nothing has landed yet, and
+                        including a turn with only one action in it -- `rt-actno-live` is
+                        what says "still resolving", and a turn that dropped the marker
+                        during its own reveal would report itself finished before it had
+                        started. The COUNT is only worth printing when there is more than
+                        one action to count, so a one-action turn shows the marker alone. */}
+                    {steps.length > 0 && (
+                      <span className={`rt-actno${atStepEnd ? "" : " rt-actno-live"}`}>
+                        {stepLabel}
+                      </span>
+                    )}
                   </span>
+                  {/* A tab REVIEWS the turn it names -- except the one you are already
+                      on, which replays it. That is the only way back into an action you
+                      watched go past, and it costs a control nobody has to learn. */}
                   <span className="rt-steps" role="tablist" aria-label="turns this round">
                     {turnBeats.map((b, i2) => (
                       <button
@@ -1882,7 +1972,7 @@ export default function RagTag({ myId, authUser, onExit }) {
                         aria-label={`Turn ${i2 + 1}`}
                         title={`Turn ${i2 + 1}`}
                         className={`rt-step${i2 === beatIdx ? " rt-step-on" : ""}${i2 < beatIdx ? " rt-step-done" : ""}`}
-                        onClick={() => setBeatIdx(i2)} />
+                        onClick={() => (i2 === beatIdx ? showTurn(i2) : reviewTurn(i2))} />
                     ))}
                   </span>
                 </header>
@@ -1902,13 +1992,22 @@ export default function RagTag({ myId, authUser, onExit }) {
                     flipKey={`m-${game?.round}-${beatIdx}`} />
                 </div>
 
+                {/* Keyed on the TURN, not on the step: the lines of a turn accumulate
+                    here as it plays, and re-keying per step would remount the ones
+                    already on screen and replay their entrance every action. The
+                    stagger that used to fan them in went with the same change --
+                    they arrive one at a time now, which is the thing the stagger was
+                    imitating. "Nothing lands." waits for the turn to be over, or it
+                    is a verdict passed before the turn has one. */}
                 <div className="rt-ribbon" key={`rb-${game?.round}-${beatIdx}`}>
-                  {beatLines.length ? beatLines.map((l, n) => (
-                    <span className={`rt-rib rt-tone-${l.tone}`} key={l.key}
-                      style={{ "--d": `${Math.min(n, 8) * 60}ms` }}>
+                  {beatLines.map((l) => (
+                    <span className={`rt-rib rt-tone-${l.tone}`} key={l.key}>
                       <Icon name={l.icon} />{l.text}
                     </span>
-                  )) : <span className="rt-rib rt-tone-info"><Icon name="dot" />Nothing lands.</span>}
+                  ))}
+                  {!beatLines.length && atStepEnd && (
+                    <span className="rt-rib rt-tone-info"><Icon name="dot" />Nothing lands.</span>
+                  )}
                 </div>
 
                 {atEnd && realTurns > 0 && (
@@ -1923,22 +2022,38 @@ export default function RagTag({ myId, authUser, onExit }) {
                   </div>
                 )}
 
+                {/* Back and "To the end" REVIEW -- they land on a turn already
+                    resolved, because you press them to see what happened rather
+                    than to watch it again. The middle button is the only one that
+                    changes what it says: while a turn is still playing it finishes
+                    THAT turn, and only once the turn is over does it become the
+                    next one -- so a click never costs you an action you had not
+                    seen. It is dropped on the last turn, where "To the end" says
+                    the same thing. */}
                 <div className="rt-controls">
                   <button type="button" className="rt-ctl" disabled={beatIdx <= 0}
-                    onClick={() => setBeatIdx((n) => Math.max(0, n - 1))}>
+                    onClick={() => reviewTurn(Math.max(0, beatIdx - 1))}>
                     <Icon name="prev" />Back
                   </button>
+                  {beatIdx < lastIdx && (
+                    atStepEnd
+                      ? (
+                        <button type="button" className="rt-ctl rt-ctl-go"
+                          onClick={() => showTurn(Math.min(lastIdx, beatIdx + 1))}>
+                          Next turn<Icon name="next" />
+                        </button>
+                      ) : (
+                        <button type="button" className="rt-ctl rt-ctl-go"
+                          onClick={() => setStepIdx(STEP_DONE)}>
+                          Finish turn<Icon name="next" />
+                        </button>
+                      )
+                  )}
                   {!atEnd && (
-                    <>
-                      <button type="button" className="rt-ctl rt-ctl-go"
-                        onClick={() => setBeatIdx((n) => Math.min(lastIdx, n + 1))}>
-                        Next turn<Icon name="next" />
-                      </button>
-                      <button type="button" className="rt-ctl"
-                        onClick={() => setBeatIdx(lastIdx)}>
-                        To the end<Icon name="skip" />
-                      </button>
-                    </>
+                    <button type="button" className="rt-ctl"
+                      onClick={() => reviewTurn(lastIdx)}>
+                      To the end<Icon name="skip" />
+                    </button>
                   )}
                 </div>
               </section>
@@ -1951,7 +2066,7 @@ export default function RagTag({ myId, authUser, onExit }) {
               catalog={catalog}
               activeSlot={shownBeat?.active?.[mySeat]}
               fxSlots={fxSlots[mySeat]}
-              beatKey={`${game?.round}-${beatIdx}`}
+              beatKey={`${game?.round}-${beatIdx}-${stepNow}`}
               scale={hpScale}
               onInfo={setInfo}
             />}
@@ -2180,9 +2295,13 @@ export default function RagTag({ myId, authUser, onExit }) {
                 </div>
               </div>
             )}
+            {/* Two different waits, and telling somebody to step to a turn they are
+                already standing on is worse than saying nothing. */}
             {over && !atEnd && (
               <div className="rt-waitline rt-warn">
-                It is decided — step to the last turn to see how it ended.
+                {beatIdx >= lastIdx
+                  ? "It is decided — the last turn is still playing out."
+                  : "It is decided — step to the last turn to see how it ended."}
               </div>
             )}
           </div>

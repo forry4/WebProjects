@@ -499,7 +499,7 @@ def test_an_intrigues_attack_is_thrown_with_the_intriguers_power():
     f(game, 1, 1)["tokens"]["scheme"] = 10
     before = hp(game, 0, 0)
     turn = E.Turn(game, [None, None])
-    E._move_marker(game, 1, 1, -2, turn.beat)     # land her on the Intrigue icon at 12
+    E._move_marker(turn, 1, 1, -2)                # land her on the Intrigue icon at 12
     E._unleash_scheme(turn, (1, 1), "late")
     E._settle(turn)
     assert before - hp(game, 0, 0) == 5, "her Power, not her Partner's"
@@ -562,6 +562,72 @@ def test_every_beat_carries_the_board_as_it_stood_when_that_turn_ended():
     after = [E.hp_value(b["state"][1][0]) for b in turns]
     assert after == [start - 3, start - 6], "each beat holds that turn's board, not the last"
     assert E.hp_value(f(game, 1, 0)) == after[-1], "and the live state is the final one"
+
+
+def test_every_event_carries_the_board_as_it_stood_when_IT_happened():
+    """A turn is played out one action at a time, so a turn-sized snapshot is not enough.
+
+    The beat-level snapshot above fixed a round landing in one frame; this is the same
+    bug one level down. A card that attacks and then heals is one decision and two
+    things to watch, and with only an end-of-turn state the bars moved by the NET of
+    them -- the arithmetic of the turn, not a thing that happened.
+
+    Asserted as a chain rather than per event: `pre` plus every delta in order has to
+    land exactly on the beat's own end state. That is the property the client relies on
+    (`beatStateAt` merges forward from `pre`), and it is the one an unnoted mutation
+    breaks -- which is how the Fey Folk's Character was caught stepping off the track
+    AFTER the event that says they did.
+    """
+    def walk(game):
+        moved = 0
+        for beat in game["beats"]:
+            state = [list(beat["pre"][0]), list(beat["pre"][1])]
+            for ev in beat["events"]:
+                for seat, slot, snap in ev.get("st", []):
+                    state[seat][slot] = snap
+                    moved += 1
+            assert state == beat["state"], (
+                "pre + every event's delta must land on the beat's own end state")
+        assert moved, "no event moved anything, so the walk proved nothing"
+
+    game = rig(["golem", "shango"], ["mordred", "joan"],
+               deck0=[11, 11], deck1=[22, 22])
+    f(game, 0, 0)["power"] = 3
+    E.advance(game)
+    walk(game)
+
+    # And again over a Character passing into Spirit, which is the event that
+    # caught this: `_become_spirits` noted it BEFORE clearing `character` and
+    # `hp`, so the one frame that says "they are gone" still had them standing
+    # on the Spirit space. An event's snapshot has to mean what its sentence
+    # says. The plain rig above cannot reach it -- nobody in it has Characters.
+    spirits = rig(["the_fey_folk", "golem"], ["bodvar", "joan"],
+                  deck0=[52], deck1=[122])
+    spirits["fighters"][0][0]["character"] = "fairy"
+    spirits["fighters"][0][0]["chars"]["fairy"] = "active"
+    set_hp(spirits, 0, 0, 1)
+    f(spirits, 1, 0)["power"] = 6
+    one_turn(spirits)
+    assert any(ev["kind"] == "spirit" for b in spirits["beats"] for ev in b["events"]),         "the Character has to have passed into Spirit for this half to prove anything"
+    walk(spirits)
+
+
+def test_the_hp_event_carries_state_like_every_other_event():
+    """`_move_marker` used to append straight to `beat["events"]`, around `Turn.note`.
+
+    `note` is the single funnel that stamps an event with what it moved, so the one
+    event the whole health animation is about was also the only one arriving with no
+    board on it -- the bars would have sat still through the exact action that moved
+    them. Kept as its own test rather than left to the chain above: the chain only
+    notices a missing delta when nothing later re-states it, and a marker that moves
+    again in the same beat hides it completely.
+    """
+    game = rig(["golem", "shango"], ["mordred", "joan"], deck0=[11], deck1=[22])
+    f(game, 0, 0)["power"] = 3
+    E.advance(game)
+    hps = [ev for b in game["beats"] for ev in b["events"] if ev["kind"] == "hp"]
+    assert hps, "the Attack has to have moved a marker"
+    assert all(ev.get("st") for ev in hps), "every hp event carries what it moved"
 
 
 def test_a_beat_never_carries_miladys_face_down_pile():

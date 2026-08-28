@@ -4642,12 +4642,46 @@ try {
 		const turnsThisRound = await page.locator(".rt-steps .rt-step").count();
 		check("a step marker per turn", turnsThisRound >= 2, `${turnsThisRound} markers`);
 
+		// A TURN is played out one ACTION at a time -- a card that attacks, heals and
+		// burns is one decision and three things to watch, and it used to land in a
+		// single frame, every bar, total and token jumping to the sum together. The two
+		// halves of that are asserted separately because they fail differently: the
+		// ribbon has to GROW inside one turn (the actions arrive), and the turn counter
+		// has to HOLD (a turn boundary is still a click, so the fight cannot run away
+		// from the player). One check waiting on both would prove neither.
+		const liveLines = () => page.locator(".rt-ribbon .rt-rib").count();
 		const firstTurnText = await page.locator(".rt-turnno").first().innerText().catch(() => "");
+		const ribbonAtOnce = await liveLines();
+		const actLabel = await page.locator(".rt-actno").first().innerText().catch(() => "");
 		await sleep(2200);
+		const ribbonLater = await liveLines();
 		const stillTurnText = await page.locator(".rt-turnno").first().innerText().catch(() => "");
-		check("the fight does not advance on its own",
+		check("the fight does not advance a TURN on its own",
 			firstTurnText === stillTurnText && /1\b/.test(stillTurnText),
 			`was "${firstTurnText}", now "${stillTurnText}"`);
+		// Gated on the counter READ AT THE START, not merely on its presence: a turn
+		// with one action has nothing to stagger, and a harness that arrived late
+		// enough to find the turn already finished would otherwise fail for being
+		// slow. "action 1 of 4" is the only state that proves anything here.
+		const acts = /action (\d+) of (\d+)/.exec(actLabel);
+		if (acts && Number(acts[1]) < Number(acts[2])) {
+			check("the actions of a turn arrive one at a time, not all at once",
+				ribbonLater > ribbonAtOnce,
+				`${ribbonAtOnce} -> ${ribbonLater} ribbon lines; counter was "${actLabel}"`);
+		}
+
+		// Whatever turn is on the stage, let it FINISH playing before reading anything
+		// off the boards. Every check below compares two board states, and one read
+		// mid-action is a false failure that looks exactly like the bug this block
+		// exists to catch.
+		const settled = async () => {
+			await sleep(150);            // let the click render before believing the DOM
+			for (let i = 0; i < 40; i++) {
+				if (await page.locator(".rt-actno-live").count() === 0) return;
+				await sleep(250);
+			}
+		};
+		await settled();
 
 		const cardNames = await page.locator(".rt-card-name").allInnerTexts().catch(() => []);
 		check("both revealed cards are named",
@@ -4671,8 +4705,21 @@ try {
 				`a prompt was already showing: "${await page.locator(".rt-prompt h3").first().innerText().catch(() => "")}"`);
 		}
 
+		const healthNow = async () => (await page.locator(".rt-fighter .rt-hp b")
+			.allInnerTexts().catch(() => [])).join("|");
+		
+		// THE CARDS FLIP BEFORE ANYTHING MOVES. Each beat carries the board as it
+		// stood when the cards were turned over, and the turn walks forward from
+		// there -- so the frame right after "Next turn" must still show the board
+		// that turn INHERITED. Reading it here is the only moment that state is
+		// observable, and before per-event state existed there was no such frame at
+		// all: the whole turn landed at once.
+		const beforeNext = await healthNow();
 		await page.locator(".rt-ctl-go").click({ timeout: 10_000 }).catch(() => {});
-		await sleep(500);
+		const atFlip = await healthNow();
+		check("the next turn flips its cards before it moves the boards",
+			atFlip === beforeNext, `"${beforeNext}" became "${atFlip}" on the flip`);
+		await settled();
 		const afterNext = await page.locator(".rt-turnno").first().innerText().catch(() => "");
 		check("Next turn advances the fight", afterNext !== stillTurnText,
 			`still "${afterNext}"`);
@@ -4687,18 +4734,21 @@ try {
 		// somebody health the readouts MUST differ, and if it cost nobody any they must
 		// not -- a one-sided check here would pass on a quiet round without proving
 		// anything.
-		const healthNow = async () => (await page.locator(".rt-fighter .rt-hp b")
-			.allInnerTexts().catch(() => [])).join("|");
 		// "To the end" is picked BY ITS TEXT, not by position: the control row is
-		// [Back, Next turn, To the end] only while turns remain, and collapses to just
-		// [Back] at the end -- so `.last()` silently becomes Back on a two-turn round and
-		// both reads land on the same turn. It also has to be put BACK at the end
-		// afterwards, because the next decision is deliberately held until the last turn
-		// is on screen and leaving the cursor at turn 1 strands the whole BUILD step.
+		// [Back, Next turn / Finish turn, To the end] only while there is something
+		// left to watch, and collapses to just [Back] once there is not -- so `.last()`
+		// silently becomes Back on a two-turn round and both reads land on the same
+		// turn. The middle button changes its own text mid-turn, which is a second
+		// reason not to reach for it by position. It also has to be put BACK at the end
+		// afterwards, because the next decision is deliberately held until the last
+		// ACTION of the last turn is on screen, and leaving the cursor at turn 1
+		// strands the whole BUILD step.
 		const toEnd = async () => {
 			const btn = page.locator(".rt-ctl", { hasText: "To the end" });
 			if (await btn.count()) { await btn.first().click().catch(() => {}); await sleep(400); }
 		};
+		// Back and "To the end" REVIEW: they land on a turn already resolved rather
+		// than replaying it, so neither needs settling for.
 		const toStart = async () => {
 			for (let i = 0; i < 12; i++) {
 				const back = page.locator(".rt-ctl").first();
