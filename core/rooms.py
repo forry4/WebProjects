@@ -20,7 +20,10 @@ does not know what a game is.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
+import os
+import random
 import time
 import zlib
 from collections import deque
@@ -131,6 +134,80 @@ def unpack_rng(st):
     blob = base64.b64decode(st[1]["b64"])
     words = [int.from_bytes(blob[i:i + 4], "little") for i in range(0, len(blob), 4)]
     return [st[0], words] + list(st[2:])
+
+
+# ── Reproducible deals, for the render gate only ─────────────────────────────
+# Games deal from an unseeded RNG. That is correct in production and it was the
+# single largest cause of failed Pages deploys: 11 of the 15 failures in the 500
+# runs to 2026-08-28 were the `screens` gate, and the ones that turned out to be
+# the HARNESS rather than the product were all one bug wearing four hats — an
+# assertion that holds on SOME deals, written green locally and drawn red in CI.
+# `807155f` says it outright ("an assertion that holds on SOME deals"); `d1bdc1e`
+# is the Double prompt that only fires when the bot wins the auction ("real, just
+# rare -- CI simply drew the rare deal twice"); `408bf9e` is a price row that
+# populates depending on which seat opened; `8726c31a` is a regex that collided
+# with the one fighter whose honest output happened to look like the bug. Four of
+# those went red->green with the app code BYTE-IDENTICAL and only the harness
+# changed, which is the tell: the gate was measuring the dice, not the product.
+#
+# `GAMES_DEAL_SEED` makes a deal a pure function of who is at the table, so the
+# gate replays the same hand on every run and a check that passes locally cannot
+# be drawn red later. Read PER CALL, never captured at import, so a test can set
+# it around a single deal.
+#
+# The key is the sorted player ids plus the mode. Deliberately NOT the room id
+# (generated per room, so it would feed the randomness straight back in) and
+# deliberately NOT a global counter: screens.mjs runs its blocks in TWO LANES, so
+# a global counter is handed out in interleaving order and the same block draws a
+# different hand every run — precisely the property this exists to remove. Every
+# screens block seeds its own stable guest id (`skat-harness`, `hard-harness`,
+# ...), so keying on identity gives each block its own reproducible deal whatever
+# lane it lands in. The per-key counter that rides along is what lets one block
+# play two games and get two different — still reproducible — hands; it is
+# per-key rather than global so that one block's second deal cannot depend on
+# whether another block happened to run first.
+#
+# UNSET IN PRODUCTION. The unset path returns `random.Random()`, which is the
+# expression each caller used before. This must never become client-settable: a
+# seat that can pin the deal in a hidden-info game knows the deal.
+_DEAL_COUNTERS: dict[str, int] = {}
+
+
+def deal_rng(players=(), *, mode: str = "") -> random.Random:
+    """The RNG a game deals from. Unseeded unless `GAMES_DEAL_SEED` is set."""
+    seed = os.environ.get("GAMES_DEAL_SEED")
+    if not seed:
+        return random.Random()
+    key = "|".join([seed, mode, *sorted(str(p) for p in players)])
+    n = _DEAL_COUNTERS[key] = _DEAL_COUNTERS.get(key, -1) + 1
+    return random.Random(
+        int.from_bytes(hashlib.sha256(f"{key}|{n}".encode()).digest()[:8], "big"))
+
+
+def bot_seed(*parts) -> int:
+    """The seed a bot's move draws from. Random unless `GAMES_DEAL_SEED` is set.
+
+    Pinning the DEAL is only half of a reproducible game: every bot move draws
+    its own `random.randrange(2 ** 31)`, so a seeded deal still branches the
+    moment the bot chooses. That is not a hypothetical — `d1bdc1e` is exactly
+    it: "the Double prompt only fires when the bot wins the auction ... real,
+    just rare", two Pages deploys red on a decision no deal seed would have
+    fixed.
+
+    Pass the POSITION the move is computed from (each game already builds a
+    `_position_key` for its stale-move guard). Seeding off the position rather
+    than a move counter means a re-entered scheduler for the same position asks
+    the same question and gets the same answer — the reproducibility survives
+    the retries and reconnects that make a move counter drift.
+
+    Unset in production, where the bot must stay unpredictable: a bot that
+    answers every identical position identically is a bot you can learn by rote.
+    """
+    seed = os.environ.get("GAMES_DEAL_SEED")
+    if not seed:
+        return random.randrange(2 ** 31)
+    key = "|".join([seed, *(str(p) for p in parts)])
+    return int.from_bytes(hashlib.sha256(key.encode()).digest()[:4], "big")
 
 
 def ensure_room_loaded(rooms: Rooms, room_id: str,

@@ -495,6 +495,39 @@ covers the logic; each game's wiring is one line).
   (verified non-vacuous by dropping one). If the beat block ever turns flaky, move `dmCardFace` into
   lane A before touching any threshold. Output is buffered per block and flushed as one group with its
   wall time, because two lanes logging line-by-line interleave into noise.
+- **`screens` runs the backend with `GAMES_DEAL_SEED` set, so its deals are REPRODUCIBLE — and that
+  was the single largest cause of failed Pages deploys.** Of the 15 failures in the 500 runs to
+  2026-08-28, 11 were this gate, and the ones that were the HARNESS rather than the product were one
+  bug wearing four hats: *an assertion that holds on SOME deals*, written green locally and drawn red
+  in CI. Four of them went red→green with the application code **byte-identical** — `807155f` (piles
+  sampled after a round that ended early), `d1bdc1e` (the Double prompt only fires when the bot wins
+  the auction — "real, just rare"), `408bf9e` (a price row that populates depending on which seat
+  opened) and `8726c31a` (a regex that collided with the one fighter whose honest output looked like
+  the bug). `core.rooms.deal_rng` makes a deal a pure function of who is at the table and
+  `core.rooms.bot_seed` does the same for each bot decision — **both halves are needed**: pinning the
+  deal alone still branches at the first bot choice, which is exactly what `d1bdc1e` was. The key is
+  the sorted player ids, never the room id (generated) and never a global counter (the two LANES hand
+  one out in interleaving order, so the same block would draw a different hand every run). Wired into
+  Dissonance and Rag Tag, which account for all 11; any other game is one line at its `_start_new_game`.
+  **How far that reaches differs by game, and the difference is the SIMULTANEITY, not the seeding.**
+  Dissonance is turn-based, so its positions advance deterministically and a seeded run replays whole.
+  Rag Tag is simultaneous, so `_position_key` legitimately includes WHO HAS ALREADY SUBMITTED (it has
+  to — that is the stale-move guard) and whether the bot is scheduled before or after the human's
+  submission lands still moves its seed: the DEAL is pinned, the bot's draft picks are not. Do not
+  "fix" that by keying the bot seed on something staler; the guard needs the live position. It is why
+  the Rag Tag block's checks are written to hold for ANY fighter, and why the two that cannot be are
+  steered and asserted rather than sampled (below).
+  **UNSET IN PRODUCTION**, where the unset path is the expression each caller used before — a bot that
+  answers every identical position identically is one you can learn by rote, and a seat that could pin
+  the deal in a hidden-info game would know the deal. `core/tests/test_deal_rng.py` guards both
+  directions.
+- **A seeded deal makes a CONDITIONAL check permanently vacuous instead of eventually covered, so it
+  has to be steered and then ASSERTED.** Rag Tag's board-panel block has two checks that only fire if
+  the drafted four include a ring (Joan) or Characters (the Fey Folk); the random draft used to reach
+  them eventually, and pinning the deal parked one at zero for good. The harness now DRAFTS for them
+  and fails if either count is zero — steering you cannot trust without the assertion, which was
+  verified non-vacuous by dropping the preference and watching it go red. Check the same thing before
+  seeding any other game's block: what was "sampled over many runs" becomes "fixed forever".
 - **The gates hand their build to each other: `SCREENS_REUSE_BUILD=1` (set by CI and `.githooks/pre-push`)
   lets `screens` reuse the bundle `smoke` just built** — the same `vite build` was running twice. It is
   **verified, not trusted**: `runBuild()` rebuilds anyway unless `dist/` is newer than every source file
@@ -575,6 +608,12 @@ the frontend (`webapp/**`, each game's dir, `shared/**`, `books/**`): a `build` 
 (bakes `VITE_WS_URL=wss://splendid-nelz.onrender.com/ws`), runs the smoke gate, uploads via
 `upload-pages-artifact`; a `deploy` job publishes via `deploy-pages`. It commits/pushes nothing. If deploy
 flakes, re-run the workflow's `deploy` job. `gh-pages` branch + `docs/` are kept only as rollback nets.
+**The deploy step's auto-retry WAITS 30s first, and that wait is the point of it.** Run 717
+(2026-08-17) flaked at 18:34:45, retried at 18:34:46 and failed again at 18:34:48 — both attempts
+inside three seconds, which is the same dice re-rolled within the same second rather than a second
+chance, and it is the only Pages-backend failure that ever reached a red run. Do not "tidy" the sleep
+away. (Deploy-side flakes are rare: 2 of 15 failures in 500 runs, and the other one, run 317, was the
+run reporting failure after a retry that SUCCEEDED — fixed same-day by `continue-on-error`.)
 
 ```bash
 git sync-main                 # ff the primary main worktree to origin/main (global alias)

@@ -31,7 +31,6 @@ import asyncio
 import concurrent.futures
 import json
 import logging
-import random
 import time
 from typing import Any
 
@@ -398,7 +397,7 @@ async def _schedule_bot_turn(room_id: str) -> None:
         try:
             move = await loop.run_in_executor(
                 _BOT_EXEC, _bot_move_sync, snapshot, seat,
-                random.randrange(2 ** 31))
+                _rooms.bot_seed(position_before, seat))
         except Exception:
             LOG.warning("ragtag bot failed in %s", room_id, exc_info=True)
             return
@@ -427,8 +426,12 @@ async def _schedule_bot_turn(room_id: str) -> None:
 
 def _start_new_game(room: dict, room_id: str) -> None:
     seats = list(room["players"].keys())
-    random.shuffle(seats)
-    room["game"] = engine.new_game(seats, seed=random.randrange(2 ** 31))
+    # ONE rng for both halves, so a seeded run reproduces the seating and the
+    # draft together rather than half of each. Unseeded in production — see
+    # core.rooms.deal_rng.
+    rng = _rooms.deal_rng(seats, mode="ragtag")
+    rng.shuffle(seats)
+    room["game"] = engine.new_game(seats, seed=rng.randrange(2 ** 31))
     room["status"] = "playing"
 
 

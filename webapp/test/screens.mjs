@@ -190,8 +190,18 @@ try {
 	// bundle — so detect it and fail loudly instead.
 	const spawnedAt = Math.floor(Date.now() / 1000);
 	console.log("starting backend (uvicorn app:app) + building ...");
+	// GAMES_DEAL_SEED makes every deal a function of WHO IS AT THE TABLE instead
+	// of the clock. It is the fix for this gate's most expensive failure mode: 11
+	// of the 15 failed Pages deploys in the 500 runs to 2026-08-28 were this gate,
+	// and the ones that were the harness rather than the product were all "an
+	// assertion that holds on SOME deals" — green here, red in CI on the first run
+	// that drew the other hand. Each block below seeds its own stable guest id, so
+	// each gets its own fixed deal no matter which LANE it lands in. Override it
+	// to re-roll every hand at once when you want to know a check is not merely
+	// memorising one deal. See core.rooms.deal_rng.
 	api = spawn("python", ["-m", "uvicorn", "app:app", "--port", String(API_PORT)],
-		{ cwd: repoRoot, stdio: "ignore", shell: true });
+		{ cwd: repoRoot, stdio: "ignore", shell: true,
+			env: { ...process.env, GAMES_DEAL_SEED: process.env.GAMES_DEAL_SEED || "screens-1" } });
 	// The build needs nothing from the backend, so it runs WHILE uvicorn boots
 	// rather than after it. Started before the await so both clocks run together.
 	const built = runBuild();
@@ -4603,12 +4613,28 @@ try {
 		await page.locator(".cm-create").click({ timeout: 15_000 }).catch(() => {});
 
 		// Draft: two picks, and the second hand is the one the bot passed across.
+		//
+		// The picks are DELIBERATE, not "whatever is first". Two of the board-panel
+		// checks below are conditional on who was drafted — a ring is only drawn by
+		// a fighter who has one, and only the Fey Folk have Characters — and a
+		// conditional nothing reached is a green tick over an untested claim. That
+		// used to be covered by the draft being random: see it eventually, over many
+		// runs. The deal is SEEDED now (see GAMES_DEAL_SEED above), which buys the
+		// determinism this gate needed and takes "eventually" away with it — an
+		// unlucky seed would park those two checks at zero for good. So reach for the
+		// fighters that exercise them instead of hoping, and ASSERT below that both
+		// were reached. Which fighter is drafted is not what this block tests; what
+		// their board panel renders is.
+		const WANTED = [/fey folk/i, /joan/i];
 		let drafted = 0;
 		for (let round = 0; round < 2; round++) {
 			await page.waitForSelector(".rt-prompt .rt-pick", { timeout: 25_000 }).catch(() => {});
-			const n = await page.locator(".rt-prompt .rt-pick").count();
+			const picks = page.locator(".rt-prompt .rt-pick");
+			const n = await picks.count();
 			if (n === 0) break;
-			await page.locator(".rt-prompt .rt-pick").first().click().catch(() => {});
+			const labels = await picks.allInnerTexts().catch(() => []);
+			const wanted = labels.findIndex((t) => WANTED.some((re) => re.test(t)));
+			await picks.nth(wanted >= 0 ? wanted : 0).click().catch(() => {});
 			drafted += 1;
 			await sleep(700);
 		}
@@ -4902,6 +4928,17 @@ try {
 			boardFails.dial.length === 0, JSON.stringify(boardFails.dial));
 		check("...and a fighter with Characters shows every one of them on its card",
 			boardFails.roster.length === 0, JSON.stringify(boardFails.roster));
+		// The two checks above are conditional, so they pass by DEFAULT on a board
+		// that cannot fail them. While the draft was random this was reported and
+		// left to the reader; with a seeded deal the draft is fixed, so a run that
+		// reaches neither would report zero forever and nobody would look. The
+		// draft above steers toward both — this is the half that fails if that ever
+		// stops working, which is the only way the steering can be trusted.
+		check("...and the two conditional board checks actually reached a board",
+			exercised.ring > 0 && exercised.roster > 0,
+			`boards opened: ${seenBoards.join(", ")} — ${exercised.ring} with a ring,`
+			+ ` ${exercised.roster} with Characters (both must be > 0; if the seeded`
+			+ ` draft stopped offering them, change GAMES_DEAL_SEED in this file)`);
 		log(`  ..   boards opened: ${seenBoards.join(", ")}`
 			+ ` (${exercised.ring} with a ring, ${exercised.roster} with Characters,`
 			+ ` ${exercised.special} drawing a special track)`);

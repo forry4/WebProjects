@@ -191,6 +191,16 @@ jobs:
         id: deployment
         continue-on-error: true
         uses: actions/deploy-pages@v4
+      # WAIT before retrying. This is the whole reason the retry is worth having:
+      # run 717 (2026-08-17) flaked at 18:34:45, retried at 18:34:46 and failed
+      # again at 18:34:48 — both attempts inside three seconds, which is the same
+      # dice re-rolled within the same second rather than a second chance. A
+      # transient Pages-backend fault needs time to pass before the retry can mean
+      # anything. 30s is cheap against a ~2-minute run and is the only thing here
+      # that distinguishes "retried" from "retried usefully".
+      - name: Let the Pages backend recover before retrying
+        if: steps.deployment.outcome == 'failure'
+        run: sleep 30
       # One automatic in-job retry self-heals a transient flake — no manual re-run needed.
       - name: Retry deploy once if it flaked
         if: steps.deployment.outcome == 'failure'

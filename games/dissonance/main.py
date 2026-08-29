@@ -1012,7 +1012,7 @@ async def _schedule_bot_turn(room_id: str) -> None:
             try:
                 move = await loop.run_in_executor(
                     _BOT_EXEC, _bot_move_sync, snapshot, seat, difficulty,
-                    random.randrange(2 ** 31))
+                    _rooms.bot_seed(position_before, seat, difficulty))
             except Exception:
                 LOG.warning("dissonance bot failed in %s", room_id, exc_info=True)
                 return
@@ -1038,16 +1038,19 @@ async def _schedule_bot_turn(room_id: str) -> None:
         await broadcast_state(room_id)
 
 
-def _new_rng() -> random.Random:
-    return random.Random()
+def _new_rng(players=(), mode: str = "") -> random.Random:
+    # The deal seam. Unseeded in production; `GAMES_DEAL_SEED` makes the hand a
+    # function of who is at the table so the render gate replays it — see
+    # core.rooms.deal_rng for why that env var exists.
+    return _rooms.deal_rng(players, mode=mode)
 
 
 def _start_new_game(room: dict, room_id: str) -> None:
     seats = [p for p in room["players"].keys()]
-    rng = _new_rng()
+    mode = _valid_mode(room.get("mode"))
+    rng = _new_rng(seats, mode)
     rng.shuffle(seats)   # who opens the auction is a real edge; randomise it
-    room["game"] = engine.new_game(seats, rng, opener=0,
-                                   mode=_valid_mode(room.get("mode")))
+    room["game"] = engine.new_game(seats, rng, opener=0, mode=mode)
     room["status"] = "playing"
 
 
