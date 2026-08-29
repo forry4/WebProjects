@@ -19,6 +19,7 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
 | [`games/rag_tag/CLAUDE.md`](games/rag_tag/CLAUDE.md) | Rag Tag (Tag Team) — the simultaneous turn resolution, the generated fighter data and where it came from, the two-pass declaration |
 | [`shared/CLAUDE.md`](shared/CLAUDE.md) | Shared frontend kits + URL routing |
 | [`books/CLAUDE.md`](books/CLAUDE.md) | The Books feature |
+| [`bggfilter/CLAUDE.md`](bggfilter/CLAUDE.md) | BGG Filter — the BoardGameGeek harvest + the frontend-only filter page |
 | [`docs/ai-research-log.md`](docs/ai-research-log.md) | **AI campaign history, dated sessions, rejected-experiment postmortems.** When something here says "see the research log," that's the blow-by-blow + "do not relitigate" detail. |
 
 ---
@@ -105,6 +106,8 @@ games/
                        #   of four, and scores the three cards each own hand is
                        #   left holding) — see its CLAUDE.md
 books/                 # Books feature (wired into the app, not a sub-app)
+bggfilter/             # BGG Filter — frontend-only; tools/ harvests BGG, the payload ships
+                       #   as webapp/public/data/bgg-filter.json (GENERATED, ~1MB, fetched not bundled)
 shared/                # theme.js (baseCss), lobby.jsx, splendor.jsx, router.js — cross-game frontend kits
                        #   + AuthScreen.jsx / HomeScreen.jsx — site-SHELL screens, here for the
                        #   dependency direction (games -> shared, never back)

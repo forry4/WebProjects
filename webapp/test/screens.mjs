@@ -41,6 +41,7 @@ const SCREENS = [
 	{ path: "/dissonance", chunk: "Dissonance", marker: ".dis" },
 	{ path: "/ragtag", chunk: "RagTag", marker: ".ragtag" },
 	{ path: "/books", chunk: "Books", marker: ".bk-app" },
+	{ path: "/bggfilter", chunk: "BggFilter", marker: ".bgf" },
 ];
 
 // Newest mtime across everything the bundle is built FROM — the same four trees

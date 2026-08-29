@@ -43,7 +43,7 @@ const GAME_EMBLEM = {
 
 export { SITE_NAME, GAMES, GAME_EMBLEM };
 
-export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles, onBooks, onLogout }) {
+export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles, onBooks, onBggFilter, onLogout }) {
 	return (
 		<>
 			<style>{css}</style>
@@ -85,6 +85,9 @@ export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles
 						</button>
 						<button type="button" className="btn btn-ghost" onClick={onBooks}>
 							📚 Books
+						</button>
+						<button type="button" className="btn btn-ghost" onClick={onBggFilter}>
+							🎲 BGG Filter
 						</button>
 					</div>
 				</div>

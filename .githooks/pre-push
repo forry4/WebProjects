@@ -25,6 +25,7 @@
 #     test_btn_has_a_variant, test_css_tokens).
 #   * smoke + screens run only when the push can change the BUNDLE — the
 #     deploy-pages.yml filter: webapp/**, games/**, shared/**, books/**,
+#     bggfilter/**,
 #     minus *.md and minus Python tests/ dirs. webapp/test/ (singular) is
 #     the gate itself and is deliberately inside the filter.
 
@@ -59,7 +60,7 @@ for f in $files; do
     need_py=1
     case "$f" in */tests/*) continue ;; esac        # Python tests never reach the bundle
     case "$f" in
-        webapp/*|games/*|shared/*|books/*) need_fe=1 ;;
+        webapp/*|games/*|shared/*|books/*|bggfilter/*) need_fe=1 ;;
     esac
 done
 
