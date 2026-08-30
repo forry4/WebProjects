@@ -299,7 +299,11 @@ def raise_cap_for(mode: str) -> int:
 #: it, every consumer (the result panel's maths line, the Hard pricing, the DD
 #: resolver) reads it with no new term, and Null still overrides a set (the
 #: bonus is a set price, and a declarer who ducks out owes none of it).
-JUMP_SET_BONUS = {"classic": 6, "skat": 0, "minor": 0, "dummy": 0,
+#: CLASSIC IS 5 SINCE 2026-08-29 (was 6). Measured indistinguishable from 6 and
+#: from 7 at n=400 -- the jump rate moves no outcome, opening or settled
+#: distribution outside the noise floor, at either shortfall rate. With the level
+#: term now 0 it is, however, the whole of a set's fixed part.
+JUMP_SET_BONUS = {"classic": 5, "skat": 0, "minor": 0, "dummy": 0,
                   "quartet": 0}
 
 #: ...and WHETHER THE DOUBLE MULTIPLIES IT. True is the shipped rule (the bonus
@@ -514,6 +518,13 @@ DOUBLE_JUMP_MULT = {"classic": 2}
 #:    on flat payouts -- so it is the number most worth re-running in `skatlab`.
 OVER_BONUS = {"classic": 1, "skat": 1, "minor": 1, "dummy": 1, "quartet": 1}
 
+#: RETIRED 2026-08-29 -- classic is 0. The flat make bonus was a SUBSIDY ON
+#: CHEAP CONTRACTS: at level 1 it was 83% of the made base, at level 10 only 5%,
+#: so it made a level-1 contract pay like a level-6 one. Measured (400 CRN-paired
+#: deals, expertst self-play k=8, dd-resolved, against a same-rule different-seed
+#: control): removing it halves what a settled level-1 pays (mean +7.4 -> +3.5,
+#: median +8 -> +4) and breaks up a payout that was 98.4% concentrated in a single
+#: bucket. Every other mode keeps 0, which they always had.
 #: THE FLAT STAKE (shipped 2026-08-11, classic only) -- +10 on every made
 #: contract's base, +10 to the defender's base when it is missed (never on
 #: Null, which overrides a set). Symmetric make/set stakes change the rider on
@@ -536,7 +547,7 @@ OVER_BONUS = {"classic": 1, "skat": 1, "minor": 1, "dummy": 1, "quartet": 1}
 #: needs its own calibrated dose, if any), dummy's is unmeasured, and skat's
 #: branch never reads these. The auction lab overrides via DIS_FLAT_MAKE /
 #: DIS_FLAT_SET when it needs a different arm.
-FLAT_MAKE_BONUS = {"classic": 4, "skat": 0, "minor": 0, "dummy": 0,
+FLAT_MAKE_BONUS = {"classic": 0, "skat": 0, "minor": 0, "dummy": 0,
                    "quartet": 0}
 #: THE LINEAR MAKE TERM -- `make = L^2 + LINEAR x L + flat`. 0 as shipped, so
 #: the made base is unchanged; it exists because the re-pricing campaign wants
@@ -547,16 +558,28 @@ FLAT_MAKE_BONUS = {"classic": 4, "skat": 0, "minor": 0, "dummy": 0,
 #: 33% -> 25%). See CLAUDE.md for why it has not shipped.
 LINEAR_MAKE_BONUS = {"classic": 0, "skat": 0, "minor": 0, "dummy": 0,
                      "quartet": 0}
+#: CLASSIC IS 0 SINCE 2026-08-29, and this is the load-bearing half of that
+#: change -- read the warning before moving it back. The level term is the only
+#: thing that priced AMBITION: bidding one level higher with the same hand gains
+#: N^2-(N-1)^2 (=+11 at level 6) and, with this at 0, costs only `short` more.
+#: At the shipped short=5 the gain/cost ratio of overreaching is 2.20, against
+#: 1.57 when this was 2. Measured consequence (same harness as FLAT_MAKE_BONUS):
+#: make rate 64.2% -> 54.2% (-10.0pp, p=0.001), settled level +0.415 (p<0.001),
+#: level-7 settlements 2.5% -> 10.8%, and at level >=5 the DECLARER -- the seat
+#: that won the auction -- nets negative 57.0% of the time with a median of -10
+#: (base +29). Raising CLASSIC_SHORT_PENALTY to 10 restores the ratio to 1.10 and
+#: reverses all of it; that arm was measured and NOT taken. Shipped at the user's
+#: explicit direction with the above on the record.
 #: What one level of the contract adds to the SET base -- 1 everywhere, which is
 #: what was implicit before this was a constant. The campaign wants 2 in classic.
-SET_LEVEL_RATE = {"classic": 2, "skat": 1, "minor": 1, "dummy": 1,
+SET_LEVEL_RATE = {"classic": 0, "skat": 1, "minor": 1, "dummy": 1,
                   "quartet": 1}
 #: ...and the level the make bonus starts applying at (1 = every made
 #: contract). Gating it off the floor was the differentiation experiment; it
 #: measured indistinguishable from ungated, because a weak hand's 1-open is a
 #: surrender, not a value bid -- no make-side price reaches it.
 FLAT_MAKE_MIN_LEVEL = 1
-FLAT_SET_PENALTY = {"classic": 2, "skat": 0, "minor": 0, "dummy": 0,
+FLAT_SET_PENALTY = {"classic": 0, "skat": 0, "minor": 0, "dummy": 0,
                     "quartet": 0}
 
 #: Denominations are RANKED by index (C < D < H < S < NT < Null), so an

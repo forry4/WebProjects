@@ -76,7 +76,7 @@ export default function DissonanceRules() {
 					{ t: "The opener must bid", d: "Passing is not allowed on the first bid, however bad the hand is." },
 					{ t: "Denominations are ranked", d: "♣ < ♦ < ♥ < ♠ < NT. A bid at the same number in a higher-ranked denomination outranks the one standing." },
 					{ t: "Overtaking", d: "Match the number in a higher-ranked denomination, or raise it by any amount in any denomination YOU have not named before. Or pass." },
-					{ t: "Jumps carry a price", d: "If the bid that WINS the auction raised the level, the defender scores +6 per level of that raise when they defeat the contract — and the opening bid counts, as a raise from level 0: open at 6, get set, and your opponent collects an extra 36. Climbing one rung at a time is the cheap way up; leaping is legal but hands the defender a fatter set." },
+					{ t: "Jumps carry a price", d: "If the bid that WINS the auction raised the level, the defender scores +5 per level of that raise when they defeat the contract — and the opening bid counts, as a raise from level 0: open at 6, get set, and your opponent collects an extra 30. Climbing one rung at a time is the cheap way up; leaping is legal but hands the defender a fatter set." },
 					{ t: "The last bid wins", d: "That player is the declarer, their denomination is trump (or no-trump), and their number is the target." },
 					{ t: "Declarer leads", d: "The declarer leads to trick 1 — which is an odd, LOSING trick. Leading first is a real disadvantage, and it's why the auction isn't a free-for-all." },
 				]} />
@@ -121,20 +121,21 @@ export default function DissonanceRules() {
 					It doubles what the contract is <i>riding on</i>, not the flat stake:
 				</p>
 				<ul>
-					<li>Declarer <b>makes</b> it: they score <b>2 × (N × N + 4)</b>, overtricks
+					<li>Declarer <b>makes</b> it: they score <b>2 × N × N</b>, overtricks
 						doubled with it.</li>
-					<li>Declarer <b>falls short</b>: the base <b>2N + 2</b> is unchanged, but
-						every point they finish below N costs <b>10 instead of 5</b>, and the
-						jump penalty for the leap that won the auction <b>doubles</b> too.</li>
+					<li>Declarer <b>falls short</b>: every point they finish below N costs
+						<b>10 instead of 5</b>, and the jump penalty for the leap that won the
+						auction <b>doubles</b> too. Both halves of a set double, so Kontra pays
+						the defender exactly what the round was already worth to them.</li>
 					<li><b>Null is untouched.</b> A declarer who wins no +2 trick still scores
 						the flat 20, Kontra or not.</li>
 				</ul>
 				<p>
 					So Kontra is a bet on <b>how badly</b> they miss, not merely that they do.
-					A level-6 contract climbed one rung at a time pays you <b>36</b> one short
-					but <b>66</b> four short. The same contract reached by <i>opening</i> at 6
+					A level-6 contract climbed one rung at a time pays you <b>20</b> one short
+					but <b>50</b> four short. The same contract reached by <i>opening</i> at 6
 					and being passed out carries a six-level jump, and Kontra doubles that too
-					— <b>96</b> one short, <b>126</b> four short.
+					— <b>70</b> one short, <b>100</b> four short.
 				</p>
 				<p className="rl-note">
 					Which is the point: a <b>sacrifice</b> — leaping to a contract you can't
@@ -146,7 +147,7 @@ export default function DissonanceRules() {
 					<p>
 						<b>What it's for.</b> When you're about to make a big contract, your
 						opponent's best move is often to <b>outbid you with nothing</b> — 6♣ over
-						your 5♠ — because being set costs them less than letting you score 29.
+						your 5♠ — because being set costs them less than letting you score 25.
 						Kontra is how you charge them properly for that. Note the escape,
 						though: a declarer who hasn't yet won a +2 trick can duck every one of
 						them and take Null instead, and Kontra doesn't touch Null. So the bet
@@ -271,8 +272,9 @@ export default function DissonanceRules() {
 					<li>Scoring keeps classic's shape at the smaller scale: make{" "}
 						<b>N²</b> plus 1 per overtrick, fall short and your opponent scores{" "}
 						<b>N plus 2 per point short</b> — cheaper per point than classic's 5,
-						because the payoffs are about a quarter the size. Classic's flat ±10
-						stake doesn't apply here — at this scale it would drown the contract.</li>
+						because the payoffs are about a quarter the size. Minor still charges
+						<b> N</b> for the level on a set, which classic no longer does; at this
+						scale the level is most of what a small contract is worth.</li>
 					<li><b>Null pays 6</b> — exactly a made level-1 contract played to its
 						ceiling, the relationship classic's Null had before the flat stake
 						re-anchored it to 20.</li>
@@ -403,23 +405,26 @@ export default function DissonanceRules() {
 				</p>
 				<ul>
 					<li>Declarer <b>makes</b> the contract (finishes with at least N trick points):
-						declarer scores <b>N × N, plus a flat 4</b>, plus <b>1 for every trick
+						declarer scores <b>N × N</b>, plus <b>1 for every trick
 						point past N</b>. The defender scores nothing.</li>
-					<li>Declarer <b>falls short</b>: the <b>defender</b> scores <b>2 × N + 2, plus 5
-						for every point the declarer finished below N</b> — plus <b>6 per level the
-						winning bid jumped</b> in the auction, if it jumped at all.</li>
+					<li>Declarer <b>falls short</b>: the <b>defender</b> scores <b>5 for every point
+						the declarer finished below N</b> — plus <b>5 per level the winning bid
+						jumped</b> in the auction, if it jumped at all. The level itself carries no
+						charge: what a set costs is how far you missed and how far you leapt.</li>
 				</ul>
 				<p>
-					Making it grows fast and breaking it grows slowly, so the higher you bid the
-					more you stand to win and the less your opponent collects for stopping you —
-					which is what makes a high contract worth reaching for rather than merely
-					risky. Bidding 3 and making it scores 13; bidding 3 and finishing on 7 scores
-					17; bidding 3 and finishing on 1 gives your opponent 18.
+					Making it grows with the square of the level while breaking it does not grow
+					with the level at all, so the higher you bid the more you stand to win and the
+					less your opponent collects for stopping you — which is what makes a high
+					contract worth reaching for rather than merely risky. Bidding 3 and making it
+					scores 9; bidding 3 and finishing on 7 scores 13; bidding 3 and finishing on 1
+					gives your opponent 10.
 				</p>
 				<p>
-					The <b>jump</b> is the expensive part, at 6 a level. Climbing to 5 one rung at
-					a time costs you 18 if you go down; leaping straight to 5 costs 42. The ladder
-					is there to be walked.
+					The <b>jump</b> is the expensive part, at 5 a level — and with the level itself
+					free, it is most of what a set costs. Climbing to 5 one rung at a time adds 5 if
+					you go down; leaping straight to 5 adds 25, before the shortfall. The ladder is
+					there to be walked.
 				</p>
 				<RulesTip>
 					<p>

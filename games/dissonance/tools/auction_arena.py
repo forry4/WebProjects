@@ -98,6 +98,27 @@ if "DIS_FLAT_MIN" in os.environ:
     E.FLAT_MAKE_MIN_LEVEL = int(os.environ["DIS_FLAT_MIN"])
 if "DIS_FLAT_SET" in os.environ:
     E.FLAT_SET_PENALTY[MODE] = int(os.environ["DIS_FLAT_SET"])
+# ...and what one LEVEL of the contract adds to the set base (`SET_LEVEL_RATE`,
+# 2 in classic as shipped). Together with DIS_FLAT_SET this makes the whole set
+# base addressable from the lab -- `DIS_SET_LEVEL=0 DIS_FLAT_SET=0` leaves only
+# the jump bonus and the per-point shortfall, which is the arm that asks what
+# the LEVEL term is buying. Terms are data all the way to the Rust search and
+# the DD resolver, so this needs no wire field and no Rust change.
+if "DIS_SET_LEVEL" in os.environ:
+    E.SET_LEVEL_RATE[MODE] = int(os.environ["DIS_SET_LEVEL"])
+# ...and the PER-POINT shortfall rate, the other half of what a set costs.
+# Classic reads its own `CLASSIC_SHORT_PENALTY` (a scalar, not a dict -- skat
+# keeps `SHORT_PENALTY`), so an arm that re-weights the set toward the MARGIN
+# rather than the LEVEL moves this and `DIS_SET_LEVEL` together.
+if "DIS_SHORT" in os.environ and MODE == "classic":
+    E.CLASSIC_SHORT_PENALTY = int(os.environ["DIS_SHORT"])
+# ...and what a DOUBLED shortfall costs per point. Separate because it is a
+# separate dict in the engine: moving `DIS_SHORT` alone would silently flatten
+# the Double (shipped doubled rate is 10 = 2 x the undoubled 5, and the Double
+# is designed so both ends scale together), so an arm that moves the undoubled
+# rate must say what the doubled one does.
+if "DIS_DBL_SHORT" in os.environ:
+    E.DOUBLED_SHORT_PENALTY[MODE] = int(os.environ["DIS_DBL_SHORT"])
 #: `<k>` or `<kA>:<kB>` -- per-tier world counts, so a tier can be measured at
 #: the budget it would actually deploy with (Expert's 3s allowance buys k=8
 #: where Hard's latency target picked 3). The resolver ignores k entirely.
@@ -629,7 +650,11 @@ print(f"\n{MODE} k={K} resolve={RESOLVE}: {TIER_A} - {TIER_B} = {mu:+.4f} +- {se
       f"payoff/round over {len(pairs)} paired deals"
       + (f" ({dropped} one-sided drops discarded)" if dropped else ""))
 print(f"[ARM] FLAT_MAKE_BONUS = {E.FLAT_MAKE_BONUS.get(MODE, 0)}, "
-      f"FLAT_SET_PENALTY = {E.FLAT_SET_PENALTY.get(MODE, 0)}"
+      f"FLAT_SET_PENALTY = {E.FLAT_SET_PENALTY.get(MODE, 0)}, "
+      f"SET_LEVEL_RATE = {E.SET_LEVEL_RATE.get(MODE, 1)}, "
+      f"JUMP_SET_BONUS = {E.JUMP_SET_BONUS.get(MODE, 0)}, "
+      f"SHORT = {E.CLASSIC_SHORT_PENALTY if MODE == 'classic' else E.SHORT_PENALTY}"
+      f"/{E.DOUBLED_SHORT_PENALTY.get(MODE, '-')}dbl"
       + (f" from level {E.FLAT_MAKE_MIN_LEVEL}" if E.FLAT_MAKE_MIN_LEVEL > 1 else ""))
 if diff_pairs:
     dmu, dse = _stat(diff_pairs)
