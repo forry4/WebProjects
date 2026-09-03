@@ -101,7 +101,7 @@ const GAME_EMBLEM = {
 	// universal close/cancel. The filled pommels and the full-length guards are what
 	// make it read as swords rather than as a multiplication sign at the size it is
 	// actually drawn.
-	ragtag: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M19 4.2 10.2 14.2 8.6 16" /><path d="M8.2 12.5 12.2 15.9" /><circle cx="7.6" cy="16.8" r="1.35" fill="currentColor" stroke="none" /><path d="M5 4.2 13.8 14.2 15.4 16" /><path d="M15.8 12.5 11.8 15.9" /><circle cx="16.4" cy="16.8" r="1.35" fill="currentColor" stroke="none" /></svg>),
+	ragtag: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinejoin="round" strokeLinecap="round"><path d="M19 4.2 10.2 14.2 8.6 16" /><path d="M8.2 12.5 12.2 15.9" /><circle cx="7.6" cy="16.8" r="1.35" fill="currentColor" stroke="none" /><path d="M5 4.2 13.8 14.2 15.4 16" /><path d="M15.8 12.5 11.8 15.9" /><circle cx="16.4" cy="16.8" r="1.35" fill="currentColor" stroke="none" /></svg>),
 };
 
 // The three side features, drawn to the same three rules. Emoji were the old labels,

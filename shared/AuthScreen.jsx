@@ -173,7 +173,7 @@ export default function AuthScreen({ siteName, siteFoot, httpBase, css, myId, on
 								<p className="auth-note">
 									{tab === "login"
 										? "Signed-in games are saved and can be resumed from any device."
-										: "A name and a password, nothing else — no email, no verification."}
+										: "A name and a password — no email, and no verification step."}
 									<span className="auth-note-sub">
 										{tab === "login"
 											? "Names are not case-sensitive."

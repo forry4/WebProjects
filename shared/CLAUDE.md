@@ -129,6 +129,30 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
   three tabs at two viewports, and caught that on the first run after the edit. Note the
   `>=1500` floor is LOWER than the base one (310 vs 344) and that is not a mistake: the
   card is 480px wide there against 420, so the helper lines wrap less.
+  **A height lock can outlive its reason — re-derive it before defending it.** The
+  panel's floor existed because the card was vertically CENTRED, so a shorter tab moved
+  the tab strip up, under the cursor that had just clicked it. Top-anchoring the card
+  (for the wordmark, below) removed that hazard entirely, at which point the lock was
+  buying nothing and costing an 84px void above AND below Guest's fact list. The gate
+  now asserts the tab strip and first field hold still, which is what the hazard
+  actually was; the floor is gone. The same applies to the error slot: it was RESERVED
+  space so the CTA could not jump, and with no lock it is just a ~50px hole the eye
+  reads as a missing element — it collapses when empty, but stays in the DOM, because an
+  aria-live region must not be added and removed.
+  **The wordmark's POSITION is part of the lockup, not just its size.** It sat at
+  269 / 98.5 / 68.5 at 1280x800 while size and centring were pixel-identical — loading
+  and auth centred their block, home top-anchored — so both boot paths moved the brand
+  mark ~200px while the user watched, and the gate passed throughout. All three screens
+  top-anchor now and share `--shell-top` / `--shell-rail` / `--shell-hero-gap`; the two
+  with no identity rail stand in for its height, which is why the rail is `height` and
+  not `min-height` (a floor is not the real height, and the wordmark sat 6px low while
+  it was one).
+  **Nothing interactive may use `--text-dim`.** At 4.36:1 it fails AA for something a
+  person is being asked to click, and it was setting `.btn-ghost` — the EXIT chip and
+  the loading screen's only escape hatch from a cold host. The tertiary tier also sits
+  in the LIT part of the page, where the warm top light raises the local ground and
+  takes the contrast down with it, so measure these against the lit ground rather than
+  against `--bg`.
   Two layout rules there are load-bearing rather than stylistic:
   - **The card is a list ROW at 1–2 columns and a POSTER at 3.** At two columns the card
     is 440–550px wide and ~190 tall (nearly 3:1), and the poster stacks everything down

@@ -17,7 +17,7 @@
    recessed groove — fill above the page, 1px dark inset at the top — reads as a
    channel with the lamp above it, like everything else here. */
 .loading-bar-wrap{width:min(280px,72vw);height:7px;margin-top:26px;border-radius:4px;overflow:hidden;
-  background:#2a251d;border:1px solid #3f382d;
+  background:#585044;border:1px solid #6d6555;
   box-shadow:inset 0 1px 2px rgba(0,0,0,.55),0 1px 0 rgba(255,240,215,.04)}
 /* Lit along its length rather than a flat slab, so the one moving element on the
    screen belongs to the same lamp as everything else. */
@@ -105,7 +105,12 @@
 
 /* A reserved slot, so an error does not shove the button down under the cursor
    that is on its way to press it. */
+/* Collapses when empty. It was RESERVED space, to stop the CTA jumping under a
+   height-locked panel; the panel is not height-locked any more, so an empty slot is
+   just a ~50px hole under the password field that the eye reads as a missing element.
+   It stays in the DOM either way -- an aria-live region must not be added and removed. */
 .auth-error-slot{min-height:20px;display:flex;align-items:center;margin:-8px 0 12px}
+.auth-error-slot:empty{min-height:0;margin:0}
 .auth-error{display:flex;align-items:center;gap:7px;width:100%;padding:5px 9px;border-radius:var(--radius);
   font-size:.84rem;line-height:1.3;color:#f08a8a;
   background:color-mix(in srgb,var(--red-gem) 12%,transparent);
@@ -303,7 +308,7 @@
 @media(min-width:1000px){
   /* Only the SPAN lives per tier; the banner's composition is one rule further down,
      shared by both tiers it can occur at. */
-  .home-game-card:last-child:nth-child(3n+1){flex-basis:100%;padding:30px 22px 30px 26px}
+  .home-game-card:last-child:nth-child(3n+1){flex-basis:100%;padding:30px 18px 30px 22px}
 }
 /* THE BANNER HAS ONE COMPOSITION, at both widths it can occur at. It first kept the
    list-row stack at two columns (everything in the left 40% of a 1400px card) and sent
@@ -363,7 +368,7 @@
   /* Same idea as the three-column tier: the newest game must not read as lighter than
      the utility strip below it. Less padding than there because a two-column card is a
      ROW at 115px, not a 208px poster, so the banner has less to live up to. */
-  .home-game-card:last-child:nth-child(2n+1){flex-basis:100%;padding:26px 18px 26px 22px}
+  .home-game-card:last-child:nth-child(2n+1){flex-basis:100%;padding:26px 16px 26px 20px}
   /* No promotion for the side tier — see .home-extras: it never has a two-column
      step, so it can never orphan one. */
 }
@@ -446,7 +451,7 @@
 .home-more{margin-top:clamp(24px,3.2vh,32px)}
 .home-more-hd{display:flex;align-items:center;gap:16px;margin-bottom:14px;font-weight:600;
   font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;letter-spacing:.2em;text-transform:uppercase;
-  color:var(--text-dim)}
+  color:var(--text-soft)}
 .home-more-hd::before,.home-more-hd::after{content:"";flex:1 1 0;height:1px;
   background:linear-gradient(90deg,transparent,#4a4335 45%,#544b3b 100%)}
 .home-more-hd::after{background:linear-gradient(90deg,#544b3b 0,#4a4335 55%,transparent)}
@@ -511,7 +516,7 @@
   .home-tagline,.auth-tagline,.loading-sub{font-size:1.26rem}
   .home-games,.home-extras{--gap:22px}
   .home-game-card{padding:21px 22px 20px 26px}
-  .home-game-card:last-child:nth-child(3n+1){padding:34px 26px 34px 30px}
+  .home-game-card:last-child:nth-child(3n+1){padding:34px 22px 34px 26px}
   .home-game-emblem{width:58px;height:58px;border-radius:14px}
   .home-game-emblem svg{width:33px;height:33px}
   .home-game-name{font-size:1.42rem}
@@ -573,7 +578,10 @@
    its own. If the taglines are ever reworded, re-walk it — this number is a property
    of the COPY, not of any device. */
 @media(max-width:377px){
-  .home-game-desc{min-height:3em}
+  /* ...and the reserve splits above and below the line rather than pooling under it,
+     or the one single-line tagline strands its pill 21px below where every neighbour
+     puts it. */
+  .home-game-desc{min-height:3em;display:flex;align-items:center}
 }
 @media(max-width:360px){
   .home-game-emblem{width:40px;height:40px;border-radius:10px}

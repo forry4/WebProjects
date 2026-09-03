@@ -583,6 +583,31 @@ try {
 		check("...and holds its accent's hue", drift.length === 0,
 			drift.map((d) => `${d.text} ${Math.round(d.accentHue)}->${Math.round(d.plateHue)}`).join(", "));
 
+		// THE BANNER'S PLATE SITS ON THE POSTERS' PLATE LINE. The banner spans a row
+		// directly under a 3-wide grid whose plates form a hard vertical, so a few px of
+		// jog lands exactly where the eye is already tracking. Its horizontal padding is
+		// the posters' and only its VERTICAL padding is its own; this is what says so,
+		// because the two are set in different rules at three different tiers and drifted
+		// by 4px at both >=1500 widths while matching at 1280.
+		for (const w of [1180, 1600, 1920]) {
+			await page.setViewportSize({ width: w, height: 1000 });
+			await page.waitForTimeout(200);
+			const edges = await page.evaluate(() => {
+				const cards = [...document.querySelectorAll(".home-game-card")];
+				const last = cards[cards.length - 1];
+				const x = (c) => Math.round(c.querySelector(".home-game-emblem").getBoundingClientRect().left
+					- c.getBoundingClientRect().left);
+				// Only meaningful while the last card really is alone on its row.
+				const alone = Math.round(last.getBoundingClientRect().width)
+					> Math.round(cards[0].getBoundingClientRect().width) + 8;
+				return { alone, poster: x(cards[0]), banner: x(last) };
+			});
+			check(`the banner's plate lands on the posters' plate line at ${w}px`,
+				!edges.alone || edges.poster === edges.banner, JSON.stringify(edges));
+		}
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.waitForTimeout(200);
+
 		const dim = m.names.filter((n) => n.contrast < 4.5);
 		check(`all ${m.names.length} game titles clear AA on the card`, dim.length === 0,
 			dim.map((d) => `${d.text} ${d.contrast}:1`).join(", "));

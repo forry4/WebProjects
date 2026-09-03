@@ -31,7 +31,7 @@
      NOTHING INTERACTIVE MAY USE --text-dim. At 4.36:1 it fails AA for the thing a
      person is being asked to click; it was setting `.btn-ghost`, which is the EXIT chip
      on the menu AND the loading screen's only escape hatch from a cold host. */
-  --text-soft:#a4967e;
+  --text-soft:#b3a58b;
   --white-gem:#ddd4be;--blue-gem:#4257ff;--green-gem:#3f9c2e;--red-gem:#dc4040;--black-gem:#15151a;--gold-gem:#f5c842;
   --radius:8px;--radius-lg:14px;
 }
