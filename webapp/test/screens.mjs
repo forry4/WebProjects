@@ -529,6 +529,36 @@ try {
 		}
 		check("no two games share an accent colour", close.length === 0, close.join(", "));
 
+		// THE WIDTHS A LADDER BREAKS AT ARE THE ONES ON ITS BOUNDARIES, and a fixed set
+		// of device viewports never visits them: this walks 559/560, 999/1000 and
+		// 1499/1500 (each tier's last and first pixel) plus the extremes, and asserts
+		// three things at every one — the page does not scroll sideways, no card escapes
+		// the content column, and the six grid cards are all the SAME width. That last
+		// one is what catches a `calc()` basis that stops dividing evenly, which is the
+		// shape every bug in this grid has had.
+		const boundaries = [280, 320, 559, 560, 640, 834, 999, 1000, 1100, 1280, 1499, 1500, 1920, 2560];
+		const bad = [];
+		for (const w of boundaries) {
+			await page.setViewportSize({ width: w, height: 900 });
+			await page.waitForTimeout(200);
+			const m = await page.evaluate(() => {
+				const cards = [...document.querySelectorAll(".home-game-card")];
+				const box = document.querySelector(".home").getBoundingClientRect();
+				const widths = [...new Set(cards.slice(0, 6).map((c) => Math.round(c.getBoundingClientRect().width)))];
+				const outside = cards.filter((c) => {
+					const r = c.getBoundingClientRect();
+					return r.left < box.left - 1 || r.right > box.right + 1;
+				}).length;
+				return { over: document.documentElement.scrollWidth > window.innerWidth, widths, outside,
+					// The seventh card is alone on its row at every column count the
+					// ladder offers, so it must span the full grid at every one of them.
+					bannerSpans: Math.round(cards[6].getBoundingClientRect().width) >= Math.round(box.width - 48) - 1 };
+			});
+			if (m.over || m.outside || m.widths.length !== 1 || !m.bannerSpans) bad.push(`${w}px ${JSON.stringify(m)}`);
+		}
+		check(`the home grid survives all ${boundaries.length} breakpoint boundaries`, bad.length === 0,
+			bad.slice(0, 3).join(" | "));
+
 		check("no page errors on the home menu", errors.length === 0, errors[0]?.slice(0, 160) || "");
 		await ctx.close();
 	}

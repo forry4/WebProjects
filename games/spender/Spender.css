@@ -273,9 +273,13 @@
     row-gap:0;padding:19px 17px 18px 22px}
   .home-game-emblem{align-self:start;margin-bottom:13px}
   .home-game-players{margin-top:13px}
-  /* Bottom-RIGHT, opposite the pill, so the poster has ink in three corners instead
-     of everything packed against one edge. */
-  .home-game-go{grid-area:players;align-self:end;justify-self:end;margin:0}
+  /* Top-right, on the emblem's line. This was written as bottom-right, opposite the
+     pill, and it never applied: `.home-game-go{grid-area:go}` further down is equal
+     specificity and LATER in the file, so it won — a media query buys no specificity.
+     The rendered result is the better one anyway (the plate and the chevron read as
+     one line across the top of the poster), so this states what actually happens
+     rather than carrying a rule that lies about it. */
+  .home-game-go{align-self:start;justify-self:end;margin-top:12px}
 }
 
 /* A CARD THAT WOULD BE ALONE ON ITS ROW SPANS THE ROW INSTEAD. Seven games never
@@ -319,6 +323,11 @@
     grid-template-areas:"emblem text go" "emblem players go";column-gap:14px;row-gap:9px;
     align-items:start}
   .home-game-card:last-child:nth-child(2n+1) .home-game-players{justify-self:start}
+  /* ...and its PLATE back to the top, or the last card in the list is the only one
+     whose emblem is vertically centred — visible as Rag Tag's plate sitting lower
+     than the six above it in a single scrolling column. */
+  .home-game-card:last-child:nth-child(2n+1) .home-game-emblem,
+  .home-game-card:last-child:nth-child(3n+1) .home-game-emblem{align-self:start}
 }
 @media(min-width:560px) and (max-width:999px){
   .home-game-card:last-child:nth-child(2n+1){flex-basis:100%}
@@ -364,12 +373,6 @@
   box-shadow:inset 0 1px 0 rgba(255,240,215,.08);
   transition:background .18s ease,border-color .18s ease}
 .home-game-emblem svg{width:27px;height:27px;display:block}
-/* Under ~360px the 48px plate costs the title a whole word of measure. */
-@media(max-width:360px){
-  .home-game-emblem{width:40px;height:40px;border-radius:10px}
-  .home-game-emblem svg{width:23px;height:23px}
-  .home-game-card{column-gap:12px;padding-left:17px;padding-right:12px}
-}
 .home-game-card:hover .home-game-emblem{background:color-mix(in srgb,var(--accent) 19%,#2c2820);
   border-color:color-mix(in srgb,var(--accent) 48%,transparent)}
 
@@ -484,6 +487,35 @@
   .home-extra-note{font-size:.95rem}
   .home-foot{font-size:.76rem}
 }
+/* ── The small-screen tier, LAST in the section so it out-orders what it overrides.
+   Written next to the rules it adjusts, it silently did nothing: a media query buys
+   no specificity, so the later base `.home-game-name` simply won and the title went
+   on wrapping. That is the second time this section has paid for it. ── */
+/* Under ~400px the plate and the tracking together cost the title a whole word of
+   measure: "Castles of Crimson" broke to two lines and made that one card 20px taller
+   than its six neighbours in a single scrolling column — which is the one place a
+   ragged card height is actually visible, since you scroll past all seven in a row. */
+@media(max-width:400px){
+  .home-game-name{font-size:.98rem;letter-spacing:.012em}
+}
+/* The tagline reserves a second line ONLY where the taglines actually use one. Below
+   ~375px most of the seven wrap and reserving the line for the one or two that do not
+   buys an even scroll for 20px a card. Above it, none of them wrap — so the same rule
+   there put a visible blank line under every tagline and added 149px to a 390px phone
+   in exchange for equalising heights that were already equal. Measured both ways
+   rather than argued by walking the width one pixel at a time: 377px is the last width
+   at which any tagline still wraps, and from 378 up every card is the same height on
+   its own. If the taglines are ever reworded, re-walk it — this number is a property
+   of the COPY, not of any device. */
+@media(max-width:377px){
+  .home-game-desc{min-height:3em}
+}
+@media(max-width:360px){
+  .home-game-emblem{width:40px;height:40px;border-radius:10px}
+  .home-game-emblem svg{width:23px;height:23px}
+  .home-game-card{column-gap:12px;padding-left:17px;padding-right:12px}
+}
+
 /* SHORT-AND-WIDE. A 1280x800 laptop is the one common size where the page did not fit:
    919px of content against an 800px viewport, and the fold landed within ~20px of the
    "Also here" rule — so the last thing on screen was a section divider and three card

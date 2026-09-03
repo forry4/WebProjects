@@ -44,6 +44,15 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro','Crimson F
 .btn-outline{background:transparent;color:var(--gold);border:1px solid var(--gold)}.btn-outline:hover{background:var(--gold);color:#0f0e0c}
 .btn-ghost{background:transparent;color:var(--text-dim);border:1px solid var(--border)}.btn-ghost:hover{border-color:var(--text-dim);color:var(--text)}
 .btn-danger{background:transparent;color:var(--red-gem);border:1px solid var(--red-gem)}.btn-danger:hover{background:var(--red-gem);color:#fff}
+/* A VISIBLE KEYBOARD RING, because .btn had none and the browser default is a 1px
+   near-black outline — on a #0f0e0c page that is nothing at all. Measured by tabbing
+   the home menu: the first stop reported `1px rgb(17,17,17)`, i.e. the site's first
+   keyboard focus was invisible, on every screen in every game.
+   `outline-offset` is what makes one ring work on all four variants: the 2px gap shows
+   the PAGE ground, so the gold ring is always sitting on dark even when the button
+   itself is a solid gold slab. */
+.btn:focus-visible{outline:2px solid var(--gold-light);outline-offset:2px}
+.btn-gold:focus-visible{outline-color:var(--gold-light)}
 .btn:disabled{opacity:.35;cursor:not-allowed}
 .btn-full{width:100%}
 .btn-sm{padding:7px 14px;font-size:.78rem}
