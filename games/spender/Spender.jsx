@@ -2790,6 +2790,13 @@ export default function SpenderApp() {
 				    paired selectors in Spender.css) rather than being a bare progress
 				    bar on black. */}
 				<div className="app loading-screen">
+					{/* Same shell as the auth screen: the block centres in the space above
+					    the strapline and the strapline takes the bottom edge. It used to
+					    be one centred column biased upward with trailing padding, which
+					    left ~40% of every viewport empty BELOW it — 308px at 1280x800,
+					    460px at 1920x1080 — on the one screen a cold visitor stares at
+					    for thirty seconds. */}
+					<div className="auth-main">
 					<h1 className="loading-logo">{SITE_NAME}</h1>
 					{HERO_RULE}
 					<p className="loading-sub">Waking the server…</p>
@@ -2811,6 +2818,7 @@ export default function SpenderApp() {
 						onClick={() => { pushPath(buildPath("offline")); enterOfflineHub(null); }}>
 						Play offline vs AI
 					</button>
+					</div>
 					<p className="loading-foot">{SITE_FOOT}</p>
 				</div>
 			</>

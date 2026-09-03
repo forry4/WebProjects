@@ -43,7 +43,7 @@ const SITE_FOOT = "Play in the browser — no download, no ads";
 // page, so a new game whose brand colour is too dark, or too near a neighbour, fails
 // the gate instead of shipping.
 const GAMES = [
-	{ id: "spender", name: "Spender", tagline: "A gem merchant's game of prestige", status: "ready", screen: "spender", accent: "#cba33c", players: "1–4 players" },
+	{ id: "spender", name: "Spender", tagline: "A gem merchant’s game of prestige", status: "ready", screen: "spender", accent: "#cba33c", players: "1–4 players" },
 	{ id: "coc", name: "Castles of Crimson", tagline: "A realm of conquest and intrigue", status: "ready", screen: "coc", accent: "#ef8290", players: "1–4 players" },
 	{ id: "wherewolf", name: "Where Wolf", tagline: "A village of secrets and lies", status: "ready", screen: "werewolf", accent: "#8ca5f2", players: "3–10 players" },
 	{ id: "duel", name: "Spender Duel", tagline: "A two-player battle of gems and crowns", status: "ready", screen: "duel", accent: "#d18ede", players: "1–2 players" },
@@ -81,7 +81,7 @@ const GAME_EMBLEM = {
 	// A keep with a raised gate.
 	coc: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M4.5 19.6V9.4h2.7V6.6h2.7v2.8h4.2V6.6h2.7v2.8h2.7v10.2Z" /><path d="M10 19.6v-4.4h4v4.4" /></svg>),
 	// The night. Grown ~15% on the old one, which read a size smaller than the rest.
-	wherewolf: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M20.1 14.9A8.4 8.4 0 1 1 10.4 4.1 6.8 6.8 0 0 0 20.1 14.9Z" /><path d="M17.3 4.4v2.6M16 5.7h2.6" /></svg>),
+	wherewolf: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M20.3 14.6A8.4 8.4 0 1 1 10.6 4.2 7.7 7.7 0 0 0 20.3 14.6Z" /><path d="M17.3 4.4v2.6M16 5.7h2.6" /></svg>),
 	// The crown the duel is played for.
 	duel: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M4.2 9 7.1 16.3h9.8L19.8 9l-4.4 3.6L12 5.5 8.6 12.6Z" /><path d="M7.4 19.2h9.2" /></svg>),
 	// A treasure chest — Dontminion IS its economy, and a chest cannot be mistaken for

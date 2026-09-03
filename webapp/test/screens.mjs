@@ -460,7 +460,12 @@ try {
 		await page.waitForSelector(".home-game-card", { timeout: 25_000 }).catch(() => {});
 
 		const m = await page.evaluate(() => {
-			const rgb = (s) => (s.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+			const cv = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+			const rgb = (s) => {
+				cv.clearRect(0, 0, 1, 1); cv.fillStyle = "#000"; cv.fillStyle = s;
+				cv.fillRect(0, 0, 1, 1);
+				return [...cv.getImageData(0, 0, 1, 1).data].slice(0, 3);
+			};
 			const lin = (c) => { c /= 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
 			const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
 			const contrast = (a, b) => {
@@ -512,6 +517,41 @@ try {
 		// The pill is a sibling of the card head precisely so this holds.
 		check("every player-count pill in a row sits on one baseline",
 			new Set(m.pillY).size === 1, JSON.stringify(m.pillY));
+
+		// THE EMBLEM PLATE MUST CARRY ITS ACCENT'S HUE. It is derived by mixing the
+		// accent into the card ground, and mixing in sRGB let the ground's warm hue win
+		// — hardest for the cool accents, where Where Wolf's plate came out
+		// chromatically NEUTRAL and read as disabled beside six tinted siblings, and
+		// Dontminion's cyan rendered green. A plate that has lost its hue is exactly as
+		// broken as a title that has, and neither shows up in any DOM check.
+		const plates = await page.evaluate(() => {
+			const cv = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+			const rgb = (s) => {
+				cv.clearRect(0, 0, 1, 1); cv.fillStyle = "#000"; cv.fillStyle = s;
+				cv.fillRect(0, 0, 1, 1);
+				return [...cv.getImageData(0, 0, 1, 1).data].slice(0, 3);
+			};
+			const hue = ([r, g, b]) => {
+				const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+				if (!d) return null;
+				let h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+				return ((h * 60) % 360 + 360) % 360;
+			};
+			return [...document.querySelectorAll(".home-game-card")].map((c) => {
+				const ink = rgb(getComputedStyle(c.querySelector(".home-game-name")).color);
+				const fill = rgb(getComputedStyle(c.querySelector(".home-game-emblem")).backgroundColor);
+				const [mx, mn] = [Math.max(...fill), Math.min(...fill)];
+				return { text: c.querySelector(".home-game-name").textContent,
+					accentHue: hue(ink), plateHue: hue(fill), plateChroma: +((mx - mn) / 255).toFixed(3) };
+			});
+		});
+		const flat = plates.filter((p) => p.plateChroma < 0.045);
+		check("every emblem plate is visibly tinted", flat.length === 0,
+			flat.map((f) => `${f.text} chroma ${f.plateChroma}`).join(", "));
+		const drift = plates.filter((p) => p.accentHue != null && p.plateHue != null
+			&& Math.min(Math.abs(p.accentHue - p.plateHue), 360 - Math.abs(p.accentHue - p.plateHue)) > 22);
+		check("...and holds its accent's hue", drift.length === 0,
+			drift.map((d) => `${d.text} ${Math.round(d.accentHue)}->${Math.round(d.plateHue)}`).join(", "));
 
 		const dim = m.names.filter((n) => n.contrast < 4.5);
 		check(`all ${m.names.length} game titles clear AA on the card`, dim.length === 0,
@@ -575,11 +615,17 @@ try {
 				ruleW: rule ? Math.round(rule.getBoundingClientRect().width) : null,
 				gap: rule ? Math.round(rule.getBoundingClientRect().top - r.bottom) : null };
 		});
-		await page.setViewportSize({ width: 1440, height: 900 });
-		await page.waitForTimeout(200);
+		// AT TWO VIEWPORTS, AND THE SECOND ONE IS THE POINT. This ran only at 1440x900
+		// and passed while the wordmark was 48px on the menu and 64px on the two screens
+		// in front of it at 1280x800 — because the short-viewport tier (height <= 880)
+		// compressed only `.home-logo`, and 900 sits just above it. A gate that tests one
+		// viewport tests one branch of a responsive ramp.
+		for (const vp of [{ width: 1440, height: 900 }, { width: 1280, height: 800 }]) {
+		await page.setViewportSize(vp);
+		await page.waitForTimeout(250);
 		const marks = { home: await lockup(page) };
 		for (const [name, seedUser, stall] of [["auth", false, false], ["loading", false, true]]) {
-			const c = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+			const c = await browser.newContext({ viewport: vp });
 			// The loading screen is only reachable when the backend MISSES the shell's
 			// 250ms fast path, which is the spun-down-dyno case it exists for.
 			if (stall) await c.route("**/games**", async (route) => {
@@ -594,9 +640,10 @@ try {
 		}
 		const off = ["px", "track", "ruleW", "gap"].filter((k) =>
 			new Set(Object.values(marks).map((m) => m?.[k])).size !== 1);
-		check("the wordmark lockup is identical on loading, auth and home",
+		check(`the wordmark lockup is identical on loading, auth and home at ${vp.width}x${vp.height}`,
 			marks.auth && marks.loading && off.length === 0,
 			off.length ? `${off.join(",")} differ: ${JSON.stringify(marks)}` : "a screen did not render");
+		}
 
 		check("no page errors on the home menu", errors.length === 0, errors[0]?.slice(0, 160) || "");
 		await ctx.close();

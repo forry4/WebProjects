@@ -90,7 +90,23 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
   title grew 50→54→67px at 1920 while a visitor watched, and `.home-rule` at `74%` drew
   at 253/241/265px because the three columns are padded 32/20/16. The ornament is
   viewport-relative now for exactly that reason. Note that the h1's own BOX width still
-  differs (it is its container's) and is deliberately not compared.
+  differs (it is its container's) and is deliberately not compared. **It runs at TWO
+  viewports, and the second one is the whole point**: at 1440x900 it passed while the
+  wordmark was 48px on the menu and 64px on the two screens in front of it at 1280x800,
+  because the short-viewport tier (height <= 880) compressed only `.home-logo` and 900
+  sits just above it. A gate that tests one viewport tests one branch of a ramp.
+  **The emblem plate is gated too** — that it is visibly tinted at all, and that it holds
+  its accent's HUE. It is derived by mixing the accent into the card ground, and mixing
+  `in srgb` let the warm ground win: Where Wolf's plate came out chromatically neutral
+  and read as disabled beside six tinted siblings, and Dontminion's cyan rendered green.
+  It mixes `in oklab` at 36% now, and 36 is the measured floor — 30% still drifted Duel
+  and Dissonance past 22 degrees.
+  **Any colour probe in that gate must go through a 1x1 canvas.** `getComputedStyle`
+  returns whatever notation the DECLARATION used, so a `color-mix(in oklab, ...)` comes
+  back as `oklab(0.36 0.002 0.04)` — and a regex that assumes `rgb()` reads those three
+  numbers as R,G,B and reports a near-black grey. That is how the plate check first
+  "failed" on plates that were perfectly correct. `canvas.fillStyle` parses any CSS
+  colour and hands back sRGB bytes.
   Two layout rules there are load-bearing rather than stylistic:
   - **The card is a list ROW at 1–2 columns and a POSTER at 3.** At two columns the card
     is 440–550px wide and ~190 tall (nearly 3:1), and the poster stacks everything down

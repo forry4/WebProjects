@@ -8,10 +8,9 @@
    tall content block and centre it; this one's block is short, so true centring put the
    wordmark in the dimmest part of the ground, and moving between the screens the title
    visibly dropped and dimmed. */
-.loading-screen{display:flex;flex-direction:column;align-items:center;justify-content:safe center;
-  min-height:100vh;gap:0;padding:32px 24px clamp(40px,18vh,190px);text-align:center;
-  position:relative;z-index:0}
-.loading-screen .home-rule{margin-top:clamp(8px,1.1vh,11px)}
+.loading-screen{display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
+  min-height:100vh;gap:0;padding:calc(env(safe-area-inset-top,0px) + 32px) 24px 32px;
+  text-align:center;position:relative;z-index:0}
 /* The track has to be LIGHTER than the ground, not darker. A near-black groove on a
    near-black page is invisible: at 10% the whole control read as a stray hairline with
    a speck on it, so there was nothing to show the 90% still to go. A raised-and-
@@ -32,8 +31,8 @@
      sideways as the digits swap. */
   font-variant-numeric:tabular-nums;min-height:1.2em}
 .loading-escape{margin-top:30px;text-transform:uppercase}
-.loading-foot{margin-top:clamp(26px,4vh,40px);font-family:'Cinzel','Cinzel Fallback',serif;
-  font-size:.65rem;letter-spacing:.15em;text-transform:uppercase;color:var(--text-dim)}
+.loading-foot{margin-top:clamp(22px,3.2vh,32px);flex:0 0 auto;font-family:'Cinzel','Cinzel Fallback',serif;
+  font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;color:var(--text-soft)}
 
 /* ─── Auth ──────────────────────────────────────────────────────────────── */
 /* The front door. It shares the home menu's GROUND, WORDMARK and ORNAMENT by
@@ -46,8 +45,8 @@
   position:relative;z-index:0}
 .auth-main{flex:1 1 auto;width:100%;display:flex;flex-direction:column;align-items:center;
   justify-content:safe center}
+.loading-screen .auth-main{gap:0}
 .auth-hero{text-align:center;margin-bottom:clamp(24px,4vh,36px)}
-.auth-hero .home-rule{margin-top:clamp(8px,1.1vh,11px)}
 .auth-tagline,.loading-sub{color:var(--text-soft);font-size:clamp(1rem,.94rem + .35vw,1.14rem);
   letter-spacing:.02em;margin-top:clamp(13px,1.9vh,18px)}
 
@@ -308,13 +307,18 @@
 .home-game-card:last-child:nth-child(2n+1),
 .home-game-card:last-child:nth-child(3n+1){
   grid-template-columns:auto minmax(0,auto) auto minmax(0,1fr);grid-template-rows:auto;
-  grid-template-areas:"emblem text players go";column-gap:18px;row-gap:0;align-items:center}
+  grid-template-areas:"emblem text players go";column-gap:28px;row-gap:0;align-items:center}
 .home-game-card:last-child:nth-child(2n+1) .home-game-emblem,
 .home-game-card:last-child:nth-child(3n+1) .home-game-emblem{align-self:center;margin-bottom:0}
+/* align-self:start puts the pill on the TITLE's line rather than in the blank gap
+   between the title and the tagline, which is where centring on the block had left it. */
 .home-game-card:last-child:nth-child(2n+1) .home-game-players,
-.home-game-card:last-child:nth-child(3n+1) .home-game-players{align-self:center;justify-self:start;margin-top:0}
+.home-game-card:last-child:nth-child(3n+1) .home-game-players{align-self:start;justify-self:start;margin-top:2px}
 .home-game-card:last-child:nth-child(2n+1) .home-game-go,
-.home-game-card:last-child:nth-child(3n+1) .home-game-go{align-self:center;justify-self:end}
+.home-game-card:last-child:nth-child(3n+1) .home-game-go{align-self:center;justify-self:end;
+  opacity:.45;transform:none}
+.home-game-card:last-child:nth-child(2n+1):hover .home-game-go,
+.home-game-card:last-child:nth-child(3n+1):hover .home-game-go{opacity:1}
 @media(max-width:559px){
   /* One column: every card is already full width, so the "alone on its row" selectors
      match all seven and must not turn the whole list into banners. */
@@ -331,10 +335,8 @@
 }
 @media(min-width:560px) and (max-width:999px){
   .home-game-card:last-child:nth-child(2n+1){flex-basis:100%}
-  /* The side tier has three entries and follows the same rule, or the 2-column
-     tablet leaves BGG Filter alone at the left with a hole beside it — the exact
-     shape the spanning rule exists to remove one section higher up. */
-  .home-extra:last-child:nth-child(2n+1){flex-basis:100%}
+  /* No promotion for the side tier — see .home-extras: it never has a two-column
+     step, so it can never orphan one. */
 }
 .home-game-emblem{grid-area:emblem}
 .home-game-text{grid-area:text}
@@ -368,13 +370,13 @@
    had slipped upward. */
 .home-game-emblem{align-self:start;justify-self:start;display:grid;place-items:center;
   width:48px;height:48px;border-radius:12px;
-  color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,#2c2820);
-  border:1px solid color-mix(in srgb,var(--accent) 32%,transparent);
+  color:var(--accent);background:color-mix(in oklab,var(--accent) 36%,#232019);
+  border:1px solid color-mix(in oklab,var(--accent) 44%,transparent);
   box-shadow:inset 0 1px 0 rgba(255,240,215,.08);
   transition:background .18s ease,border-color .18s ease}
 .home-game-emblem svg{width:27px;height:27px;display:block}
-.home-game-card:hover .home-game-emblem{background:color-mix(in srgb,var(--accent) 19%,#2c2820);
-  border-color:color-mix(in srgb,var(--accent) 48%,transparent)}
+.home-game-card:hover .home-game-emblem{background:color-mix(in oklab,var(--accent) 50%,#232019);
+  border-color:color-mix(in oklab,var(--accent) 66%,transparent)}
 
 .home-game-text{min-width:0;align-self:start;display:flex;flex-direction:column;align-items:flex-start}
 .home-game-name{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:600;
@@ -419,8 +421,7 @@
 .home-more-hd::before,.home-more-hd::after{content:"";flex:1 1 0;height:1px;
   background:linear-gradient(90deg,transparent,var(--border) 40%,var(--border) 60%,transparent)}
 .home-extras{--gap:16px;--cols:1;display:flex;flex-wrap:wrap;gap:var(--gap)}
-@media(min-width:560px){.home-extras{--cols:2;--gap:18px}}
-@media(min-width:1000px){.home-extras{--cols:3}}
+@media(min-width:700px){.home-extras{--cols:3;--gap:18px}}
 .home-extra{flex:0 1 calc((100% - (var(--cols) - 1) * var(--gap)) / var(--cols));min-width:0;
   display:flex;align-items:center;gap:13px;text-align:left;cursor:pointer;color:inherit;font-family:inherit;
   padding:13px 15px;border-radius:var(--radius-lg);
@@ -485,7 +486,10 @@
   .home-extra-icon svg{width:25px;height:25px}
   .home-extra-label{font-size:.96rem}
   .home-extra-note{font-size:.95rem}
-  .home-foot{font-size:.76rem}
+  .home-foot,.loading-foot{font-size:.76rem}
+  .loading-bar-wrap{width:min(360px,72vw);height:8px}
+  .loading-hint{font-size:.92rem}
+  .loading-escape{margin-top:36px}
   /* The identity rail steps too, or it stays at laptop size against type that
      has grown around it and reads as a stray fragment in the corner. */
   .home-ident-kind{font-size:.72rem}
@@ -533,9 +537,14 @@
 @media(min-width:1000px) and (max-height:880px){
   .home{padding-top:calc(env(safe-area-inset-top,0px) + 14px);padding-bottom:18px}
   .home-hero{margin:12px 0 18px}
-  .home-logo{font-size:3rem}
+  /* ALL THREE LOGOS, not just the menu's. Compressing only `.home-logo` here is what
+     made the wordmark 48px on the menu and 64px on the two screens in front of it at
+     1280x800 — so the entry sequence was a title that visibly SHRANK by a third
+     between the loading screen and the menu, at the most common laptop size. The
+     lockup gate did not see it because it ran at height 900, above this tier. */
+  .home-logo,.auth-logo,.loading-logo{font-size:3rem}
   .home-rule{height:16px;margin-top:7px}
-  .home-tagline{font-size:1rem;margin-top:12px}
+  .home-tagline,.auth-tagline,.loading-sub{font-size:1rem;margin-top:12px}
   .home-games,.home-extras{--gap:12px}
   .home-game-card{padding:15px 15px 14px 20px}
   .home-game-card:last-child:nth-child(3n+1){padding:13px 16px 13px 20px}
