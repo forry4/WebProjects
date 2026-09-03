@@ -431,10 +431,8 @@
 .home-extra-icon{flex:0 0 auto;display:grid;place-items:center;width:38px;height:38px;border-radius:10px;
   color:#c4b498;background:rgba(196,180,152,.07);border:1px solid rgba(196,180,152,.2)}
 .home-extra-icon svg{width:21px;height:21px;display:block}
-.home-extra-text{min-width:0;display:flex;flex-direction:column;gap:3px}
-.home-extra-label{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.84rem;font-weight:600;
+.home-extra-label{min-width:0;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.84rem;font-weight:600;
   letter-spacing:.05em;color:#d8caac;line-height:1.2}
-.home-extra-note{font-size:.86rem;font-style:italic;color:#b3a487;line-height:1.35}
 
 @media(prefers-reduced-motion:reduce){
   .home-game-card,.home-game-emblem,.home-game-go,.home-extra{transition:none}
@@ -475,7 +473,6 @@
   .home-extra-icon{width:44px;height:44px}
   .home-extra-icon svg{width:25px;height:25px}
   .home-extra-label{font-size:.96rem}
-  .home-extra-note{font-size:.95rem}
   .loading-bar-wrap{width:min(360px,72vw);height:8px}
   .loading-hint{font-size:.92rem}
   .loading-escape{margin-top:36px;min-height:54px;padding:0 32px;font-size:.96rem}

@@ -127,9 +127,9 @@ export { SITE_NAME, GAMES, GAME_EMBLEM, HERO_RULE };
 export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles, onBooks, onBggFilter, onLogout }) {
 	// Built here rather than at module scope because each entry closes over a prop.
 	const extras = [
-		{ id: "puzzles", label: "Spender Puzzles", note: "Endgames with one forced win", onClick: onPuzzles },
-		{ id: "books", label: "Books", note: "A reading list that ranks itself", onClick: onBooks },
-		{ id: "bgg", label: "BGG Filter", note: "Sift the BoardGameGeek shelf", onClick: onBggFilter },
+		{ id: "puzzles", label: "Spender Puzzles", onClick: onPuzzles },
+		{ id: "books", label: "Books", onClick: onBooks },
+		{ id: "bgg", label: "BGG Filter", onClick: onBggFilter },
 	];
 	return (
 		<>
@@ -192,15 +192,12 @@ export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles
 					</nav>
 
 					<section className="home-more" aria-labelledby="home-more-hd">
-						<h2 className="home-more-hd" id="home-more-hd"><span>Also here</span></h2>
+						<h2 className="home-more-hd" id="home-more-hd"><span>Extras</span></h2>
 						<div className="home-extras">
 							{extras.map(x => (
 								<button key={x.id} type="button" className="home-extra" onClick={x.onClick}>
 									<span className="home-extra-icon" aria-hidden="true">{EXTRA_ICON[x.id]}</span>
-									<span className="home-extra-text">
-										<span className="home-extra-label">{x.label}</span>
-										<span className="home-extra-note">{x.note}</span>
-									</span>
+									<span className="home-extra-label">{x.label}</span>
 								</button>
 							))}
 						</div>
