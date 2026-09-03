@@ -415,6 +415,32 @@ try {
 		const stored = await page.evaluate(() => localStorage.getItem("spender_user"));
 		check("...and a guest is NOT persisted to localStorage", stored === null,
 			`got ${stored}`);
+		// THE PANEL IS ONE HEIGHT ACROSS THE THREE TABS, AT EVERY TIER. The card is
+		// vertically centred, so a panel that grows or shrinks with the tab moves the
+		// TAB STRIP — the control the cursor is already travelling toward. The floor is
+		// a measured number (the tallest tab's natural height), so it has to be
+		// re-measured whenever the copy or the type ramp changes, and the >=1500 tier
+		// scales the type: 1920 is here precisely because it is the one that would
+		// silently break when someone edits a helper line.
+		for (const vp of [{ width: 1280, height: 800 }, { width: 1920, height: 1080 }]) {
+			await page.goto(`http://localhost:${PORT}/`, { waitUntil: "networkidle" });
+			await page.setViewportSize(vp);
+			await page.waitForSelector(".auth-card", { timeout: 20_000 }).catch(() => {});
+			const heights = [];
+			for (let i = 0; i < 3; i++) {
+				await page.locator(".auth-tab").nth(i).click().catch(() => {});
+				await page.waitForTimeout(220);
+				heights.push(await page.evaluate(() => {
+					const card = document.querySelector(".auth-card").getBoundingClientRect();
+					const btn = document.querySelector(".auth-panel .btn").getBoundingClientRect();
+					return { card: Math.round(card.height), cta: Math.round(btn.top - card.top) };
+				}).catch(() => null));
+			}
+			check(`the auth card and its CTA hold still across the tabs at ${vp.width}x${vp.height}`,
+				new Set(heights.map((h) => h && h.card)).size === 1
+				&& new Set(heights.map((h) => h && h.cta)).size === 1, JSON.stringify(heights));
+		}
+
 		check("no page errors during auth", errors.length === 0, errors[0]?.slice(0, 160) || "");
 		await ctx.close();
 	}
