@@ -334,14 +334,6 @@
   margin-top:0;opacity:.45;transform:none}
 .home-game-card:last-child:nth-child(2n+1):hover .home-game-go,
 .home-game-card:last-child:nth-child(3n+1):hover .home-game-go{opacity:1}
-/* ROW FORM ONLY -- in the poster form the plate sits ABOVE the title, not beside it.
-   The plate labels the whole stack, so it centres on the whole stack: cap-aligning a
-   48px plate to a 12px cap line above a 76px text block left a ~45x44px empty pocket in
-   the bottom-left of every row card, seven of them down a phone. */
-@media(max-width:999px){
-  .home-game-card{align-items:center}
-  .home-game-emblem{align-self:center}
-}
 @media(max-width:559px){
   /* One column: every card is already full width, so the "alone on its row" selectors
      match all seven and must not turn the whole list into banners. */
@@ -551,6 +543,23 @@
   .auth-note,.auth-fact{font-size:.94rem}
   /* (No panel floor at this tier either -- see .auth-panel.) */
 }
+
+/* ROW FORM ONLY -- and LAST in the section, because a media query buys no specificity
+   and the base `.home-game-emblem{align-self:start}` sits further down the file. Written
+   next to the rules it overrides it did nothing for six of the seven cards: only the
+   BANNER's rule, which is specific enough to win on its own, survived -- so at one
+   column Rag Tag's tile was the only centred one, 15px lower than its six identical
+   siblings at 390 and 31px lower at 320, where it spanned the second line of the
+   subtitle. THIS IS THE THIRD TIME THIS SECTION HAS PAID FOR THAT ORDERING.
+   In the poster form the plate sits ABOVE the title, not beside it.
+   The plate labels the whole stack, so it centres on the whole stack: cap-aligning a
+   48px plate to a 12px cap line above a 76px text block left a ~45x44px empty pocket in
+   the bottom-left of every row card, seven of them down a phone. */
+@media(max-width:999px){
+  .home-game-card{align-items:center}
+  .home-game-emblem{align-self:center}
+}
+
 /* ── The small-screen tier, LAST in the section so it out-orders what it overrides.
    Written next to the rules it adjusts, it silently did nothing: a media query buys
    no specificity, so the later base `.home-game-name` simply won and the title went

@@ -662,6 +662,34 @@ try {
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await page.waitForTimeout(200);
 
+		// AT ONE COLUMN THE SEVEN CARDS ARE IDENTICAL IN SHAPE, so nothing may single one
+		// out. The banner selector `:last-child:nth-child(3n+1)` also matches when there is
+		// only ONE column and every card is already full width, and this section has now
+		// paid for that three times: the pill's title-line offset, the half-lit chevron,
+		// and the plate's centring — the last of which ALSO needed the row-form rule moved
+		// after the base rules, since a media query buys no specificity and only the
+		// banner's own rule was specific enough to win where it sat. Geometry, measured, is
+		// the only thing that catches all three.
+		await page.setViewportSize({ width: 390, height: 900 });
+		await page.waitForTimeout(250);
+		const singleCol = await page.evaluate(() => {
+			const cards = [...document.querySelectorAll(".home-game-card")];
+			const at = (c, sel) => { const e = c.querySelector(sel); if (!e) return null;
+				return Math.round(e.getBoundingClientRect().top - c.getBoundingClientRect().top); };
+			return {
+				one: new Set(cards.map((c) => Math.round(c.getBoundingClientRect().width))).size === 1,
+				plate: cards.map((c) => at(c, ".home-game-emblem")),
+				title: cards.map((c) => at(c, ".home-game-name")),
+				chevron: cards.map((c) => +getComputedStyle(c.querySelector(".home-game-go")).opacity),
+			};
+		});
+		const uniform = (a) => new Set(a).size === 1;
+		check("at one column no card is singled out", singleCol.one
+			&& uniform(singleCol.plate) && uniform(singleCol.title) && uniform(singleCol.chevron),
+			JSON.stringify(singleCol));
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.waitForTimeout(200);
+
 		const dim = m.names.filter((n) => n.contrast < 4.5);
 		check(`all ${m.names.length} game titles clear AA on the card`, dim.length === 0,
 			dim.map((d) => `${d.text} ${d.contrast}:1`).join(", "));

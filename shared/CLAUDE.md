@@ -120,8 +120,17 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
   width and there is nothing to distinguish the last one — so the banner's half-lit
   chevron made exactly one of seven identical phone rows look selected, on the tier that
   has no hover to explain it. The `@media(max-width:559px)` counter-block has to undo
-  every banner property, and it has now been missed twice (the pill's 2px title-line
-  offset, then the chevron).
+  every banner property, and it has now been missed THREE times: the pill's title-line
+  offset, the half-lit chevron, and the plate's centring. `screens.mjs` measures it now
+  — at 390 every card's plate offset, title offset and chevron opacity must be identical,
+  which catches all three shapes at once and was verified by restoring the bug.
+  **AND A MEDIA QUERY BUYS NO SPECIFICITY.** This section has paid for that three times
+  too, so put every tier block AFTER the base rules it overrides, not next to them. The
+  plate bug needed both fixes: the row-form `@media(max-width:999px)` rule sat above the
+  base `.home-game-emblem{align-self:start}` and so did nothing for six of the seven
+  cards, while the BANNER's rule — specific enough to win wherever it sits — kept
+  applying. That is what made exactly one card differ. A rule that looks right and
+  changes nothing is the worst kind, because the diff reads as a fix.
   **`.auth-panel`'s `min-height` is a MEASURED number and rots on any copy change.** It
   is the tallest tab's natural height, so the three tabs come out one height and the
   centred card cannot move the tab strip under the cursor. Adding one helper line moved
