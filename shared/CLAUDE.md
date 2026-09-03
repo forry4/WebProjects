@@ -83,6 +83,14 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
   written ONCE and listed on all three, and `HERO_RULE`/`SITE_FOOT` are exported from
   `HomeScreen.jsx` and passed into `AuthScreen`. Do not copy a declaration to a second
   screen — a user sees two of these ten seconds apart, and a copied rule always drifts.
+  **The wordmark lockup is GATED, not just documented**: `screens.mjs` renders all three
+  (the loading screen by stalling `**/games**` past the shell's 250ms fast path) and
+  fails if the type size, tracking, ornament width or the gap under the title differ.
+  It was written because they DID: clamp(...,3.1rem)/(...,3.4rem)/(...,4rem) meant the
+  title grew 50→54→67px at 1920 while a visitor watched, and `.home-rule` at `74%` drew
+  at 253/241/265px because the three columns are padded 32/20/16. The ornament is
+  viewport-relative now for exactly that reason. Note that the h1's own BOX width still
+  differs (it is its container's) and is deliberately not compared.
   Two layout rules there are load-bearing rather than stylistic:
   - **The card is a list ROW at 1–2 columns and a POSTER at 3.** At two columns the card
     is 440–550px wide and ~190 tall (nearly 3:1), and the poster stacks everything down

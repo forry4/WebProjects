@@ -559,6 +559,45 @@ try {
 		check(`the home grid survives all ${boundaries.length} breakpoint boundaries`, bad.length === 0,
 			bad.slice(0, 3).join(" | "));
 
+		// ── ONE WORDMARK LOCKUP ACROSS THE THREE SHELL SCREENS ──────────────────
+		// A visitor sees loading, then auth, then home, inside about a minute on a
+		// spun-down dyno. The wordmark used to be clamp(...,3.1rem) / clamp(...,3.4rem)
+		// / clamp(...,4rem) on the three, so at 1920 it grew 50 -> 54 -> 67px while they
+		// watched, and the ornament under it was a PERCENTAGE of three differently
+		// padded columns, so it drew at 253 / 241 / 265px. Nothing else about the block
+		// changes between the screens, so the growth read as the page being rebuilt.
+		// The h1's own box width is its container's and is deliberately NOT compared.
+		const lockup = async (page) => page.evaluate(() => {
+			const el = document.querySelector(".home-logo,.auth-logo,.loading-logo");
+			const cs = getComputedStyle(el), r = el.getBoundingClientRect();
+			const rule = document.querySelector(".home-rule");
+			return { px: cs.fontSize, track: cs.letterSpacing,
+				ruleW: rule ? Math.round(rule.getBoundingClientRect().width) : null,
+				gap: rule ? Math.round(rule.getBoundingClientRect().top - r.bottom) : null };
+		});
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.waitForTimeout(200);
+		const marks = { home: await lockup(page) };
+		for (const [name, seedUser, stall] of [["auth", false, false], ["loading", false, true]]) {
+			const c = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+			// The loading screen is only reachable when the backend MISSES the shell's
+			// 250ms fast path, which is the spun-down-dyno case it exists for.
+			if (stall) await c.route("**/games**", async (route) => {
+				await new Promise((r) => setTimeout(r, 1200)); await route.continue();
+			});
+			const pg = await c.newPage();
+			await pg.goto(`http://localhost:${PORT}/`, { waitUntil: "load" });
+			await pg.waitForSelector(stall ? ".loading-logo" : ".auth-logo", { timeout: 25_000 }).catch(() => {});
+			await pg.waitForTimeout(400);
+			marks[name] = await lockup(pg).catch(() => null);
+			await c.close();
+		}
+		const off = ["px", "track", "ruleW", "gap"].filter((k) =>
+			new Set(Object.values(marks).map((m) => m?.[k])).size !== 1);
+		check("the wordmark lockup is identical on loading, auth and home",
+			marks.auth && marks.loading && off.length === 0,
+			off.length ? `${off.join(",")} differ: ${JSON.stringify(marks)}` : "a screen did not render");
+
 		check("no page errors on the home menu", errors.length === 0, errors[0]?.slice(0, 160) || "");
 		await ctx.close();
 	}
