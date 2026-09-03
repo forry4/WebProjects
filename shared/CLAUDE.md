@@ -107,6 +107,28 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
   numbers as R,G,B and reports a near-black grey. That is how the plate check first
   "failed" on plates that were perfectly correct. `canvas.fillStyle` parses any CSS
   colour and hands back sRGB bytes.
+  **The footer is `.shell-foot`, ONE class on all three screens, and it must stay one.**
+  It was `.home-foot`/`.auth-foot`/`.loading-foot` — five rules across four different
+  selector lists — and they drifted exactly as that arrangement guarantees: the loading
+  one missed the `<=430px` step and set 24% larger than its neighbours on a phone, the
+  auth one missed the `>=1500` step and set 11% smaller at 1920, and home let it flow at
+  the end of a centred column while the other two pinned it, so at 2560 the same
+  sentence sat 207px off the bottom against their 35. All three screens use the same
+  `main` + `shell-foot` shell now.
+  **A banner rule must be keyed on the LAYOUT the card landed in, not on its index.**
+  `:last-child:nth-child(3n+1)` also matches at ONE column, where every card is full
+  width and there is nothing to distinguish the last one — so the banner's half-lit
+  chevron made exactly one of seven identical phone rows look selected, on the tier that
+  has no hover to explain it. The `@media(max-width:559px)` counter-block has to undo
+  every banner property, and it has now been missed twice (the pill's 2px title-line
+  offset, then the chevron).
+  **`.auth-panel`'s `min-height` is a MEASURED number and rots on any copy change.** It
+  is the tallest tab's natural height, so the three tabs come out one height and the
+  centred card cannot move the tab strip under the cursor. Adding one helper line moved
+  it 272 -> 344. `screens.mjs` gates the card height AND the CTA's offset across the
+  three tabs at two viewports, and caught that on the first run after the edit. Note the
+  `>=1500` floor is LOWER than the base one (310 vs 344) and that is not a mistake: the
+  card is 480px wide there against 420, so the helper lines wrap less.
   Two layout rules there are load-bearing rather than stylistic:
   - **The card is a list ROW at 1–2 columns and a POSTER at 3.** At two columns the card
     is 440–550px wide and ~190 tall (nearly 3:1), and the poster stacks everything down
