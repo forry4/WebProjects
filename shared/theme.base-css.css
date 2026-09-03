@@ -27,7 +27,10 @@
      card and only just clears it on the page ground. That is fine for a one-word
      label and not fine for a sentence. --text-soft is the same hue two steps up —
      6.1:1 on --surface, 7.1:1 on --bg. Use it for anything that is read, not
-     glanced at. (--text-muted is 2.5:1 and is DECORATION ONLY, never text.) */
+     glanced at. (--text-muted is 2.5:1 and is DECORATION ONLY, never text.)
+     NOTHING INTERACTIVE MAY USE --text-dim. At 4.36:1 it fails AA for the thing a
+     person is being asked to click; it was setting `.btn-ghost`, which is the EXIT chip
+     on the menu AND the loading screen's only escape hatch from a cold host. */
   --text-soft:#a4967e;
   --white-gem:#ddd4be;--blue-gem:#4257ff;--green-gem:#3f9c2e;--red-gem:#dc4040;--black-gem:#15151a;--gold-gem:#f5c842;
   --radius:8px;--radius-lg:14px;
@@ -42,7 +45,7 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro','Crimson F
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 20px;border-radius:var(--radius);border:none;cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.88rem;letter-spacing:.06em;font-weight:600;transition:all .15s;white-space:nowrap}
 .btn-gold{background:var(--gold);color:#0f0e0c}.btn-gold:hover{background:var(--gold-light)}
 .btn-outline{background:transparent;color:var(--gold);border:1px solid var(--gold)}.btn-outline:hover{background:var(--gold);color:#0f0e0c}
-.btn-ghost{background:transparent;color:var(--text-dim);border:1px solid var(--border)}.btn-ghost:hover{border-color:var(--text-dim);color:var(--text)}
+.btn-ghost{background:transparent;color:var(--text-soft);border:1px solid var(--border)}.btn-ghost:hover{border-color:var(--text-dim);color:var(--text)}
 .btn-danger{background:transparent;color:var(--red-gem);border:1px solid var(--red-gem)}.btn-danger:hover{background:var(--red-gem);color:#fff}
 /* A VISIBLE KEYBOARD RING, because .btn had none and the browser default is a 1px
    near-black outline — on a #0f0e0c page that is nothing at all. Measured by tabbing

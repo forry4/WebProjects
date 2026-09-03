@@ -415,30 +415,34 @@ try {
 		const stored = await page.evaluate(() => localStorage.getItem("spender_user"));
 		check("...and a guest is NOT persisted to localStorage", stored === null,
 			`got ${stored}`);
-		// THE PANEL IS ONE HEIGHT ACROSS THE THREE TABS, AT EVERY TIER. The card is
-		// vertically centred, so a panel that grows or shrinks with the tab moves the
-		// TAB STRIP — the control the cursor is already travelling toward. The floor is
-		// a measured number (the tallest tab's natural height), so it has to be
-		// re-measured whenever the copy or the type ramp changes, and the >=1500 tier
-		// scales the type: 1920 is here precisely because it is the one that would
-		// silently break when someone edits a helper line.
+		// THE TAB STRIP HOLDS STILL ACROSS THE THREE TABS, AT EVERY TIER — and note what
+		// this replaced. It used to assert the panel was ONE HEIGHT, which was the right
+		// check while the card was vertically centred: a shorter tab moved the strip up,
+		// under the cursor that had just clicked it. The card is top-anchored now, so the
+		// strip cannot move whatever the panel does, and holding the height instead cost
+		// an 84px void above and below Guest's fact list. THE HAZARD IS THE SAME ONE; only
+		// the mechanism that guards it changed, so this asserts the thing that actually
+		// matters rather than a proxy for it. 1920 is here because the >=1500 tier scales
+		// the type, and is where an edited helper line would first show up.
 		for (const vp of [{ width: 1280, height: 800 }, { width: 1920, height: 1080 }]) {
 			await page.goto(`http://localhost:${PORT}/`, { waitUntil: "networkidle" });
 			await page.setViewportSize(vp);
 			await page.waitForSelector(".auth-card", { timeout: 20_000 }).catch(() => {});
-			const heights = [];
+			const marks = [];
 			for (let i = 0; i < 3; i++) {
 				await page.locator(".auth-tab").nth(i).click().catch(() => {});
 				await page.waitForTimeout(220);
-				heights.push(await page.evaluate(() => {
-					const card = document.querySelector(".auth-card").getBoundingClientRect();
-					const btn = document.querySelector(".auth-panel .btn").getBoundingClientRect();
-					return { card: Math.round(card.height), cta: Math.round(btn.top - card.top) };
+				marks.push(await page.evaluate(() => {
+					const t = document.querySelector(".auth-tabs").getBoundingClientRect();
+					const c = document.querySelector(".auth-card").getBoundingClientRect();
+					const f = document.querySelector(".auth-field");
+					return { tabs: Math.round(t.top), card: Math.round(c.top),
+						field: f ? Math.round(f.getBoundingClientRect().top) : null };
 				}).catch(() => null));
 			}
-			check(`the auth card and its CTA hold still across the tabs at ${vp.width}x${vp.height}`,
-				new Set(heights.map((h) => h && h.card)).size === 1
-				&& new Set(heights.map((h) => h && h.cta)).size === 1, JSON.stringify(heights));
+			const same = (k) => new Set(marks.map((m) => m && m[k])).size === 1;
+			check(`the tab strip and the first field hold still across the tabs at ${vp.width}x${vp.height}`,
+				same("tabs") && same("card") && same("field"), JSON.stringify(marks));
 		}
 
 		check("no page errors during auth", errors.length === 0, errors[0]?.slice(0, 160) || "");
@@ -637,9 +641,25 @@ try {
 			const el = document.querySelector(".home-logo,.auth-logo,.loading-logo");
 			const cs = getComputedStyle(el), r = el.getBoundingClientRect();
 			const rule = document.querySelector(".home-rule");
-			return { px: cs.fontSize, track: cs.letterSpacing,
+			// THE FOOTER IS PART OF THE LOCKUP. It is one element and one class on all
+			// three screens now, but its distance from the bottom of the page is the
+			// CONTAINER's padding, which is three different rules — so the same
+			// sentence sat 8px lower on the menu than on the two screens in front of
+			// it, and before that, 170px lower. Its size is covered by the shared
+			// class; its POSITION is not, so it is measured here.
+			const foot = document.querySelector(".shell-foot");
+			const fb = foot?.getBoundingClientRect();
+			// ...and WHERE it sits, not only how it is set. The three screens placed it at
+			// 269 / 98.5 / 68.5 at 1280x800, because loading and auth centred their block
+			// while home top-anchored — so both boot paths moved the brand mark ~200px
+			// while the user watched. Size was identical the whole time, which is why the
+			// gate passed.
+			return { top: Math.round(r.top + window.scrollY),
+				px: cs.fontSize, track: cs.letterSpacing,
 				ruleW: rule ? Math.round(rule.getBoundingClientRect().width) : null,
-				gap: rule ? Math.round(rule.getBoundingClientRect().top - r.bottom) : null };
+				gap: rule ? Math.round(rule.getBoundingClientRect().top - r.bottom) : null,
+				footPx: foot ? getComputedStyle(foot).fontSize : null,
+				footUp: fb ? Math.round(document.documentElement.scrollHeight - (fb.top + window.scrollY + fb.height)) : null };
 		});
 		// AT TWO VIEWPORTS, AND THE SECOND ONE IS THE POINT. This ran only at 1440x900
 		// and passed while the wordmark was 48px on the menu and 64px on the two screens
@@ -664,9 +684,9 @@ try {
 			marks[name] = await lockup(pg).catch(() => null);
 			await c.close();
 		}
-		const off = ["px", "track", "ruleW", "gap"].filter((k) =>
+		const off = ["top", "px", "track", "ruleW", "gap", "footPx", "footUp"].filter((k) =>
 			new Set(Object.values(marks).map((m) => m?.[k])).size !== 1);
-		check(`the wordmark lockup is identical on loading, auth and home at ${vp.width}x${vp.height}`,
+		check(`the wordmark and footer lockup is identical on loading, auth and home at ${vp.width}x${vp.height}`,
 			marks.auth && marks.loading && off.length === 0,
 			off.length ? `${off.join(",")} differ: ${JSON.stringify(marks)}` : "a screen did not render");
 		}

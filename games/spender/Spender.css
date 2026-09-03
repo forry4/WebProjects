@@ -9,7 +9,7 @@
    wordmark in the dimmest part of the ground, and moving between the screens the title
    visibly dropped and dimmed. */
 .loading-screen{display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
-  min-height:100vh;gap:0;padding:calc(env(safe-area-inset-top,0px) + 32px) 24px 32px;
+  min-height:100vh;gap:0;padding:calc(env(safe-area-inset-top,0px) + var(--shell-top)) 24px 24px;
   text-align:center;position:relative;z-index:0}
 /* The track has to be LIGHTER than the ground, not darker. A near-black groove on a
    near-black page is invisible: at 10% the whole control read as a stray hairline with
@@ -38,15 +38,21 @@
    `.home-logo,.auth-logo` and `.home::before,.auth-screen::before` rules in the
    Home section below. Two screens a user sees back to back, ten seconds apart,
    cannot be allowed to drift into two looks, and a copied rule always drifts. */
+.home,.auth-screen,.loading-screen{--shell-top:18px;--shell-rail:40px;--shell-hero-gap:clamp(18px,3.4vh,34px)}
 .auth-screen{display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
-  min-height:100vh;padding:calc(env(safe-area-inset-top,0px) + 32px) 20px 32px;
+  min-height:100vh;padding:calc(env(safe-area-inset-top,0px) + var(--shell-top)) 20px 24px;
   position:relative;z-index:0}
 /* The centring block the footer sits below, shared by all three screens. */
 .auth-main{flex:1 1 auto;width:100%;display:flex;flex-direction:column;align-items:center;
-  justify-content:safe center}
-.home-main{flex:1 1 auto;width:100%;display:flex;flex-direction:column;justify-content:safe center}
-.loading-screen .auth-main{gap:0}
-.auth-hero{text-align:center;margin-bottom:clamp(24px,4vh,36px)}
+  justify-content:flex-start}
+/* flex-start, NOT centred: centring the column puts a variable slack above the identity
+   rail, which moves the wordmark with the viewport height — and the wordmark's whole
+   job is to hold still while the three screens change under it. All three top-anchor
+   and pin the footer, so the slack lands in one place on all of them. */
+.home-main{flex:1 1 auto;width:100%;display:flex;flex-direction:column;justify-content:flex-start}
+.loading-screen .auth-main{gap:0;padding-top:calc(var(--shell-rail) + var(--shell-hero-gap))}
+.auth-hero{text-align:center;margin-top:calc(var(--shell-rail) + var(--shell-hero-gap));
+  margin-bottom:clamp(24px,4vh,36px)}
 .auth-tagline,.loading-sub{color:var(--text-soft);font-size:clamp(1rem,.94rem + .35vw,1.14rem);
   letter-spacing:.02em;margin-top:clamp(13px,1.9vh,18px)}
 
@@ -66,18 +72,19 @@
 .auth-tab:hover:not(.active){color:var(--text)}
 .auth-tab:focus-visible{outline:2px solid var(--gold);outline-offset:-3px;border-radius:6px}
 
-/* ONE HEIGHT FOR ALL THREE FORMS. Sign In has two fields, Guest has one, and without
-   a floor the card jumped ~74px taller and shorter as you moved along the tabs — and
-   because the card is vertically centred, the TAB STRIP moved too, which is the
-   control the cursor is already aiming at.
-   344px is the tallest panel's natural height, measured rather than guessed: any
-   larger and all three carry slack they do not need. It moved from 276 the moment a
-   second helper line was added, which is exactly the rot the gate below exists to
-   catch — and did, on the first run after the edit. `space-between` then spreads Guest's remainder across its joints instead
-   of piling it into one gap, and the three facts below carry most of the difference
-   as content rather than as air. If the copy in here changes, re-measure. */
+/* NO HEIGHT LOCK, DELIBERATELY, AND THIS REPLACES ONE.
+   The panel used to carry a measured `min-height` so the three tabs came out one
+   height. The reason was that the card was vertically CENTRED, so a shorter tab moved
+   the tab strip up, under the cursor that had just clicked it. The card is top-anchored
+   now (the wordmark holds ONE position across all three screens, so nothing above the
+   panel can move), which means the strip cannot move whatever the panel does -- and the
+   lock was then buying nothing while costing a great deal: Guest's content is ~200px
+   shorter than Sign In's, and distributing that much slack inside the panel put an 84px
+   void above AND below the fact list, which reads as a rendering failure rather than as
+   a layout. Each tab is its own height now. What still has to hold still is the TAB
+   STRIP, and screens.mjs asserts exactly that instead. */
 .auth-panel .btn{text-transform:uppercase;letter-spacing:.1em}
-.auth-panel{display:flex;flex-direction:column;justify-content:space-between;min-height:344px}
+.auth-panel{display:flex;flex-direction:column;justify-content:flex-start}
 .auth-panel>.btn{flex:0 0 auto}
 
 .auth-field-wrap{margin-bottom:20px}
@@ -91,7 +98,7 @@
   border:1px solid var(--border);border-radius:var(--radius);color:var(--text);
   font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:1.02rem;letter-spacing:normal;
   outline:none;transition:border-color .15s ease,box-shadow .15s ease,background .15s ease}
-.auth-field::placeholder{color:#6d6455}
+.auth-field::placeholder{color:#8d8271}
 .auth-field:focus{border-color:var(--gold);background:rgba(0,0,0,.4);
   box-shadow:0 0 0 3px color-mix(in srgb,var(--gold) 20%,transparent)}
 .auth-input-row:focus-within .auth-input-icon{color:var(--gold)}
@@ -106,10 +113,10 @@
 .auth-error-icon{flex:0 0 auto;width:16px;height:16px}
 .auth-error-icon svg{width:100%;height:100%;display:block}
 
-.auth-note{margin:0 0 20px;color:var(--text-soft);
+.auth-note{margin:auto 0 20px;color:var(--text-soft);
   font-size:.83rem;line-height:1.5;text-wrap:balance}
 .auth-note-sub{display:block;margin-top:5px;color:var(--text-dim);font-size:.78rem}
-.auth-facts{list-style:none;margin:0 0 20px;padding:0;display:flex;flex-direction:column;gap:12px}
+.auth-facts{list-style:none;margin:auto 0 20px;padding:0;display:flex;flex-direction:column;gap:12px}
 .auth-fact{display:flex;align-items:flex-start;gap:10px;color:var(--text-soft);
   font-size:.87rem;line-height:1.35;text-wrap:pretty}
 .auth-fact-icon{flex:0 0 auto;width:15px;height:15px;margin-top:2px}
@@ -146,9 +153,8 @@
    off the TOP, where no scrollbar can reach it. */
 .home{width:100%;max-width:var(--home-w,1180px);margin:0 auto;flex:1 1 auto;
   display:flex;flex-direction:column;justify-content:flex-start;position:relative;z-index:0;
-  padding:calc(env(safe-area-inset-top,0px) + 18px) 24px 24px}
-@media(max-width:600px){.home{padding-left:16px;padding-right:16px}
-  .home-main{justify-content:flex-start}}
+  padding:calc(env(safe-area-inset-top,0px) + var(--shell-top)) 24px 24px}
+@media(max-width:600px){.home{padding-left:16px;padding-right:16px}}
 
 /* The ground. Two fixed layers, painted once and never scrolled: a warm light from
    above the fold, a vignette to stop the corners reading as a flat void, and a fine
@@ -171,7 +177,7 @@
   radial-gradient(140% 108% at 50% 34%,rgba(0,0,0,0) 26%,rgba(0,0,0,.62) 100%)}
 .home::after,.auth-screen::after,.loading-screen::after{opacity:.05;background-size:180px 180px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23g)'/%3E%3C/svg%3E")}
 
-.home-header{display:flex;justify-content:flex-end;align-items:center;gap:12px;min-height:34px}
+.home-header{display:flex;justify-content:flex-end;align-items:center;gap:12px;height:var(--shell-rail)}
 .home .browser-user{gap:12px}
 /* One unboxed identity string, one chip. */
 .home-ident{display:inline-flex;align-items:baseline;gap:7px;min-width:0}
@@ -186,7 +192,7 @@
 
 /* The lockup is ONE object: the ornament binds UP to the wordmark (small gap) and the
    line below stands off it (larger gap). Equal gaps made three centred items. */
-.home-hero{text-align:center;margin:clamp(18px,3.4vh,34px) 0 clamp(22px,3.2vh,32px)}
+.home-hero{text-align:center;margin:var(--shell-hero-gap) 0 clamp(22px,3.2vh,32px)}
 /* The wordmark is foiled rather than flat gold: a light-to-dark vertical ramp reads
    as a struck metal plate under the top light above. `color` stays a real gold so a
    browser without background-clip:text shows the title instead of nothing — the
@@ -308,19 +314,27 @@
    width instead of being pushed away by a 1fr. */
 .home-game-card:last-child:nth-child(2n+1),
 .home-game-card:last-child:nth-child(3n+1){
-  grid-template-columns:auto minmax(0,auto) auto minmax(0,1fr);grid-template-rows:auto;
+  grid-template-columns:auto minmax(0,1fr) auto auto;grid-template-rows:auto;
   grid-template-areas:"emblem text players go";column-gap:28px;row-gap:0;align-items:center}
 .home-game-card:last-child:nth-child(2n+1) .home-game-emblem,
 .home-game-card:last-child:nth-child(3n+1) .home-game-emblem{align-self:center;margin-bottom:0}
 /* align-self:start puts the pill on the TITLE's line rather than in the blank gap
    between the title and the tagline, which is where centring on the block had left it. */
 .home-game-card:last-child:nth-child(2n+1) .home-game-players,
-.home-game-card:last-child:nth-child(3n+1) .home-game-players{align-self:start;justify-self:start;margin-top:2px}
+.home-game-card:last-child:nth-child(3n+1) .home-game-players{align-self:center;justify-self:end;margin-top:0}
 .home-game-card:last-child:nth-child(2n+1) .home-game-go,
 .home-game-card:last-child:nth-child(3n+1) .home-game-go{align-self:center;justify-self:end;
   margin-top:0;opacity:.45;transform:none}
 .home-game-card:last-child:nth-child(2n+1):hover .home-game-go,
 .home-game-card:last-child:nth-child(3n+1):hover .home-game-go{opacity:1}
+/* ROW FORM ONLY -- in the poster form the plate sits ABOVE the title, not beside it.
+   The plate labels the whole stack, so it centres on the whole stack: cap-aligning a
+   48px plate to a 12px cap line above a 76px text block left a ~45x44px empty pocket in
+   the bottom-left of every row card, seven of them down a phone. */
+@media(max-width:999px){
+  .home-game-card{align-items:center}
+  .home-game-emblem{align-self:center}
+}
 @media(max-width:559px){
   /* One column: every card is already full width, so the "alone on its row" selectors
      match all seven and must not turn the whole list into banners. */
@@ -339,11 +353,11 @@
   .home-game-card:last-child:nth-child(3n+1) .home-game-go{opacity:0;transform:translateX(-5px)}
   .home-game-card:last-child:nth-child(2n+1):hover .home-game-go,
   .home-game-card:last-child:nth-child(3n+1):hover .home-game-go{opacity:.9;transform:none}
-  /* ...and its PLATE back to the top, or the last card in the list is the only one
-     whose emblem is vertically centred — visible as Rag Tag's plate sitting lower
-     than the six above it in a single scrolling column. */
+  /* Its plate centres like every other row's. This block exists because the banner
+     rule also matches at ONE column, where the last card has six identical siblings and
+     must not differ from them in any way; it has been missed twice already. */
   .home-game-card:last-child:nth-child(2n+1) .home-game-emblem,
-  .home-game-card:last-child:nth-child(3n+1) .home-game-emblem{align-self:start}
+  .home-game-card:last-child:nth-child(3n+1) .home-game-emblem{align-self:center}
 }
 @media(min-width:560px) and (max-width:999px){
   /* Same idea as the three-column tier: the newest game must not read as lighter than
@@ -497,7 +511,7 @@
   .home-tagline,.auth-tagline,.loading-sub{font-size:1.26rem}
   .home-games,.home-extras{--gap:22px}
   .home-game-card{padding:21px 22px 20px 26px}
-  .home-game-card:last-child:nth-child(3n+1){padding:36px 26px 36px 30px}
+  .home-game-card:last-child:nth-child(3n+1){padding:34px 26px 34px 30px}
   .home-game-emblem{width:58px;height:58px;border-radius:14px}
   .home-game-emblem svg{width:33px;height:33px}
   .home-game-name{font-size:1.42rem}
@@ -518,7 +532,7 @@
   .home-ident-kind{font-size:.72rem}
   .home .browser-username{font-size:1.04rem}
   .home .home-header .btn-sm{height:34px;padding:0 17px;font-size:.84rem}
-  .home-header{min-height:38px}
+  .home,.auth-screen,.loading-screen{--shell-rail:44px}
   /* The front door steps with everything else, or a 420px card sits under a wordmark
      that has grown to 67px and reads as a dialog someone forgot to scale. */
   .auth-card{max-width:480px;padding:10px 32px 28px}
@@ -528,12 +542,7 @@
   .auth-field{font-size:1.12rem;padding:13px 15px 13px 44px}
   .auth-input-icon{left:14px;width:20px;height:20px}
   .auth-note,.auth-fact{font-size:.94rem}
-  /* Re-measured for this tier, and it is LOWER than the base floor rather than
-     higher, which looks like a mistake and is not: the card is 480px wide here
-     against 420, so the two helper lines wrap less and the tallest tab's natural
-     height falls even though the type grew. Measured, not reasoned — and the gate
-     below is what says so. */
-  .auth-panel{min-height:310px}
+  /* (No panel floor at this tier either -- see .auth-panel.) */
 }
 /* ── The small-screen tier, LAST in the section so it out-orders what it overrides.
    Written next to the rules it adjusts, it silently did nothing: a media query buys
@@ -543,6 +552,11 @@
    measure: "Castles of Crimson" broke to two lines and made that one card 20px taller
    than its six neighbours in a single scrolling column — which is the one place a
    ragged card height is actually visible, since you scroll past all seven in a row. */
+/* One line at 320: the wordmark snapped to two lines at the SAME cap height rather
+   than scaling to hold the 288px content column. */
+@media(max-width:360px){
+  .home-logo,.auth-logo,.loading-logo{font-size:2.05rem;letter-spacing:.035em}
+}
 @media(max-width:400px){
   .home-game-name{font-size:.98rem;letter-spacing:.012em}
   /* `pretty` only shortens the LAST line; a tagline that takes exactly two wants them
@@ -576,8 +590,8 @@
    1280x1100 window has room for the full ramp and keeps it. It is last in the section
    so it out-orders the base rules it overrides — a media query adds no specificity. */
 @media(min-width:1000px) and (max-height:880px){
-  .home{padding-top:calc(env(safe-area-inset-top,0px) + 14px);padding-bottom:18px}
-  .home-hero{margin:10px 0 15px}
+  .home,.auth-screen,.loading-screen{--shell-top:14px;--shell-hero-gap:10px}
+  .home-hero{margin-bottom:15px}
   /* ALL THREE LOGOS, not just the menu's. Compressing only `.home-logo` here is what
      made the wordmark 48px on the menu and 64px on the two screens in front of it at
      1280x800 — so the entry sequence was a title that visibly SHRANK by a third
@@ -596,7 +610,7 @@
   .home-more{margin-top:14px}
   .home-more-hd{margin-bottom:8px}
   .home-extra{padding:10px 14px}
-  .shell-foot{padding-top:16px}
+  .shell-foot{padding-top:10px}
 }
 
 /* ─── Browser ───────────────────────────────────────────────────────────── */
