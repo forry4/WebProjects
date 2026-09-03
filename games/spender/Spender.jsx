@@ -67,7 +67,7 @@ import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 // Site-shell screens, extracted out of this file (see shared/AuthScreen.jsx).
 import AuthScreen from "../../shared/AuthScreen.jsx";
-import HomeScreen, { SITE_NAME, GAMES } from "../../shared/HomeScreen.jsx";
+import HomeScreen, { SITE_NAME, SITE_FOOT, GAMES, HERO_RULE } from "../../shared/HomeScreen.jsx";
 // Offline vs-AI: the local game driver (wasm engine + IndexedDB saves) — see offline.js.
 import { OFFLINE_AI_PID, createOfflineGame, loadOfflineGame, deleteOfflineGame,
 	listOfflineGames, offlineRoomData, applyOfflineMove } from "./offline.js";
@@ -2774,22 +2774,35 @@ export default function SpenderApp() {
 		return (
 			<>
 				<style>{css}</style>
+				{/* THE THIRD SHELL SCREEN, and on a cold Render dyno the one a first-time
+				    visitor looks at for 30-50 seconds — so it wears the same wordmark,
+				    the same ornament and the same ground as the two screens behind it
+				    (`.loading-screen` is named alongside `.home`/`.auth-screen` in the
+				    paired selectors in Spender.css) rather than being a bare progress
+				    bar on black. */}
 				<div className="app loading-screen">
-					<div className="loading-logo">{SITE_NAME}</div>
-					<p className="loading-sub">Waking up the server…</p>
-					<div className="loading-bar-wrap">
+					<h1 className="loading-logo">{SITE_NAME}</h1>
+					{HERO_RULE}
+					<p className="loading-sub">Waking the server…</p>
+					{/* role=progressbar with the real value, so the wait is announced
+					    rather than being a decorative div that only sighted users can
+					    read. aria-valuetext carries the same words as the caption. */}
+					<div className="loading-bar-wrap" role="progressbar" aria-label="Connecting"
+						aria-valuemin={0} aria-valuemax={100}
+						aria-valuenow={Math.round(loadingProgress * 100)}>
 						<div className="loading-bar" style={{ width: `${Math.round(loadingProgress * 100)}%` }} />
 					</div>
 					<p className="loading-hint">
-						{loadingProgress >= 0.99 ? "Ready!" : loadingProgress < 0.05 ? "Connecting…" : `${Math.round(loadingProgress * 100)}%`}
+						{loadingProgress >= 0.99 ? "Ready" : loadingProgress < 0.05 ? "Connecting…" : `${Math.round(loadingProgress * 100)}%`}
 					</p>
 					{/* The polling loop above never gives up, so a user with NO connection needs an
 					    exit that doesn't. Navigating away from "loading" cancels the poll (the
 					    effect's cleanup); the offline hub then works entirely from local storage. */}
-					<button className="btn btn-ghost" style={{ marginTop: 18 }}
+					<button className="btn btn-ghost loading-escape"
 						onClick={() => { pushPath(buildPath("offline")); enterOfflineHub(null); }}>
-						Play offline vs AI →
+						Play offline vs AI
 					</button>
+					<p className="loading-foot">{SITE_FOOT}</p>
 				</div>
 			</>
 		);
@@ -2797,8 +2810,10 @@ export default function SpenderApp() {
 
 	// Auth screen
 	if (screen === "auth") return (
-		<AuthScreen siteName={SITE_NAME} httpBase={HTTP_BASE} css={css} myId={myId}
-			onAuthenticated={handleAuthenticated} />
+		// heroRule is the home menu's ornament, handed over rather than re-drawn:
+		// the front door and the menu behind it are one title plate.
+		<AuthScreen siteName={SITE_NAME} siteFoot={SITE_FOOT} httpBase={HTTP_BASE} css={css} myId={myId}
+			heroRule={HERO_RULE} onAuthenticated={handleAuthenticated} />
 	);
 
 	// Home menu — pick a game (Forrest Games landing)

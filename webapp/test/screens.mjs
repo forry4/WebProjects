@@ -419,6 +419,120 @@ try {
 		await ctx.close();
 	}
 
+
+	// ── Home screen: the two things about it that are MEASURED, not eyeballed ──
+	//
+	// `routeMounts`/`shellNav` prove the menu renders and its cards click through.
+	// Neither can see the two properties the landing page was actually shipping
+	// broken, because both are quantities rather than presence:
+	//
+	//  1. THE CONTENT COLUMN'S WIDTH. `.home` had `margin:0 auto` + `max-width` and
+	//     is a flex ITEM, and auto inline margins on a flex item cancel the default
+	//     `stretch` — so the box sized to fit-content (~516px) and the max-width
+	//     never applied at ANY viewport. The whole site rendered as a narrow ribbon
+	//     down the middle of a desktop for as long as that rule existed, and every
+	//     DOM-level check passed the entire time. A width is the only thing that
+	//     catches it, so this asserts the column really does use the screen.
+	//  2. THE ACCENT PALETTE. Each game's colour is its card title's ink, so it has
+	//     to clear AA on the card (the titles are ~1.2rem — under the large-text
+	//     exemption), and the seven have to be tellable APART or the colour is not
+	//     doing the identifying job it exists for. Two of them were the same gold.
+	//     Both are properties of a hex literal in shared/HomeScreen.jsx, i.e. exactly
+	//     the kind of thing a new game copies from its neighbour and gets wrong; the
+	//     failure is a title that is merely hard to read, which nothing else fails on.
+	//
+	// Colour maths runs in the PAGE, off getComputedStyle, so it measures what the
+	// browser actually painted — including any later stylesheet that overrides an
+	// accent — rather than re-reading the source constants and agreeing with itself.
+	async function homeScreen(log) {
+		const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "screens-home", name: "Harness", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		await page.goto(`http://localhost:${PORT}/`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".home-game-card", { timeout: 25_000 }).catch(() => {});
+
+		const m = await page.evaluate(() => {
+			const rgb = (s) => (s.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+			const lin = (c) => { c /= 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+			const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+			const contrast = (a, b) => {
+				const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+				return (x + 0.05) / (y + 0.05);
+			};
+			// Hue only needs to be good enough to catch "these two are the same
+			// colour", so plain HSL hue beats pulling in a colour library.
+			const hue = ([r, g, b]) => {
+				const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+				if (!d) return null;                       // grey: no hue to compare
+				let h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+				return ((h * 60) % 360 + 360) % 360;
+			};
+			const cards = [...document.querySelectorAll(".home-game-card")];
+			const names = cards.map((c) => {
+				const t = c.querySelector(".home-game-name");
+				// The card paints a gradient, so `backgroundColor` is transparent and
+				// the ink actually sits on the page ground under it. Measure against
+				// --surface, the lighter of the two stops, which is the harder case.
+				const surface = rgb(getComputedStyle(document.documentElement).getPropertyValue("--surface") ||
+					getComputedStyle(document.body).backgroundColor);
+				const ink = rgb(getComputedStyle(t).color);
+				return { text: t.textContent, ink, hue: hue(ink), contrast: +contrast(ink, surface).toFixed(2) };
+			});
+			const home = document.querySelector(".home").getBoundingClientRect();
+			const grid = document.querySelector(".home-games").getBoundingClientRect();
+			const extras = document.querySelector(".home-extras").getBoundingClientRect();
+			const pillY = cards.slice(0, 3).map((c) =>
+				Math.round(c.querySelector(".home-game-players").getBoundingClientRect().bottom));
+			return {
+				names, homeW: Math.round(home.width), innerW: window.innerWidth,
+				docW: document.documentElement.scrollWidth,
+				gridL: Math.round(grid.left), gridR: Math.round(grid.right),
+				extrasL: Math.round(extras.left), extrasR: Math.round(extras.right),
+				pillY, cards: cards.length,
+			};
+		});
+
+		check("the home column uses the screen, not fit-content", m.homeW >= m.innerW * 0.7,
+			`.home is ${m.homeW}px inside a ${m.innerW}px viewport — if this collapsed to `
+			+ `~516px, something reintroduced an auto inline margin on the flex item`);
+		check("the home page does not scroll sideways", m.docW <= m.innerW, `${m.docW} > ${m.innerW}`);
+		// Two blocks, one pair of edges: the catalogue and the side features had
+		// private max-widths that agreed at neither end.
+		check("the catalogue and the side features share both edges",
+			m.gridL === m.extrasL && m.gridR === m.extrasR,
+			`games ${m.gridL}..${m.gridR} vs extras ${m.extrasL}..${m.extrasR}`);
+		// The pill is a sibling of the card head precisely so this holds.
+		check("every player-count pill in a row sits on one baseline",
+			new Set(m.pillY).size === 1, JSON.stringify(m.pillY));
+
+		const dim = m.names.filter((n) => n.contrast < 4.5);
+		check(`all ${m.names.length} game titles clear AA on the card`, dim.length === 0,
+			dim.map((d) => `${d.text} ${d.contrast}:1`).join(", "));
+		// 22deg is the smallest gap in the shipped wheel with room to spare; the pair
+		// this was written for (two identical golds) measured 0.
+		const close = [];
+		for (let i = 0; i < m.names.length; i++) {
+			for (let j = i + 1; j < m.names.length; j++) {
+				const a = m.names[i], b = m.names[j];
+				if (a.hue == null || b.hue == null) continue;
+				const d = Math.min(Math.abs(a.hue - b.hue), 360 - Math.abs(a.hue - b.hue));
+				if (d < 22) close.push(`${a.text}/${b.text} ${d.toFixed(0)}deg`);
+			}
+		}
+		check("no two games share an accent colour", close.length === 0, close.join(", "));
+
+		check("no page errors on the home menu", errors.length === 0, errors[0]?.slice(0, 160) || "");
+		await ctx.close();
+	}
+
 	// ── Play a turn ───────────────────────────────────────────────────────────
 	// The only end-to-end exercise of the stack that actually matters: create a
 	// vs-AI game, take gems, and watch the board change. Everything above proves
@@ -5052,7 +5166,7 @@ try {
 	// `dissonanceQuartet` is lane B: it plays a whole game but arms NO worker
 	// (`client_searchable` is false for four hands), and it asserts settled
 	// geometry rather than elapsed time -- both of which are what lane B is for.
-	const laneB = [routeMounts, shellNav, authScreen, spenderPlayTurn, spenderWaitingRoom,
+	const laneB = [routeMounts, shellNav, authScreen, homeScreen, spenderPlayTurn, spenderWaitingRoom,
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, lastDifficulty,
 		dissonanceQuartet];

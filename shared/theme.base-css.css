@@ -1,9 +1,18 @@
 /* Self-hosted fonts (latin-subset variable woff2 in webapp/public/fonts/) — no external
-   dependency, preloaded in index.html. font-display:optional + the load-gate (Spender.jsx)
-   keep the real font from swapping in after first paint. */
-@font-face{font-family:'Cinzel';font-style:normal;font-weight:400 700;font-display:optional;src:url(/fonts/cinzel.latin.woff2) format('woff2')}
-@font-face{font-family:'Crimson Pro';font-style:normal;font-weight:300 400;font-display:optional;src:url(/fonts/crimsonpro.latin.woff2) format('woff2')}
-@font-face{font-family:'Crimson Pro';font-style:italic;font-weight:300 400;font-display:optional;src:url(/fonts/crimsonpro-italic.latin.woff2) format('woff2')}
+   dependency, preloaded in index.html, and held off first paint by the load gate in
+   Spender.jsx (`waitFonts`).
+   font-display is SWAP, and it must not go back to `optional`. `optional` gives a font a
+   ~100ms block period and then, if it has not arrived, uses the fallback FOR THE LIFETIME
+   OF THE PAGE — the later load still fills the cache, and `document.fonts.check()` starts
+   answering true, but nothing on screen ever changes. So the gate would dutifully wait for
+   Cinzel, report it loaded, and then render the whole site in Georgia; only the SECOND
+   visit looked right. Measured that way in the shot harness, where every context is a cold
+   cache: the wordmark came out in lowercase Georgia with `cinzel:true` in the same probe.
+   Swap is safe here precisely because of the size-adjust fallbacks below — they are metric
+   matched, so the worst case is a repaint at the same widths rather than a reflow. */
+@font-face{font-family:'Cinzel';font-style:normal;font-weight:400 700;font-display:swap;src:url(/fonts/cinzel.latin.woff2) format('woff2')}
+@font-face{font-family:'Crimson Pro';font-style:normal;font-weight:300 400;font-display:swap;src:url(/fonts/crimsonpro.latin.woff2) format('woff2')}
+@font-face{font-family:'Crimson Pro';font-style:italic;font-weight:300 400;font-display:swap;src:url(/fonts/crimsonpro-italic.latin.woff2) format('woff2')}
 /* Metric-matched fallbacks: Georgia scaled by the MEASURED width ratios (Cinzel is
    1.118x Georgia, Crimson Pro 0.879x) so an unloaded web font occupies the same space —
    no reflow even if the font is slow/absent. Referenced in the font stacks below. */
@@ -13,6 +22,13 @@
 :root{
   --bg:#0f0e0c;--surface:#1a1814;--surface2:#242018;--surface3:#2c2820;--border:#3a342a;
   --gold:#c9a84c;--gold-light:#e8c96a;--text:#e8dfc8;--text-dim:#8a7d6a;--text-muted:#5a5248;
+  /* --text-soft is the BODY-COPY dim, and it exists because --text-dim measures
+     4.40:1 on --surface and 4.79:1 on --bg: it FAILS AA for normal-size text on a
+     card and only just clears it on the page ground. That is fine for a one-word
+     label and not fine for a sentence. --text-soft is the same hue two steps up —
+     6.1:1 on --surface, 7.1:1 on --bg. Use it for anything that is read, not
+     glanced at. (--text-muted is 2.5:1 and is DECORATION ONLY, never text.) */
+  --text-soft:#a4967e;
   --white-gem:#ddd4be;--blue-gem:#4257ff;--green-gem:#3f9c2e;--red-gem:#dc4040;--black-gem:#15151a;--gold-gem:#f5c842;
   --radius:8px;--radius-lg:14px;
 }

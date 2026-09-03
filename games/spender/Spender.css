@@ -1,23 +1,125 @@
 /* ─── Loading ───────────────────────────────────────────────────────────── */
-.loading-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:16px;padding:32px;text-align:center}
-.loading-logo{font-family:'Cinzel','Cinzel Fallback',serif;font-size:3rem;font-weight:700;color:var(--gold);letter-spacing:.06em}
-.loading-sub{color:var(--text-dim);font-style:italic;font-size:.95rem}
-.loading-bar-wrap{width:220px;height:5px;background:var(--surface2);border-radius:3px;overflow:hidden;border:1px solid var(--border)}
-.loading-bar{height:100%;background:var(--gold);border-radius:3px;transition:width .4s ease}
-.loading-hint{color:var(--text-muted);font-size:.78rem;font-style:italic}
+/* The first screen a cold visitor sees, and on a spun-down Render dyno they see it for
+   30-50 seconds — long enough that "a gold bar on black" is the whole first impression
+   of the site. It wears the shell's ground, wordmark and ornament: see the paired
+   `.home,.auth-screen,.loading-screen` selectors in the Auth and Home sections. */
+/* Biased ABOVE centre by the trailing padding, so the wordmark lands where it lands on
+   the other two shell screens — in the upper third, under the lamp. Those two have a
+   tall content block and centre it; this one's block is short, so true centring put the
+   wordmark in the dimmest part of the ground, and moving between the screens the title
+   visibly dropped and dimmed. */
+.loading-screen{display:flex;flex-direction:column;align-items:center;justify-content:safe center;
+  min-height:100vh;gap:0;padding:32px 24px clamp(40px,18vh,190px);text-align:center;
+  position:relative;z-index:0}
+.loading-logo{font-size:clamp(1.9rem,6.4vw,3.1rem)}
+.loading-screen .home-rule{margin-top:clamp(8px,1.1vh,11px)}
+.loading-sub{color:var(--text-soft);font-size:clamp(.98rem,.94rem + .2vw,1.06rem);letter-spacing:.02em;
+  margin-top:clamp(13px,1.9vh,18px)}
+/* The track has to be LIGHTER than the ground, not darker. A near-black groove on a
+   near-black page is invisible: at 10% the whole control read as a stray hairline with
+   a speck on it, so there was nothing to show the 90% still to go. A raised-and-
+   recessed groove — fill above the page, 1px dark inset at the top — reads as a
+   channel with the lamp above it, like everything else here. */
+.loading-bar-wrap{width:min(280px,72vw);height:7px;margin-top:26px;border-radius:4px;overflow:hidden;
+  background:#2a251d;border:1px solid #3f382d;
+  box-shadow:inset 0 1px 2px rgba(0,0,0,.55),0 1px 0 rgba(255,240,215,.04)}
+/* Lit along its length rather than a flat slab, so the one moving element on the
+   screen belongs to the same lamp as everything else. */
+.loading-bar{height:100%;border-radius:4px;transition:width .4s ease;
+  background:linear-gradient(90deg,#a5813a,var(--gold) 45%,var(--gold-light));
+  box-shadow:0 0 10px -1px color-mix(in srgb,var(--gold) 55%,transparent)}
+@media(prefers-reduced-motion:reduce){.loading-bar{transition:none}}
+.loading-hint{margin-top:11px;font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;
+  font-size:.82rem;letter-spacing:.06em;color:var(--text-soft);
+  /* The percentage changes every tick; tabular figures stop the line breathing
+     sideways as the digits swap. */
+  font-variant-numeric:tabular-nums;min-height:1.2em}
+.loading-escape{margin-top:30px;text-transform:uppercase}
+.loading-foot{margin-top:clamp(26px,4vh,40px);font-family:'Cinzel','Cinzel Fallback',serif;
+  font-size:.65rem;letter-spacing:.15em;text-transform:uppercase;color:var(--text-dim)}
 
 /* ─── Auth ──────────────────────────────────────────────────────────────── */
-.auth-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:32px 20px;background:var(--bg)}
-.auth-logo{font-family:'Cinzel','Cinzel Fallback',serif;font-size:3rem;font-weight:700;color:var(--gold);letter-spacing:.06em;margin-bottom:4px}
-.auth-tagline{color:var(--text-dim);font-style:italic;font-size:1.05rem;margin-bottom:32px}
-.auth-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px 28px 24px;width:100%;max-width:400px}
-.auth-tabs{display:flex;border-bottom:1px solid var(--border);margin-bottom:22px}
-.auth-tab{flex:1;padding:10px 0;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--text-dim);cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.78rem;letter-spacing:.1em;text-transform:uppercase;margin-bottom:-1px;transition:all .15s}
-.auth-tab.active{color:var(--gold);border-bottom-color:var(--gold)}
+/* The front door. It shares the home menu's GROUND, WORDMARK and ORNAMENT by
+   sharing the selectors, not by copying the declarations — see the paired
+   `.home-logo,.auth-logo` and `.home::before,.auth-screen::before` rules in the
+   Home section below. Two screens a user sees back to back, ten seconds apart,
+   cannot be allowed to drift into two looks, and a copied rule always drifts. */
+.auth-screen{display:flex;flex-direction:column;align-items:center;justify-content:safe center;
+  min-height:100vh;padding:calc(env(safe-area-inset-top,0px) + 32px) 20px 32px;
+  position:relative;z-index:0}
+.auth-hero{text-align:center;margin-bottom:clamp(24px,4vh,36px)}
+.auth-logo{font-size:clamp(2.05rem,7vw,3.4rem)}
+.auth-hero .home-rule{margin-top:clamp(8px,1.1vh,11px)}
+.auth-tagline{color:var(--text-soft);font-size:clamp(.98rem,.92rem + .3vw,1.08rem);
+  letter-spacing:.02em;margin-top:clamp(13px,1.9vh,18px)}
+
+/* Same three-layer object treatment as a game card, so the form reads as a plate
+   on the table rather than a flat panel cut out of the background. */
+.auth-card{width:100%;max-width:420px;border-radius:var(--radius-lg);padding:8px 26px 24px;
+  background:linear-gradient(158deg,#272319 0%,#1d1a15 62%);
+  border:1px solid var(--border);border-top-color:#4c4437;border-bottom-color:#2a251d;
+  box-shadow:inset 0 1px 0 rgba(255,240,215,.075),inset 0 -1px 0 rgba(0,0,0,.55),
+    0 3px 10px rgba(0,0,0,.5),0 26px 50px -28px rgba(0,0,0,1)}
+
+.auth-tabs{display:flex;gap:26px;border-bottom:1px solid var(--border);margin:0 -26px 24px;padding:0 26px}
+.auth-tab{flex:0 0 auto;padding:15px 0 11px;background:transparent;border:none;border-bottom:2px solid transparent;
+  color:var(--text-soft);cursor:pointer;margin-bottom:-1px;transition:color .15s ease,border-color .15s ease;
+  font-family:'Cinzel','Cinzel Fallback',serif;font-size:.76rem;letter-spacing:.11em;text-transform:uppercase;font-weight:600}
+.auth-tab.active{color:var(--gold-light);border-bottom-color:var(--gold)}
 .auth-tab:hover:not(.active){color:var(--text)}
-.auth-field{width:100%;padding:11px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:1rem;letter-spacing:normal;outline:none;margin-bottom:10px}
-.auth-field:focus{border-color:var(--gold)}
-.auth-error{font-size:.82rem;color:var(--red-gem);padding:6px 0 2px;text-align:center}
+.auth-tab:focus-visible{outline:2px solid var(--gold);outline-offset:-3px;border-radius:6px}
+
+/* ONE HEIGHT FOR ALL THREE FORMS. Sign In has two fields, Guest has one, and without
+   a floor the card jumped ~74px taller and shorter as you moved along the tabs — and
+   because the card is vertically centred, the TAB STRIP moved too, which is the
+   control the cursor is already aiming at.
+   276px is the tallest panel's natural height, measured (Sign In / Register 275,
+   Guest 232) rather than guessed: any larger and all three carry slack they do not
+   need. `space-between` then spreads Guest's 43px remainder across its joints instead
+   of piling it into one gap, and the three facts below carry most of the difference
+   as content rather than as air. If the copy in here changes, re-measure. */
+.auth-panel .btn{text-transform:uppercase;letter-spacing:.1em}
+.auth-panel{display:flex;flex-direction:column;justify-content:space-between;min-height:276px}
+.auth-panel>.btn{flex:0 0 auto}
+
+.auth-field-wrap{margin-bottom:20px}
+.auth-label{display:block;margin-bottom:6px;font-family:'Cinzel','Cinzel Fallback',serif;
+  font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;color:var(--text-soft)}
+.auth-input-row{position:relative;display:flex;align-items:center}
+.auth-input-icon{position:absolute;left:12px;width:18px;height:18px;color:var(--text-muted);
+  pointer-events:none;transition:color .15s ease}
+.auth-input-icon svg{width:100%;height:100%;display:block}
+.auth-field{width:100%;padding:11px 13px 11px 39px;background:rgba(0,0,0,.18);
+  border:1px solid var(--border);border-radius:var(--radius);color:var(--text);
+  font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:1.02rem;letter-spacing:normal;
+  outline:none;transition:border-color .15s ease,box-shadow .15s ease,background .15s ease}
+.auth-field::placeholder{color:#6d6455}
+.auth-field:focus{border-color:var(--gold);background:rgba(0,0,0,.4);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--gold) 20%,transparent)}
+.auth-input-row:focus-within .auth-input-icon{color:var(--gold)}
+
+/* A reserved slot, so an error does not shove the button down under the cursor
+   that is on its way to press it. */
+.auth-error-slot{min-height:20px;display:flex;align-items:center;margin:-8px 0 12px}
+.auth-error{display:flex;align-items:center;gap:7px;width:100%;padding:5px 9px;border-radius:var(--radius);
+  font-size:.84rem;line-height:1.3;color:#f08a8a;
+  background:color-mix(in srgb,var(--red-gem) 12%,transparent);
+  border:1px solid color-mix(in srgb,var(--red-gem) 42%,transparent)}
+.auth-error-icon{flex:0 0 auto;width:16px;height:16px}
+.auth-error-icon svg{width:100%;height:100%;display:block}
+
+.auth-note{margin-top:24px;text-align:center;color:var(--text-soft);
+  font-size:.83rem;line-height:1.5;text-wrap:pretty}
+.auth-facts{list-style:none;margin:4px 0 24px;padding:0;display:flex;flex-direction:column;gap:11px}
+.auth-fact{display:flex;align-items:flex-start;gap:10px;color:var(--text-soft);
+  font-size:.87rem;line-height:1.35;text-wrap:pretty}
+.auth-fact-icon{flex:0 0 auto;width:15px;height:15px;margin-top:2px}
+.auth-fact-icon svg{width:100%;height:100%;display:block}
+.auth-fact.yes .auth-fact-icon{color:#7fb069}
+.auth-fact.no .auth-fact-icon{color:var(--text-muted)}
+.auth-foot{margin-top:clamp(22px,3.2vh,32px)}
+
+/* Kept: the Spender lobby's guest row still uses it. */
 .guest-name-row{display:flex;gap:8px;align-items:center;margin-bottom:10px}
 .guest-name-row .auth-field{margin-bottom:0;flex:1}
 
@@ -26,28 +128,339 @@
 .conn-dot.connected{background:var(--green-gem)}.conn-dot.disconnected{background:var(--red-gem)}
 
 /* ─── Home (Forrest Games menu) ─────────────────────────────────────────── */
-.home{max-width:900px;margin:0 auto;padding:calc(env(safe-area-inset-top,0px) + 24px) 20px 48px;min-height:100vh}
-.home-header{display:flex;justify-content:flex-end;align-items:center;min-height:34px}
-.home-hero{text-align:center;margin:40px 0 48px}
-.home-logo{font-family:'Cinzel','Cinzel Fallback',serif;font-size:clamp(2.4rem,8vw,3.6rem);font-weight:700;color:var(--gold);letter-spacing:.06em;line-height:1.1}
-.home-tagline{color:var(--text-dim);font-style:italic;font-size:1.1rem;margin-top:10px}
-.home-games{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:18px}
-/* Each card carries its game's --accent (set inline from GAMES): tints the emblem,
-   title, left spine, and hover glow so the four games read as distinct. */
-.home-game-card{--accent:var(--gold);position:relative;display:flex;gap:16px;align-items:flex-start;text-align:left;font-family:inherit;color:inherit;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:22px 22px 22px 21px;cursor:pointer;overflow:hidden;transition:border-color .18s,transform .18s,background .18s,box-shadow .18s}
-.home-game-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent);opacity:.5;transition:opacity .18s}
-.home-game-card:hover{border-color:var(--accent);transform:translateY(-3px);background:var(--surface2);box-shadow:0 12px 28px -14px color-mix(in srgb,var(--accent) 70%,transparent)}
-.home-game-card:hover::before{opacity:1}
-.home-game-card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.home-game-card.soon{opacity:.9}
-.home-game-emblem{flex:0 0 auto;width:42px;height:42px;margin-top:2px;color:var(--accent);opacity:.92}
-.home-game-emblem svg{width:100%;height:100%;display:block}
-.home-game-text{min-width:0;flex:1}
-.home-game-name{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.32rem;font-weight:600;color:var(--accent);letter-spacing:.03em;margin-bottom:7px;line-height:1.15}
-.home-game-desc{color:var(--text-dim);font-size:.95rem;line-height:1.45;font-style:italic;margin-bottom:13px}
-.home-game-players{display:inline-flex;align-items:center;gap:6px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.6rem;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dim);border:1px solid var(--border);padding:3px 9px;border-radius:10px;background:var(--surface2)}
-.home-game-players::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.85;flex:0 0 auto}
+/* WIDTH IS THE ONE THAT MATTERED. `.home` had `margin:0 auto` and `max-width:900px`
+   and IS A FLEX ITEM (`.app` is a column flex container). Auto inline margins on a
+   flex item switch off the default `stretch`, so the box sized to fit-content —
+   about 516px — and the max-width never applied at any viewport. The site rendered
+   as a narrow ribbon down the middle of every desktop, with the game titles wrapping
+   in ~240px columns while 1000px of screen sat empty on either side. `width:100%`
+   is what restores the stretch the auto margins took away; the margins then only
+   centre what is left over above --home-w. `.offline-hub` two sections down already
+   carried the `width:100%` and is why IT looked right.
 
+   `justify-content:safe center` is the vertical composition. `.app` is 100vh and this
+   fills it, so the catalogue on a 1080p screen leaves a few hundred px spare. Parking
+   the footer on the bottom edge with `margin-top:auto` spent all of it in ONE band
+   under the last row, which reads as content that failed to load; splitting it above
+   the hero and above the footer produced two unequal bands, which reads as a mistake.
+   Centring spends it as two EQUAL bands, which reads as a title page. `safe` is
+   load-bearing: plain `center` on a page taller than the viewport pushes the overflow
+   off the TOP, where no scrollbar can reach it. */
+.home{width:100%;max-width:var(--home-w,1180px);margin:0 auto;flex:1 1 auto;
+  display:flex;flex-direction:column;justify-content:safe center;position:relative;z-index:0;
+  padding:calc(env(safe-area-inset-top,0px) + 18px) 24px 24px}
+@media(max-width:600px){.home{padding-left:16px;padding-right:16px;justify-content:flex-start}}
+
+/* The ground. Two fixed layers, painted once and never scrolled: a warm light from
+   above the fold, a vignette to stop the corners reading as a flat void, and a fine
+   grain so the large dark areas have a surface instead of showing 8-bit gradient
+   banding. The grain is a tiled feTurbulence data URI — no request, and it
+   rasterises once. Both are `pointer-events:none` and sit at z-index -1 inside the
+   stacking context `.home`/`.auth-screen` opens, so nothing here can intercept a
+   click. The auth screen shares these selectors rather than copying the values: it
+   is the same room, ten seconds earlier.
+   The top light is a WIDE ellipse in px rather than a percentage radial, because the
+   percentage version resolved to a short, wide gradient whose falloff finished inside
+   the viewport, leaving a visible rectangular-ish edge behind the wordmark that read
+   as a stray panel background. */
+.home::before,.home::after,.auth-screen::before,.auth-screen::after,
+.loading-screen::before,.loading-screen::after{
+  content:"";position:fixed;inset:0;z-index:-1;pointer-events:none}
+.home::before,.auth-screen::before,.loading-screen::before{background:
+  radial-gradient(1500px 780px at 50% -8%,rgba(214,178,88,.15),rgba(214,178,88,.045) 45%,rgba(214,178,88,0) 72%),
+  radial-gradient(1100px 620px at 50% 112%,rgba(201,168,76,.05),rgba(201,168,76,0) 70%),
+  radial-gradient(140% 108% at 50% 34%,rgba(0,0,0,0) 26%,rgba(0,0,0,.62) 100%)}
+.home::after,.auth-screen::after,.loading-screen::after{opacity:.05;background-size:180px 180px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23g)'/%3E%3C/svg%3E")}
+
+.home-header{display:flex;justify-content:flex-end;align-items:center;gap:12px;min-height:34px}
+.home .browser-user{gap:12px}
+/* One unboxed identity string, one chip. */
+.home-ident{display:inline-flex;align-items:baseline;gap:7px;min-width:0}
+.home-ident-kind{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.64rem;letter-spacing:.15em;
+  text-transform:uppercase;color:var(--text-soft)}
+.home-ident-kind::after{content:"·";margin-left:7px;color:var(--text-dim)}
+.home .browser-username{font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;
+  font-size:.94rem;color:var(--text-soft);letter-spacing:.01em;text-transform:none}
+.home .home-header .btn-sm{height:30px;padding:0 14px;text-transform:uppercase;
+  border-color:#332e26;color:var(--text-dim)}
+.home .home-header .btn-sm:hover{border-color:var(--text-dim);color:var(--text)}
+
+/* The lockup is ONE object: the ornament binds UP to the wordmark (small gap) and the
+   line below stands off it (larger gap). Equal gaps made three centred items. */
+.home-hero{text-align:center;margin:clamp(18px,3.4vh,34px) 0 clamp(22px,3.2vh,32px)}
+/* The wordmark is foiled rather than flat gold: a light-to-dark vertical ramp reads
+   as a struck metal plate under the top light above. `color` stays a real gold so a
+   browser without background-clip:text shows the title instead of nothing — the
+   @supports block is the only place transparency is introduced.
+   Cinzel is an inscriptional capital and wants air; .075em tracking is undone on the
+   right by the negative margin so the CENTRED line is optically centred rather than
+   sitting one letter-space to the left of true centre. */
+.home-logo,.auth-logo,.loading-logo{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;
+  font-size:clamp(2.05rem,7.4vw,4rem);line-height:1.06;letter-spacing:.075em;margin-right:-.075em;
+  color:var(--gold);text-wrap:balance}
+@supports ((-webkit-background-clip:text) or (background-clip:text)){
+  .home-logo,.auth-logo,.loading-logo{background-image:linear-gradient(177deg,#f6e3a6 2%,#e0c069 34%,#c9a84c 58%,#9d7c37 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;
+    /* No drop-shadow glow: a filter on background-clipped text paints a soft copy of
+       the GLYPHS behind a page that already has a lamp above it, which is where the
+       "lit panel behind the title" reading came from. The ground does the lighting. */
+    filter:drop-shadow(0 1px 0 rgba(0,0,0,.5))}
+}
+.home-rule{display:block;width:min(340px,74%);height:19px;margin:clamp(8px,1.1vh,11px) auto 0;
+  color:var(--gold);opacity:.9}
+/* Not italic. Italic is the flavour voice on this page (the taglines under each
+   title); when the instruction line wore it too, it stopped signalling anything. */
+.home-tagline{color:var(--text-soft);font-size:clamp(1rem,.94rem + .35vw,1.14rem);
+  letter-spacing:.02em;margin-top:clamp(13px,1.9vh,18px)}
+
+/* THE GRID IS FLEX, NOT GRID, FOR ONE REASON: a partial last row. It is capped at
+   THREE columns at every width above 1000px, and that cap is deliberate. Seven cards
+   over four columns leave a 4+3 split whose second row is centred, so not one card
+   edge in row 2 lines up with a card edge in row 1 — every one of them straddles a
+   row-1 gutter. Over three columns the split is 3+3+1.
+   THE LAST ROW IS LEFT-ALIGNED AT EVERY TIER, and that is one rule rather than a
+   rule per tier. Centring a partial row only lands on the grid when the number left
+   over and the column count happen to have the same parity — true for one card in
+   three columns, false for one card in two, false for three cards in four — so a
+   centred orphan was on-grid at the laptop width and straddling a gutter at the
+   tablet width, i.e. a different idea at each size. Left-aligned is on-grid at every
+   width and at every future game count. The empty cell at the end of the run is what
+   a card grid looks like. */
+.home-games{--gap:16px;--cols:1;display:flex;flex-wrap:wrap;justify-content:flex-start;
+  align-items:stretch;gap:var(--gap)}
+@media(min-width:560px){.home-games{--cols:2;--gap:18px}}
+@media(min-width:1000px){.home-games{--cols:3}}
+
+/* Each card carries its game's --accent (set inline from GAMES): it tints the emblem
+   plate, the title, the left spine, the hover wash and the hover glow, so seven cards
+   in one grid still read as seven different games.
+
+   THE CARD IS TWO OBJECTS AT TWO SIZES, FROM ONE DOM. In a single column it is a LIST
+   ROW: emblem rail on the left, title / tagline / pill in ONE text column beside it,
+   the rail centred on the whole block. From two columns up it is a POSTER: emblem on
+   its own line, then title, tagline and pill down the card's own left edge. The row
+   form keeps a phone short; the poster form is what stops a 400px-wide grid cell from
+   being a 125px-tall bar with its text ending at 60% of the width. `grid-template-
+   areas` is what lets both come out of the same four children.
+
+   ELEVATION ON A NEAR-BLACK GROUND IS NOT A DROP SHADOW. A black shadow on a #0f0e0c
+   page is invisible — the card had one and the ground above and below it measured
+   identical. What actually reads is the EDGE: a 1px warm highlight along the top where
+   the lamp catches it, a dark 1px along the bottom where it does not, a fill lighter
+   than the ground it sits on, and only then a shadow to seat it. */
+.home-game-card{--accent:var(--gold);flex:0 1 calc((100% - (var(--cols) - 1) * var(--gap)) / var(--cols));
+  position:relative;isolation:isolate;min-width:0;
+  display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-rows:auto auto;
+  grid-template-areas:"emblem text go" "emblem players go";
+  column-gap:14px;row-gap:9px;
+  text-align:left;font-family:inherit;color:inherit;cursor:pointer;
+  padding:16px 14px 16px 20px;border-radius:var(--radius-lg);overflow:hidden;
+  background:linear-gradient(158deg,#272319 0%,#1d1a15 62%);
+  border:1px solid var(--border);border-top-color:#4c4437;border-bottom-color:#2a251d;
+  box-shadow:inset 0 1px 0 rgba(255,240,215,.075),inset 0 -1px 0 rgba(0,0,0,.55),
+    0 2px 5px rgba(0,0,0,.5),0 16px 34px -20px rgba(0,0,0,1);
+  transition:border-color .18s ease,transform .18s ease,box-shadow .18s ease}
+/* THE POSTER STARTS AT THREE COLUMNS, not at two. At the 2-column tier the card is
+   440-550px wide and ~190 tall — nearly 3:1 — and the poster anatomy stacks all of its
+   content down the left, so 40% of every card was empty black. That aspect ratio is
+   exactly what the ROW anatomy is for, and the row form already exists for the phone.
+   So: one column and two columns are a LIST, three columns is a GRID OF POSTERS. */
+@media(min-width:1000px){
+  .home-game-card{grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto 1fr auto;
+    grid-template-areas:"emblem go" "text text" "players players";
+    row-gap:0;padding:19px 17px 18px 22px}
+  .home-game-emblem{align-self:start;margin-bottom:13px}
+  .home-game-players{margin-top:13px}
+  /* Bottom-RIGHT, opposite the pill, so the poster has ink in three corners instead
+     of everything packed against one edge. */
+  .home-game-go{grid-area:players;align-self:end;justify-self:end;margin:0}
+}
+
+/* A CARD THAT WOULD BE ALONE ON ITS ROW SPANS THE ROW INSTEAD. Seven games never
+   divide evenly, and the leftover was the largest empty area on the page — a full
+   card-shaped hole beside the last card, directly above the section rule, so the eye
+   read the page as ending twice. Left-aligning it (the alternative) is on-grid but
+   still leaves the hole.
+   The two selectors say "last child, and its index leaves nothing beside it": with
+   three columns that is index 3n+1, with two it is 2n+1. So the rule is a property of
+   the COUNT, not of the number seven — an eighth game turns it off by itself, and a
+   tenth turns it back on. A spanning card reverts to the ROW anatomy, because at
+   1132px wide the poster stack would be the empty-bar problem again at four times the
+   size. */
+@media(min-width:1000px){
+  .home-game-card:last-child:nth-child(3n+1){flex-basis:100%;
+    grid-template-columns:auto minmax(0,1fr) auto auto;grid-template-rows:auto;
+    grid-template-areas:"emblem text players go";column-gap:18px;row-gap:0;
+    align-items:center;padding:16px 18px 16px 22px}
+  .home-game-card:last-child:nth-child(3n+1) .home-game-emblem{align-self:center;margin-bottom:0}
+  .home-game-card:last-child:nth-child(3n+1) .home-game-text{align-self:center}
+  .home-game-card:last-child:nth-child(3n+1) .home-game-players{align-self:center;justify-self:end;margin-top:0}
+  .home-game-card:last-child:nth-child(3n+1) .home-game-go{align-self:center;justify-self:end}
+}
+@media(min-width:560px) and (max-width:999px){
+  .home-game-card:last-child:nth-child(2n+1){flex-basis:100%}
+  /* The side tier has three entries and follows the same rule, or the 2-column
+     tablet leaves BGG Filter alone at the left with a hole beside it — the exact
+     shape the spanning rule exists to remove one section higher up. */
+  .home-extra:last-child:nth-child(2n+1){flex-basis:100%}
+}
+.home-game-emblem{grid-area:emblem}
+.home-game-text{grid-area:text}
+.home-game-players{grid-area:players}
+.home-game-go{grid-area:go}
+
+/* The spine fades out at both ends instead of butting into the rounded corners,
+   where a full-height bar shows a square shoulder against the radius. It is a flat
+   accent at a fixed opacity, with percentage fade stops, so every card's bar reads
+   at the same strength and the same length — and it is inside `overflow:hidden`, so
+   the card's own radius clips it. */
+.home-game-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;opacity:.75;
+  background:linear-gradient(180deg,transparent 0,var(--accent) 14%,var(--accent) 86%,transparent 100%);
+  transition:opacity .18s ease}
+.home-game-card::after{content:"";position:absolute;inset:0;z-index:-1;opacity:0;transition:opacity .22s ease;
+  background:radial-gradient(125% 150% at 0% 0%,color-mix(in srgb,var(--accent) 15%,transparent),transparent 60%)}
+.home-game-card:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--border));transform:translateY(-3px);
+  box-shadow:inset 0 1px 0 rgba(255,240,215,.1),inset 0 -1px 0 rgba(0,0,0,.55),
+    0 4px 10px rgba(0,0,0,.55),
+    0 24px 44px -24px color-mix(in srgb,var(--accent) 90%,transparent)}
+.home-game-card:hover::before,.home-game-card:focus-visible::before{opacity:1}
+.home-game-card:hover::after,.home-game-card:focus-visible::after{opacity:1}
+.home-game-card:active{transform:translateY(-1px)}
+.home-game-card:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.home-game-card.soon{opacity:.9}
+
+/* A recessed plate rather than a bare glyph: at 27px the emblems are small marks on
+   a large card and read as debris; set into a tinted well they read as a device.
+   In the ROW form it is centred on the whole text block (title + tagline + pill),
+   not on the title alone — off-centre against the block is what made it look like it
+   had slipped upward. */
+.home-game-emblem{align-self:start;justify-self:start;display:grid;place-items:center;
+  width:48px;height:48px;border-radius:12px;
+  color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,#2c2820);
+  border:1px solid color-mix(in srgb,var(--accent) 28%,transparent);
+  box-shadow:inset 0 1px 0 rgba(255,240,215,.08);
+  transition:background .18s ease,border-color .18s ease}
+.home-game-emblem svg{width:27px;height:27px;display:block}
+/* Under ~360px the 48px plate costs the title a whole word of measure. */
+@media(max-width:360px){
+  .home-game-emblem{width:40px;height:40px;border-radius:10px}
+  .home-game-emblem svg{width:23px;height:23px}
+  .home-game-card{column-gap:12px;padding-left:17px;padding-right:12px}
+}
+.home-game-card:hover .home-game-emblem{background:color-mix(in srgb,var(--accent) 19%,#2c2820);
+  border-color:color-mix(in srgb,var(--accent) 48%,transparent)}
+
+.home-game-text{min-width:0;align-self:start;display:flex;flex-direction:column;align-items:flex-start}
+.home-game-name{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:600;
+  font-size:clamp(1.06rem,.99rem + .28vw,1.24rem);line-height:1.18;letter-spacing:.022em;
+  color:var(--accent);text-wrap:balance}
+.home-game-desc{color:var(--text-soft);font-size:.95rem;line-height:1.5;font-style:italic;
+  margin-top:6px;text-wrap:pretty}
+/* CRIMSON PRO, NOT CINZEL, and this one is not a taste call. Cinzel's lining "1" is a
+   seriffed vertical with full-height serifs top and bottom; set in caps at .1em+
+   tracking at 11px it is a capital I, and "1-4 PLAYERS" read as "I-4 PLAYERS" on
+   every card that had a 1 in it. Crimson's figure is unambiguous, and the second
+   voice quietly separates the meta line from the two Cinzel headings above it. */
+.home-game-players{align-self:end;justify-self:start;display:inline-flex;align-items:center;gap:6px;
+  font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-weight:600;
+  font-size:.78rem;letter-spacing:.055em;text-transform:uppercase;
+  color:var(--text-soft);border:1px solid var(--border);padding:3px 10px;border-radius:999px;
+  background:rgba(0,0,0,.26)}
+.home-game-players::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--accent);flex:0 0 auto}
+
+/* The affordance that the card is a door. Hidden until hover on a mouse; permanently
+   half-lit on a touch screen, which never hovers and would otherwise never see it. */
+.home-game-go{align-self:center;justify-self:end;width:19px;height:19px;color:var(--accent);
+  opacity:0;transform:translateX(-5px);transition:opacity .2s ease,transform .2s ease}
+.home-game-go svg{width:100%;height:100%;display:block}
+.home-game-card:hover .home-game-go,.home-game-card:focus-visible .home-game-go{opacity:.9;transform:none}
+@media(hover:none){.home-game-go{opacity:.4;transform:none}}
+
+/* ── The side features ── */
+/* Same container, same --cols arithmetic and the same gap as the catalogue above, so
+   the two blocks share ONE pair of left and right edges. They had a private 980px
+   max-width against the grid's 1430, which put two competing verticals on the page
+   that agreed at neither end.
+   THEY ARE NOT GOLD. Gold is Spender's accent, and when the section heading, all
+   three labels and all three icons wore it too, six of the ten titles on the page
+   were one colour and Spender was the only game without an identity of its own. The
+   side tier is bone/parchment: still warm, plainly subordinate, and it hands gold
+   back to the wordmark and to Spender. */
+.home-more{margin-top:clamp(24px,3.2vh,32px)}
+.home-more-hd{display:flex;align-items:center;gap:16px;margin-bottom:14px;font-weight:600;
+  font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--text-dim)}
+.home-more-hd::before,.home-more-hd::after{content:"";flex:1 1 0;height:1px;
+  background:linear-gradient(90deg,transparent,var(--border) 40%,var(--border) 60%,transparent)}
+.home-extras{--gap:16px;--cols:1;display:flex;flex-wrap:wrap;gap:var(--gap)}
+@media(min-width:560px){.home-extras{--cols:2;--gap:18px}}
+@media(min-width:1000px){.home-extras{--cols:3}}
+.home-extra{flex:0 1 calc((100% - (var(--cols) - 1) * var(--gap)) / var(--cols));min-width:0;
+  display:flex;align-items:center;gap:13px;text-align:left;cursor:pointer;color:inherit;font-family:inherit;
+  padding:13px 15px;border-radius:var(--radius-lg);
+  background:linear-gradient(158deg,#241f18 0%,#1b1813 62%);
+  border:1px solid var(--border);border-top-color:#443d31;border-bottom-color:#2a251d;
+  box-shadow:inset 0 1px 0 rgba(255,240,215,.05),0 2px 5px rgba(0,0,0,.45),0 12px 26px -20px rgba(0,0,0,1);
+  transition:border-color .18s ease,background .18s ease,transform .18s ease}
+.home-extra:hover{transform:translateY(-2px);border-color:#6c5f47}
+.home-extra:active{transform:none}
+.home-extra:focus-visible{outline:2px solid var(--gold);outline-offset:3px}
+.home-extra-icon{flex:0 0 auto;display:grid;place-items:center;width:38px;height:38px;border-radius:10px;
+  color:#c4b498;background:rgba(196,180,152,.07);border:1px solid rgba(196,180,152,.2)}
+.home-extra-icon svg{width:21px;height:21px;display:block}
+.home-extra-text{min-width:0;display:flex;flex-direction:column;gap:3px}
+.home-extra-label{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.84rem;font-weight:600;
+  letter-spacing:.05em;color:#d8caac;line-height:1.2}
+.home-extra-note{font-size:.85rem;font-style:italic;color:var(--text-soft);line-height:1.35}
+
+/* Says something the wordmark two screens up does not, and short enough to hold one
+   line at 320px. */
+.home-foot,.auth-foot{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--text-soft);text-align:center}
+.home-foot{padding-top:clamp(26px,3.6vh,38px)}
+/* Below ~430px the line broke to a two-word widow as the last thing on the page.
+   Tightening it is cheaper than carrying a second string. */
+@media(max-width:430px){.home-foot,.auth-foot{font-size:.6rem;letter-spacing:.09em}}
+
+@media(prefers-reduced-motion:reduce){
+  .home-game-card,.home-game-emblem,.home-game-go,.home-extra{transition:none}
+  .home-game-card:hover,.home-extra:hover,.home-game-card:active{transform:none}
+  .home-game-go{transform:none}
+}
+
+/* THIS BLOCK IS LAST IN THE SECTION ON PURPOSE. A media query adds no specificity,
+   so an equal-specificity BASE rule written after it simply wins — the same cascade
+   trap the repo's mobile overrides are documented for. Sitting near the top of the
+   section it parsed, matched, and did nothing: the 2560px shot came out with the
+   laptop's 187px card height and 48px emblem, and the only symptom was that the
+   wide tier still looked like the laptop tier. Keep it below everything it steps. */
+/* THE BIG-SCREEN TIER SCALES THE WHOLE DESIGN, IT DOES NOT ADD COLUMNS. A 2560px
+   monitor was getting the 1280px composition with 1100px of inert margin around it:
+   the wordmark was the same pixel height as on a laptop (so it read SMALLER), the
+   taglines were an effective 13px and the pills 10px. Everything that carries scale
+   steps together — container, type ramp, emblem plate and card padding — so the wide
+   layout is a BIGGER composition rather than the same one further away. Adding a
+   fourth column instead is what an earlier pass tried, and it is worse: see
+   .home-games. */
+@media(min-width:1500px){
+  .home{--home-w:1400px}
+  .home-logo{font-size:4.2rem}
+  .home-tagline{font-size:1.26rem}
+  .home-games,.home-extras{--gap:22px}
+  .home-game-card,.home-game-card:last-child:nth-child(3n+1){padding:21px 22px 20px 26px}
+  .home-game-emblem{width:58px;height:58px;border-radius:14px}
+  .home-game-emblem svg{width:33px;height:33px}
+  .home-game-name{font-size:1.42rem}
+  .home-game-desc{font-size:1.06rem}
+  .home-game-players{font-size:.86rem}
+  .home-more-hd{font-size:.8rem}
+  .home-extra{padding:17px 19px}
+  .home-extra-icon{width:44px;height:44px}
+  .home-extra-icon svg{width:25px;height:25px}
+  .home-extra-label{font-size:.96rem}
+  .home-extra-note{font-size:.95rem}
+  .home-foot{font-size:.76rem}
+}
 /* ─── Browser ───────────────────────────────────────────────────────────── */
 .browser{max-width:none;margin:0;padding:28px 24px 48px}
 /* The lobby header bar is the shared LobbyHeader (.lby-header, shared/lobby.jsx). The
@@ -58,8 +471,12 @@
 .btn-outline.active{background:var(--gold);color:#0f0e0c}
 /* Section headers, card rows, empty states, badges, the card list and the column
    grid are ALL the shared lobby kit now (shared/lobby.jsx + .lby-* in its CSS).
-   Spender carried a parallel vocabulary — .section-hd/.game-card*/.empty-state/
-   .your-turn-badge — because the kit was extracted FROM here for the other four
+   Spender carried a parallel vocabulary — .section-hd, .game-card*, .empty-state
+   and .your-turn-badge. Spelled out rather than slash-separated because the old
+   wording put a star immediately before a slash INSIDE this comment, and that
+   pair is a comment TERMINATOR: it ended the comment four lines early, and the
+   remaining prose plus the .browser-section rule below it were then parsed as one
+   nonsense selector — so that margin has never once applied. — because the kit was extracted FROM here for the other four
    games and this one was never moved onto it. Four of the ten rules were
    byte-identical and five differed by a pixel; only the card hover, the muted
    note and the section-header baseline actually changed. */

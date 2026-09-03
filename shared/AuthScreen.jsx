@@ -17,10 +17,41 @@
  *
  * Owns only its own form state. It does NOT know about localStorage, routing, or the
  * session — the shell still owns identity, and `onAuthenticated(user)` hands it back.
+ *
+ * It is also the site's FRONT DOOR, and it shares the home menu's ground, wordmark and
+ * ornament rather than approximating them: the `.auth-screen`/`.home` selector pairs in
+ * Spender.css are deliberate, so the two screens cannot drift into two looks.
  */
 import { useState } from "react";
 
-export default function AuthScreen({ siteName, httpBase, css, myId, onAuthenticated }) {
+const TABS = [
+	{ id: "login", label: "Sign In" },
+	{ id: "register", label: "Register" },
+	{ id: "guest", label: "Guest" },
+];
+
+// Same 24-grid / 1.5-stroke family as the home menu's emblems.
+const ICON = {
+	user: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><circle cx="12" cy="8.4" r="3.7" /><path d="M4.8 19.6a7.2 7.2 0 0 1 14.4 0" /></svg>),
+	lock: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><rect x="5" y="10.4" width="14" height="9.2" rx="2.2" /><path d="M8.4 10.4V7.8a3.6 3.6 0 0 1 7.2 0v2.6" /></svg>),
+	alert: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><circle cx="12" cy="12" r="8" /><path d="M12 8v4.6M12 15.6v.1" /></svg>),
+	yes: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round"><path d="M5 12.6 9.8 17.4 19 6.6" /></svg>),
+	no: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round"><path d="M6.4 6.4 17.6 17.6M17.6 6.4 6.4 17.6" /></svg>),
+};
+
+// WHAT GUEST MODE COSTS YOU, as three scannable rows rather than a sentence.
+// It is also what makes the Guest panel the same HEIGHT as the other two: that panel
+// has one field where they have two, and pinning all three to one card height (so the
+// tab strip does not move under the cursor) dumped the whole 93px difference into a
+// single gap in the middle of the card, which reads as a failed render. The answer to
+// a hole is content that belongs there, not a smaller hole.
+const GUEST_FACTS = [
+	["yes", "Play immediately, nothing to fill in"],
+	["no", "Game history is not saved"],
+	["no", "Cannot resume on another device"],
+];
+
+export default function AuthScreen({ siteName, siteFoot, httpBase, css, myId, onAuthenticated, heroRule }) {
 	const [tab, setTab] = useState("login");
 	const [name, setName] = useState("");
 	const [password, setPassword] = useState("");
@@ -71,55 +102,105 @@ export default function AuthScreen({ siteName, httpBase, css, myId, onAuthentica
 		});
 	};
 
+	// A real <label> per field, not a placeholder doing double duty. A placeholder
+	// vanishes the moment you type, so on a two-field form the user loses the only
+	// thing telling them which box they are in — and a screen reader gets nothing at
+	// all on browsers that do not expose it.
+	const field = (id, label, icon, props) => (
+		<div className="auth-field-wrap">
+			<label className="auth-label" htmlFor={id}>{label}</label>
+			<div className="auth-input-row">
+				<span className="auth-input-icon" aria-hidden="true">{ICON[icon]}</span>
+				<input id={id} className="auth-field" {...props} />
+			</div>
+		</div>
+	);
+
 	return (
 		<>
 			<style>{css}</style>
 			<div className="app auth-screen">
-				<div className="auth-logo">{siteName}</div>
-				<p className="auth-tagline">A collection of tabletop games</p>
+				<div className="auth-hero">
+					<h1 className="auth-logo">{siteName}</h1>
+					{heroRule}
+					<p className="auth-tagline">A collection of tabletop games</p>
+				</div>
 
 				<div className="auth-card">
+					{/* role=tablist is not used: these switch the FORM, and the panel is
+					    re-rendered rather than shown/hidden, so the simple button group
+					    is the honest markup. `.auth-tab` and a count of 3 are what
+					    webapp/test/screens.mjs keys on. */}
 					<div className="auth-tabs">
-						{["login", "register", "guest"].map(t => (
-							<button key={t} className={`auth-tab${tab === t ? " active" : ""}`}
-								onClick={() => { setTab(t); setError(""); }}>
-								{t === "login" ? "Sign In" : t === "register" ? "Register" : "Guest"}
+						{TABS.map(t => (
+							<button key={t.id} type="button"
+								className={`auth-tab${tab === t.id ? " active" : ""}`}
+								aria-pressed={tab === t.id}
+								onClick={() => { setTab(t.id); setError(""); }}>
+								{t.label}
 							</button>
 						))}
 					</div>
 
-					{tab !== "guest" ? (
-						<>
-							{/* maxLength mirrors core.auth.validate_credentials: register is
-							    capped at 16, login accepts longer legacy values. */}
-							<input className="auth-field" placeholder="Name" value={name}
-								onChange={e => setName(e.target.value)} maxLength={tab === "register" ? 16 : 64}
-								onKeyDown={e => e.key === "Enter" && submit()} />
-							<input className="auth-field" placeholder="Password" type="password" value={password}
-								onChange={e => setPassword(e.target.value)} maxLength={tab === "register" ? 16 : 128}
-								onKeyDown={e => e.key === "Enter" && submit()} />
-							{error && <div className="auth-error">{error}</div>}
-							<button className="btn btn-gold btn-full mt-8" onClick={submit} disabled={loading}>
-								{loading && <span className="spinner" />}
-								{tab === "login" ? "Sign In" : "Create Account"}
-							</button>
-						</>
-					) : (
-						<>
-							<p style={{ color: "var(--text-dim)", fontSize: ".88rem", marginBottom: 14, lineHeight: 1.5 }}>
-								Play without an account. Your game history won't be saved.
-							</p>
-							<div className="guest-name-row">
-								<input className="auth-field" placeholder="Display name (optional)"
-									value={guestName} onChange={e => setGuestName(e.target.value)} maxLength={20}
-									onKeyDown={e => e.key === "Enter" && playAsGuest()} />
-							</div>
-							<button className="btn btn-outline btn-full mt-8" onClick={playAsGuest}>
-								Play as Guest
-							</button>
-						</>
-					)}
+					<div className="auth-panel">
+						{tab !== "guest" ? (
+							<>
+								{/* maxLength mirrors core.auth.validate_credentials: register is
+								    capped at 16, login accepts longer legacy values. */}
+								{field("auth-name", "Name", "user", {
+									value: name, placeholder: "Your name", autoComplete: "username", autoCapitalize: "off",
+									autoCorrect: "off", spellCheck: false, maxLength: tab === "register" ? 16 : 64,
+									onChange: e => setName(e.target.value),
+									onKeyDown: e => e.key === "Enter" && submit(),
+								})}
+								{field("auth-pass", "Password", "lock", {
+									type: "password", value: password, placeholder: "Your password",
+									autoComplete: tab === "register" ? "new-password" : "current-password",
+									maxLength: tab === "register" ? 16 : 128,
+									onChange: e => setPassword(e.target.value),
+									onKeyDown: e => e.key === "Enter" && submit(),
+								})}
+								{/* aria-live so the failure is announced, not just drawn. */}
+								<div className="auth-error-slot" role="alert" aria-live="polite">
+									{error && <div className="auth-error">
+										<span className="auth-error-icon" aria-hidden="true">{ICON.alert}</span>{error}
+									</div>}
+								</div>
+								<button className="btn btn-gold btn-full" onClick={submit} disabled={loading}>
+									{loading && <span className="spinner" />}
+									{tab === "login" ? "Sign In" : "Create Account"}
+								</button>
+								<p className="auth-note">
+									{tab === "login"
+										? "Signed-in games are saved and can be resumed from any device."
+										: "A name and a password, nothing else — no email, no verification."}
+								</p>
+							</>
+						) : (
+							<>
+								{field("auth-guest", "Display name", "user", {
+									value: guestName, placeholder: "Optional",
+									autoComplete: "off", maxLength: 20,
+									onChange: e => setGuestName(e.target.value),
+									onKeyDown: e => e.key === "Enter" && playAsGuest(),
+								})}
+								<ul className="auth-facts">
+									{GUEST_FACTS.map(([kind, text]) => (
+										<li key={text} className={`auth-fact ${kind}`}>
+											<span className="auth-fact-icon" aria-hidden="true">{ICON[kind]}</span>
+											{text}
+										</li>
+									))}
+								</ul>
+								<button className="btn btn-outline btn-full" onClick={playAsGuest}>
+									Play as Guest
+								</button>
+							</>
+						)}
+					</div>
 				</div>
+
+				<p className="auth-foot">{siteFoot}</p>
 			</div>
 		</>
 	);
