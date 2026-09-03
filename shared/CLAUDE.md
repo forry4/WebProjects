@@ -193,11 +193,28 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
 - **`--text-soft` (`theme.base-css.css`) is the body-copy dim; `--text-dim` is for labels and
   `--text-muted` is DECORATION ONLY.** Measured on `--surface`: soft 6.1:1, dim 4.40:1 (fails
   AA for normal-size text), muted 2.5:1. A sentence in `--text-dim` on a card is below AA.
-- **The home accents are BOUND, not chosen** (`GAMES` in `HomeScreen.jsx`): each is its card
-  title's ink, so ≥4.5:1 on `--surface`; ≥23° apart in hue, or the colour stops doing the
-  identifying job it exists for; and inside a 0.364–0.404 luminance band, or the seven
-  titles read as different weights. `screens.mjs` measures all three off the live page —
-  it caught Spender and Rag Tag landing 21° apart, which looked fine by eye.
+- **A HOME CARD'S ACCENT *IS* ITS GAME'S `--lby-accent`** — one value, in
+  `shared/accents.js`, imported by both ends. **Hue separation between games is explicitly
+  NOT a requirement, and the rule that said otherwise is why this note exists.** A gate
+  once asserted the seven accents sat ≥23° apart inside a 0.364–0.404 luminance band, and
+  the accents were tuned until they satisfied it: Castles of CRIMSON shipped pink and
+  Dontminion's gold shipped cyan. The gate's own comment gave it away — *"the pair this was
+  written for (two identical golds) measured 0"* — that pair is Spender and Dontminion, and
+  they are both gold because Dontminion inherits the site gold. A true fact about the games,
+  reported as a defect. Cards are told apart by name, emblem, tagline and colour together.
+  **What IS gated**: `screens.mjs` enters each game and compares its RENDERED `--lby-accent`
+  against the colour its home card paints. Note honestly what that does and does not buy —
+  the four games that import the module cannot drift (one source), so the check is really
+  for the three that define theirs in CSS and cannot import JS (`CastlesOfCrimson.css`,
+  `RagTag.css`, and Dissonance aliasing its own `--accent`). Verified by breaking the module
+  first, watching the gate PASS — both ends moved together — and then breaking RagTag.css,
+  where it correctly failed and named the game.
+  **Contrast is still gated, with a self-policing exemption.** Titles must clear 4.5:1
+  except those listed in `ACCENT_AA_EXEMPT`; today only Castles of Crimson, whose exact
+  crimson measures 3.59:1 and was shipped that way deliberately. A listed title must still
+  clear 3.0, and a listed title that *starts* clearing 4.5 fails as STALE so the row gets
+  deleted rather than sitting there forever — the same discipline as
+  `core/tests/test_no_conditional_skips.py`.
 - **`update-nudge.js`** — the stale-tab refresh prompt. It compares frontend-to-frontend via
   `version.json` / `__BUILD_ID__`, **never** against the backend's commit (frontend-only pushes leave the
   two SHAs legitimately different — a cross-comparison would cry wolf on every deploy).

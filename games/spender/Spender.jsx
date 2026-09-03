@@ -68,6 +68,8 @@ import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../sh
 // Site-shell screens, extracted out of this file (see shared/AuthScreen.jsx).
 import AuthScreen from "../../shared/AuthScreen.jsx";
 import HomeScreen, { SITE_NAME, SITE_FOOT, GAMES, HERO_RULE } from "../../shared/HomeScreen.jsx";
+// The home card and Spender's own lobby must be the same colour; see shared/accents.js.
+import { GAME_ACCENTS } from "../../shared/accents.js";
 // Offline vs-AI: the local game driver (wasm engine + IndexedDB saves) — see offline.js.
 import { OFFLINE_AI_PID, createOfflineGame, loadOfflineGame, deleteOfflineGame,
 	listOfflineGames, offlineRoomData, applyOfflineMove } from "./offline.js";
@@ -3118,7 +3120,7 @@ export default function SpenderApp() {
 	if (screen === "spender" && spenderScreen === "browser" && connecting) return (
 		<>
 			<style>{css}</style>
-			<div className="app" style={{ "--lby-accent": "#d4a84c" }}>
+			<div className="app" style={{ "--lby-accent": GAME_ACCENTS.spender }}>
 				<LobbyLoading label="Connecting…" />
 			</div>
 		</>
@@ -3126,7 +3128,7 @@ export default function SpenderApp() {
 	if (screen === "spender" && spenderScreen === "browser") return (
 		<>
 			<style>{css}</style>
-			<div className="app" style={{ "--lby-accent": "#d4a84c" }}>
+			<div className="app" style={{ "--lby-accent": GAME_ACCENTS.spender }}>
 				<LobbyHeader
 					onBack={() => nav("home")}
 					title="Spender"

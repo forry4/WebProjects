@@ -19,6 +19,8 @@ import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../sh
 // component's own <style> tag) — NEVER a JS template literal (the documented
 // stray-backtick blank-page footgun).
 import _cssText from "./Dontminion.css?inline";
+// The home card and this screen must be the same colour; one value, see shared/accents.js.
+import { GAME_ACCENTS } from "../../shared/accents.js";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -2116,7 +2118,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
   // the lobby then snap into the game (matches CoC).
   if (connecting && screen === "lobby") {
     return (
-      <div className="app dm" style={{ "--lby-accent": "#b08d57" }}>
+      <div className="app dm" style={{ "--lby-accent": GAME_ACCENTS.dontminion }}>
         <style>{dmStyles}</style>
         <div className="dm-center"><LobbyLoading label="Connecting…" /></div>
       </div>
@@ -2124,7 +2126,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
   }
   if (screen === "lobby") {
     return (
-      <div className="app dm" style={{ "--lby-accent": "#b08d57" }}>
+      <div className="app dm" style={{ "--lby-accent": GAME_ACCENTS.dontminion }}>
         <style>{dmStyles}</style>
         <LobbyHeader onBack={onExit} title="Dontminion" user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : "Guest"} />
         <LobbyCreateRow onCreate={() => setShowCreateModal(true)} onJoin={joinGame}
@@ -2328,7 +2330,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
     const cap = roomData?.max_players || 4;
     const isHost = roomData?.host === myId;
     return (
-      <div className="app dm" style={{ "--lby-accent": "#b08d57" }}>
+      <div className="app dm" style={{ "--lby-accent": GAME_ACCENTS.dontminion }}>
         <style>{dmStyles}</style>
         <LobbyHeader onBack={leaveToLobby} backLabel="← Leave" title="Dontminion" user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : "Guest"} />
         <div className="dm-wait">
@@ -2357,7 +2359,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
 
   if (!game) {
     return (
-      <div className="app dm" style={{ "--lby-accent": "#b08d57" }}>
+      <div className="app dm" style={{ "--lby-accent": GAME_ACCENTS.dontminion }}>
         <style>{dmStyles}</style>
         <div className="lby-loading dm-center"><span className="lby-spinner" /> Loading game…</div>
       </div>
@@ -2366,7 +2368,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
 
   // ── game screen ──
   return (
-    <div className="app dm dm-gamescreen" style={{ "--lby-accent": "#b08d57" }}>
+    <div className="app dm dm-gamescreen" style={{ "--lby-accent": GAME_ACCENTS.dontminion }}>
       <style>{dmStyles}</style>
       {/* Title bar only — the game's NAME, centred, like every other game on the
           site. Whose turn it is and which phase you're in are already carried by

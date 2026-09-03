@@ -7,6 +7,8 @@
  * The game catalogue lives here rather than in games/spender/Spender.jsx because it
  * describes the SITE, not the Spender game — Spender is just one of its entries.
  */
+import { GAME_ACCENTS } from "./accents.js";
+
 const SITE_NAME = "Forrest Games";
 // ONE footer line for the whole shell. The menu and the front door had two
 // different strings saying the same thing, which is the sort of thing nobody
@@ -17,41 +19,22 @@ const SITE_FOOT = "Play in the browser — no download, no ads";
 // browser/waiting/game live in its `spenderScreen`); `accent` drives the card's
 // --accent custom property.
 //
-// THE ACCENTS ARE A SPACED HUE WHEEL, NOT SEVEN COLOURS PICKED BY EYE, and they are
-// contrast-bound. Two rules, both of which the original palette broke:
-//   1. Every accent is the card TITLE's ink on --surface, so it must clear 4.5:1
-//      there. The titles are ~1.2rem — under the large-text exemption — and four of
-//      the originals sat at 3.0–4.4:1: fine on a bright monitor, genuinely hard on a
-//      phone outdoors. Same hues, lifted in value.
-//   2. The accents have to be TELLABLE APART at pill size, which is the whole point
-//      of having them. Spender and Dontminion were both gold and read as the same
-//      game at a glance; Dontminion is now verdigris — the last free arc of the
-//      wheel, and the one colour on it that cannot be confused with the periwinkle
-//      or the green either. Castles' crimson and Rag Tag's orange were also close,
-//      so they are pushed apart in hue rather than merely in value.
-//   3. They have to sit in one LUMINANCE band, or the titles stop reading as one
-//      family: the green measured .50 and the crimson .29 — nearly a 2x spread — so
-//      Dissonance's title glared while Castles' looked half-off, and the same spread
-//      ran down the accent stripes, where the warm ones stayed visible for their full
-//      height and the cool ones faded out at their midpoint. All seven are now inside
-//      .364-.404 relative luminance, i.e. within about 4 L* of each other.
-// The wheel as shipped, measured: crimson 352, orange 20, gold 43, green 152,
-//   verdigris 185, periwinkle 226, violet 290 — no two closer than 23deg. The three
-//   WARM ones share only a 51deg arc, so they are the trio that actually needs the
-//   arithmetic: Rag Tag first landed 21deg off Spender, which looked fine to me and
-//   failed the gate. That is the entire reason the gate measures rather than asks. `webapp/test/screens.mjs` re-measures BOTH properties off the live
-// page, so a new game whose brand colour is too dark, or too near a neighbour, fails
-// the gate instead of shipping.
+// THE ACCENT IS THE GAME'S OWN `--lby-accent`, imported from shared/accents.js so that
+// there is one value and not two that agree by habit. A long comment used to stand here
+// arguing the opposite — that the seven should be a spaced hue wheel inside one
+// luminance band — and that reasoning is exactly what turned Castles of CRIMSON pink and
+// Dontminion's gold cyan. See shared/accents.js for why hue separation is not a
+// requirement and must not be reintroduced.
 const GAMES = [
-	{ id: "spender", name: "Spender", tagline: "A gem merchant’s game of prestige", status: "ready", screen: "spender", accent: "#cba33c", players: "1–4 players" },
-	{ id: "coc", name: "Castles of Crimson", tagline: "A realm of conquest and intrigue", status: "ready", screen: "coc", accent: "#ef8290", players: "1–4 players" },
-	{ id: "wherewolf", name: "Where Wolf", tagline: "A village of secrets and lies", status: "ready", screen: "werewolf", accent: "#8ca5f2", players: "3–10 players" },
-	{ id: "duel", name: "Spender Duel", tagline: "A two-player battle of gems and crowns", status: "ready", screen: "duel", accent: "#d18ede", players: "1–2 players" },
+	{ id: "spender", name: "Spender", tagline: "A gem merchant’s game of prestige", status: "ready", screen: "spender", players: "1–4 players" },
+	{ id: "coc", name: "Castles of Crimson", tagline: "A realm of conquest and intrigue", status: "ready", screen: "coc", players: "1–4 players" },
+	{ id: "wherewolf", name: "Where Wolf", tagline: "A village of secrets and lies", status: "ready", screen: "werewolf", players: "3–10 players" },
+	{ id: "duel", name: "Spender Duel", tagline: "A two-player battle of gems and crowns", status: "ready", screen: "duel", players: "1–2 players" },
 	// APPEND new games only — webapp/test/screens.mjs clicks .home-game-card by INDEX.
-	{ id: "dontminion", name: "Dontminion", tagline: "A kingdom built one card at a time", status: "ready", screen: "dontminion", accent: "#45b3bd", players: "1–4 players" },
-	{ id: "dissonance", name: "Dissonance", tagline: "Winning every trick is a losing plan", status: "ready", screen: "dissonance", accent: "#4fbe8b", players: "2 players" },
-	{ id: "ragtag", name: "Rag Tag", tagline: "Two fighters, one deck you never shuffle", status: "ready", screen: "ragtag", accent: "#f68a54", players: "2 players" },
-];
+	{ id: "dontminion", name: "Dontminion", tagline: "A kingdom built one card at a time", status: "ready", screen: "dontminion", players: "1–4 players" },
+	{ id: "dissonance", name: "Dissonance", tagline: "Winning every trick is a losing plan", status: "ready", screen: "dissonance", players: "2 players" },
+	{ id: "ragtag", name: "Rag Tag", tagline: "Two fighters, one deck you never shuffle", status: "ready", screen: "ragtag", players: "2 players" },
+].map(g => ({ ...g, accent: GAME_ACCENTS[g.id] }));
 // Local vs AI (the offline hub) is deliberately NOT in the catalogue: with a connection the
 // home menu's real games supersede it, and without one you never get past the loading screen —
 // so its only entries are the loading screen's "Play offline vs AI" escape hatch and the
@@ -188,7 +171,7 @@ export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles
 
 					<nav className="home-games" aria-label="Games">
 						{GAMES.map(gm => (
-							<button key={gm.id} className={`home-game-card ${gm.status}`}
+							<button key={gm.id} className={`home-game-card ${gm.status}`} data-game={gm.id}
 								style={{ "--accent": gm.accent }}
 								onClick={() => onPickGame(gm.screen)}>
 								{/* FOUR FLAT CHILDREN, PLACED BY grid-template-areas, because the

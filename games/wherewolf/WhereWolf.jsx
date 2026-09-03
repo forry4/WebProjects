@@ -13,6 +13,8 @@ import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../sh
 // template literal silently reparsed the rest of the file as a tagged template and
 // blanked the whole page. A .css file cannot do that, and editors lint it properly.
 import _cssText from "./WhereWolf.css?inline";
+// The home card and this screen must be the same colour; one value, see shared/accents.js.
+import { GAME_ACCENTS } from "../../shared/accents.js";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -565,7 +567,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   // connecting to a room while still on the lobby → spinner, not a lobby flash (CoC)
   if (connecting && screen === "lobby") {
     return (
-      <div className="ww" style={{ "--lby-accent": "#6f86d6" }}><style>{css}</style>
+      <div className="ww" style={{ "--lby-accent": GAME_ACCENTS.wherewolf }}><style>{css}</style>
         <LobbyLoading label="Connecting…" />
       </div>
     );
@@ -574,7 +576,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     const savedId = (() => { try { return localStorage.getItem("werewolf_roomId"); } catch { return null; } })();
     const savedTok = savedId ? (() => { try { return localStorage.getItem(`werewolf_token_${savedId}_${myId}`); } catch { return null; } })() : null;
     return (
-      <div className="ww" style={{ "--lby-accent": "#6f86d6" }}><style>{css}</style>
+      <div className="ww" style={{ "--lby-accent": GAME_ACCENTS.wherewolf }}><style>{css}</style>
         <LobbyHeader
           onBack={onExit}
           title="Where Wolf"
@@ -667,7 +669,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     const selected = curDeck.length;
     const deckOk = selected === need;
     return (
-      <div className="ww" style={{ "--lby-accent": "#6f86d6" }}><style>{css}</style>
+      <div className="ww" style={{ "--lby-accent": GAME_ACCENTS.wherewolf }}><style>{css}</style>
         <div className="ww-wrap">
           <div className="ww-top">
             <div className="ww-top-left"><GameMenu items={[{ label: "Return to menu", icon: "←", onClick: leaveToLobby }, { label: "View rules", icon: "📖", onClick: () => setShowRules(true) }]} />
@@ -825,7 +827,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   }).filter(Boolean);
 
   return (
-    <div className="ww" style={{ "--lby-accent": "#6f86d6" }}><style>{css}</style>
+    <div className="ww" style={{ "--lby-accent": GAME_ACCENTS.wherewolf }}><style>{css}</style>
       <div className="ww-wrap">
         <div className="ww-top">
           <div className="ww-top-left"><GameMenu items={[{ label: "Return to menu", icon: "←", onClick: leaveToLobby }, { label: "View rules", icon: "📖", onClick: () => setShowRules(true) }]} />

@@ -25,6 +25,8 @@ import { applyOfflineDuelMove, armDuelUndoIfMyTurn, duelOfflineRoomData, runDuel
 // template literal silently reparsed the rest of the file as a tagged template and
 // blanked the whole page. A .css file cannot do that, and editors lint it properly.
 import _cssText from "./SpenderDuel.css?inline";
+// The home card and this screen must be the same colour; one value, see shared/accents.js.
+import { GAME_ACCENTS } from "../../shared/accents.js";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -1554,7 +1556,7 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
   // connecting to a room while still on the lobby → spinner, not a lobby flash (CoC)
   if (connecting && screen === "lobby") {
     return (
-      <div className="app duel" style={{ "--lby-accent": "#bf6fd0" }}>
+      <div className="app duel" style={{ "--lby-accent": GAME_ACCENTS.duel }}>
         <style>{duelStyles}</style>
         <LobbyLoading label="Connecting…" />
       </div>
@@ -1566,7 +1568,7 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
     const savedTok = (() => { try { return savedRid ? localStorage.getItem(`duel_token_${savedRid}_${myId}`) : null; } catch { return null; } })();
     const savedListed = savedRid && (openGames.some((g) => g.id === savedRid) || myGames.some((g) => g.id === savedRid));
     return (
-      <div className="app duel" style={{ "--lby-accent": "#bf6fd0" }}>
+      <div className="app duel" style={{ "--lby-accent": GAME_ACCENTS.duel }}>
         <style>{duelStyles}</style>
         <LobbyHeader
           onBack={onExit}
@@ -1723,7 +1725,7 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
   }
 
   return (
-    <div className="app duel duel-gamescreen" style={{ "--lby-accent": "#bf6fd0" }}>
+    <div className="app duel duel-gamescreen" style={{ "--lby-accent": GAME_ACCENTS.duel }}>
       <style>{duelStyles}</style>
       {reconnecting && !connected && !reviewOnly && <div className="duel-reconnbar">Reconnecting…</div>}
       <div className="duel-topbar">

@@ -16,6 +16,8 @@ import { applyOfflineCocMove, armCocUndoIfMyTurn, cocOfflineRoomData, runCocBotL
 // template literal silently reparsed the rest of the file as a tagged template and
 // blanked the whole page. A .css file cannot do that, and editors lint it properly.
 import _cssText from "./CastlesOfCrimson.css?inline";
+// The home card and this screen must be the same colour; one value, see shared/accents.js.
+import { GAME_ACCENTS } from "../../shared/accents.js";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -1982,7 +1984,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
   // the layouts arrive. The game/waiting screens still need `board` (guarded after this).
   // Instant feedback the moment a game is clicked, while the WS + first state land.
   if (connecting && screen === "lobby") {
-    return (<div className="coc coc-neutral" style={{ "--lby-accent": "#d6454b" }}><style>{css}</style><LobbyLoading /></div>);
+    return (<div className="coc coc-neutral" style={{ "--lby-accent": GAME_ACCENTS.coc }}><style>{css}</style><LobbyLoading /></div>);
   }
   if (screen === "lobby") {
     // Board pickers live in the create/join modals (not the lobby), so the lobby
@@ -2000,7 +2002,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
     const boardName = (id) => board?.byId?.[id]?.name || `Board ${id}`;
     const diffLabel = (d) => d.charAt(0).toUpperCase() + d.slice(1);
     return (
-      <div className="coc coc-neutral" style={{ "--lby-accent": "#d6454b" }}><style>{css}</style>
+      <div className="coc coc-neutral" style={{ "--lby-accent": GAME_ACCENTS.coc }}><style>{css}</style>
         <LobbyHeader
           onBack={onExit}
           title="Castles of Crimson"
@@ -2201,7 +2203,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
 
   // The waiting/game screens render the board, so they still wait for the layout fetch.
   if (!board) {
-    return (<div className="coc coc-neutral" style={{ "--lby-accent": "#d6454b" }}><style>{css}</style><LobbyLoading /></div>);
+    return (<div className="coc coc-neutral" style={{ "--lby-accent": GAME_ACCENTS.coc }}><style>{css}</style><LobbyLoading /></div>);
   }
 
   // ─── Waiting ─────────────────────────────────────────────────────────────
@@ -2371,7 +2373,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
     : (aiThinking ? "Bot is playing…" : `${players[game.turn] || "Opponent"}'s turn`);
 
   return (
-    <div className="coc" style={{ "--lby-accent": "#d6454b" }}><style>{css}</style>
+    <div className="coc" style={{ "--lby-accent": GAME_ACCENTS.coc }}><style>{css}</style>
       <div className="coc-wrap coc-wrap-game">
         <div className="coc-top coc-top-game">
           <div className="coc-top-left">

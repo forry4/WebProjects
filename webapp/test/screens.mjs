@@ -23,6 +23,8 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { chromium } from "playwright";
+// The accent contract lives in ONE place; this gate reads it rather than re-listing it.
+import { GAME_ACCENTS, ACCENT_AA_EXEMPT } from "../../shared/accents.js";
 
 const webappDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = path.resolve(webappDir, "..");
@@ -573,7 +575,8 @@ try {
 				const surface = rgb(getComputedStyle(document.documentElement).getPropertyValue("--surface") ||
 					getComputedStyle(document.body).backgroundColor);
 				const ink = rgb(getComputedStyle(t).color);
-				return { text: t.textContent, ink, hue: hue(ink), contrast: +contrast(ink, surface).toFixed(2) };
+				return { text: t.textContent, id: c.dataset.game, ink, hue: hue(ink),
+					contrast: +contrast(ink, surface).toFixed(2) };
 			});
 			const home = document.querySelector(".home").getBoundingClientRect();
 			const grid = document.querySelector(".home-games").getBoundingClientRect();
@@ -668,21 +671,78 @@ try {
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await page.waitForTimeout(200);
 
-		const dim = m.names.filter((n) => n.contrast < 4.5);
+		// THE TITLES CLEAR AA, WITH A SELF-POLICING EXEMPTION LIST. A game's accent is its
+		// own `--lby-accent` and is not adjusted to suit this check (see
+		// shared/accents.js), so one title ships under the 4.5:1 floor by explicit
+		// choice. An exemption that only ever whitelists is a hole, so this fails three
+		// ways: an unlisted title under 4.5, a LISTED title that has since fallen under
+		// 3.0 (the floor the spine and plate are held to), and a listed title that now
+		// clears 4.5 — a STALE row, which must be deleted rather than left claiming an
+		// exemption it no longer needs. Same shape as core/tests/test_no_conditional_skips.py.
+		const exempt = ACCENT_AA_EXEMPT;   // shared/accents.js — one list, not two
+		const dim = m.names.filter((n) => !exempt[n.id] && n.contrast < 4.5);
 		check(`all ${m.names.length} game titles clear AA on the card`, dim.length === 0,
 			dim.map((d) => `${d.text} ${d.contrast}:1`).join(", "));
-		// 22deg is the smallest gap in the shipped wheel with room to spare; the pair
-		// this was written for (two identical golds) measured 0.
-		const close = [];
-		for (let i = 0; i < m.names.length; i++) {
-			for (let j = i + 1; j < m.names.length; j++) {
-				const a = m.names[i], b = m.names[j];
-				if (a.hue == null || b.hue == null) continue;
-				const d = Math.min(Math.abs(a.hue - b.hue), 360 - Math.abs(a.hue - b.hue));
-				if (d < 22) close.push(`${a.text}/${b.text} ${d.toFixed(0)}deg`);
-			}
+		const exBad = m.names.filter((n) => exempt[n.id] && n.contrast < 3);
+		check("...and the exempted title still clears the 3:1 floor", exBad.length === 0,
+			exBad.map((d) => `${d.text} ${d.contrast}:1`).join(", "));
+		const exStale = m.names.filter((n) => exempt[n.id] && n.contrast >= 4.5);
+		check("...and no exemption is stale", exStale.length === 0,
+			exStale.map((d) => `${d.text} now clears AA at ${d.contrast}:1 — drop its row`).join(", "));
+		const exUnseen = Object.keys(exempt).filter((k) => !m.names.some((n) => n.id === k));
+		check("...and every exemption names a real card", exUnseen.length === 0, exUnseen.join(", "));
+
+		// THE CARD'S COLOUR IS THE GAME'S COLOUR — the check this whole section exists
+		// for, and the one that was missing when it mattered. Each game sets a
+		// `--lby-accent` driving its own lobby, and the home card is supposed to be the
+		// same value; the two lived in different files agreeing only by habit, and the
+		// moment a palette rule pushed on the catalogue they drifted — Castles of CRIMSON
+		// shipped pink and Dontminion's gold shipped cyan, past every check here,
+		// because nothing compared the two ends. This enters each game and compares its
+		// RENDERED `--lby-accent` against the colour its home card actually paints, so it
+		// holds for the two games that define theirs in CSS and cannot import the shared
+		// module. Comparison is on painted sRGB, not on the token text, so a hex, a
+		// resolved `var()` and an `rgb()` all compare equal.
+		const ACCENT_PAGES = [
+			{ id: "spender", card: 0, marker: ".browser" },
+			{ id: "coc", path: "/coc", marker: ".coc" },
+			{ id: "wherewolf", path: "/werewolf", marker: ".ww" },
+			{ id: "duel", path: "/duel", marker: ".duel" },
+			{ id: "dontminion", path: "/dontminion", marker: ".dm" },
+			{ id: "dissonance", path: "/dissonance", marker: ".dis" },
+			{ id: "ragtag", path: "/ragtag", marker: ".ragtag" },
+		];
+		// Every game in the catalogue must be listed, or a new one joins unmeasured —
+		// the roster is derived, not hand-kept.
+		const unlisted = Object.keys(GAME_ACCENTS).filter((k) => !ACCENT_PAGES.some((g) => g.id === k));
+		check("every game in the catalogue is colour-checked", unlisted.length === 0, unlisted.join(", "));
+		const cardInk = Object.fromEntries(m.names.map((n) => [n.id, n.ink.join(",")]));
+		const mismatched = [];
+		for (const g of ACCENT_PAGES) {
+			const c = await browser.newContext();
+			await c.addInitScript(() => localStorage.setItem("spender_user",
+				JSON.stringify({ id: "accent-fidelity", name: "Harness", guest: true })));
+			const pg = await c.newPage();
+			await pg.goto(`http://localhost:${PORT}${g.path || "/"}`, { waitUntil: "load" });
+			if (g.card != null) await pg.locator(".home-game-card").nth(g.card)
+				.click({ timeout: 15_000 }).catch(() => {});
+			const there = await pg.waitForSelector(g.marker, { timeout: 25_000 })
+				.then(() => true).catch(() => false);
+			const got = there ? await pg.evaluate((sel) => {
+				const cv = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+				const raw = getComputedStyle(document.querySelector(sel))
+					.getPropertyValue("--lby-accent").trim();
+				cv.fillStyle = "#000"; cv.fillStyle = raw; cv.fillRect(0, 0, 1, 1);
+				return { raw, rgb: [...cv.getImageData(0, 0, 1, 1).data].slice(0, 3).join(",") };
+			}, g.marker) : null;
+			await c.close();
+			if (!there) { mismatched.push(`${g.id}: ${g.marker} never rendered`); continue; }
+			if (!got.raw) { mismatched.push(`${g.id}: sets no --lby-accent`); continue; }
+			if (got.rgb !== cardInk[g.id])
+				mismatched.push(`${g.id}: card ${cardInk[g.id]} vs game ${got.rgb} (${got.raw})`);
 		}
-		check("no two games share an accent colour", close.length === 0, close.join(", "));
+		check("every home card is its game's own colour", mismatched.length === 0,
+			mismatched.join(" | "));
 
 		// THE WIDTHS A LADDER BREAKS AT ARE THE ONES ON ITS BOUNDARIES, and a fixed set
 		// of device viewports never visits them: this walks 559/560, 999/1000 and
