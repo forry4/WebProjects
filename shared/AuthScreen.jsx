@@ -174,6 +174,11 @@ export default function AuthScreen({ siteName, siteFoot, httpBase, css, myId, on
 									{tab === "login"
 										? "Signed-in games are saved and can be resumed from any device."
 										: "A name and a password, nothing else — no email, no verification."}
+									<span className="auth-note-sub">
+										{tab === "login"
+											? "Names are not case-sensitive."
+											: "1–16 characters each; letters and numbers in the name."}
+									</span>
 								</p>
 								<button className="btn btn-gold btn-full" onClick={submit} disabled={loading}>
 									{loading && <span className="spinner" />}
@@ -205,7 +210,7 @@ export default function AuthScreen({ siteName, siteFoot, httpBase, css, myId, on
 					</div>
 				</div>
 
-				<p className="auth-foot">{siteFoot}</p>
+				<p className="shell-foot">{siteFoot}</p>
 			</div>
 		</>
 	);

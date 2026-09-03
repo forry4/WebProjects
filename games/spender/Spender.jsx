@@ -2819,7 +2819,7 @@ export default function SpenderApp() {
 						Play offline vs AI
 					</button>
 					</div>
-					<p className="loading-foot">{SITE_FOOT}</p>
+					<p className="shell-foot">{SITE_FOOT}</p>
 				</div>
 			</>
 		);

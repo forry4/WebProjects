@@ -92,13 +92,16 @@ const GAME_EMBLEM = {
 	dontminion: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M4.6 10.8c0-3.3 3.3-5.6 7.4-5.6s7.4 2.3 7.4 5.6v7.4a.9.9 0 0 1-.9.9H5.5a.9.9 0 0 1-.9-.9Z" /><path d="M4.6 10.8h14.8" /><path d="M10.6 10.8h2.8v3.3h-2.8Z" /></svg>),
 	// Two cards, the near one pipped — the trick.
 	dissonance: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><rect x="3.9" y="6.4" width="8.6" height="12.2" rx="1.7" transform="rotate(-11 8.2 12.5)" /><rect x="11.5" y="4.9" width="8.6" height="12.2" rx="1.7" transform="rotate(9 15.8 11)" /><path d="M15.8 8.6 17.4 10.6 15.8 12.6 14.2 10.6Z" /></svg>),
-	// Crossed blades. The first attempt at "the tag" was a two-headed swap arrow, which
-	// is legible at any size and is also the glyph every UI in the world uses for
-	// transfer/sync — a generic affordance sitting in a row with a castle, a moon and a
-	// crown. Six strokes is more than the rest of the set carries, and it is affordable
-	// because a GAME emblem never renders below 27px; the side-feature icons, which do
-	// go to 20px, are held to two.
-	ragtag: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M19.4 4.6 9.6 14.4M7.2 13.4l3.4 3.4M7.4 16.6 5.2 18.8" /><path d="M4.6 4.6 14.4 14.4M16.8 13.4l-3.4 3.4M16.6 16.6l2.2 2.2" /></svg>),
+	// Crossed blades, WITH GUARDS AND POMMELS, and both are load-bearing. The first
+	// attempt at "the tag" was a two-headed swap arrow — legible at any size, and the
+	// glyph every UI in the world uses for transfer/sync, sitting in a row with a
+	// castle, a moon and a crown. The second was two bare diagonals with token
+	// crossguards, and measured it carried 36% less ink than the mean of the other six;
+	// worse, at 24px the guards disappeared and what remained was a plain X, i.e. the
+	// universal close/cancel. The filled pommels and the full-length guards are what
+	// make it read as swords rather than as a multiplication sign at the size it is
+	// actually drawn.
+	ragtag: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M19 4.2 10.2 14.2 8.6 16" /><path d="M8.2 12.5 12.2 15.9" /><circle cx="7.6" cy="16.8" r="1.35" fill="currentColor" stroke="none" /><path d="M5 4.2 13.8 14.2 15.4 16" /><path d="M15.8 12.5 11.8 15.9" /><circle cx="16.4" cy="16.8" r="1.35" fill="currentColor" stroke="none" /></svg>),
 };
 
 // The three side features, drawn to the same three rules. Emoji were the old labels,
@@ -157,6 +160,10 @@ export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles
 				    .home::before/::after as two fixed layers, so it does not scroll away
 				    under a long catalogue and costs no extra element. */}
 				<div className="home">
+					{/* Same main+foot shell as the auth and loading screens, so the strapline
+					    lands on the bottom edge on all three. Flowing at the end of a centred
+					    column instead put it 207px off the bottom at 2560 against their 35. */}
+					<div className="home-main">
 					{/* ONE unboxed identity string and ONE chip. It used to be a bordered
 					    "Guest" pill, then a bare username, then a bordered button — three
 					    items where the MIDDLE one had no frame, which does not read as a
@@ -221,8 +228,9 @@ export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles
 							))}
 						</div>
 					</section>
+					</div>
 
-					<footer className="home-foot">{SITE_FOOT}</footer>
+					<footer className="shell-foot">{SITE_FOOT}</footer>
 				</div>
 				{toast && <div className="toast">{toast}</div>}
 			</div>
