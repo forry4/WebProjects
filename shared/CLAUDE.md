@@ -5,6 +5,15 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
 - **`theme.js` — `baseCss`** is the single source of truth for the design system (font `@import`/
   `@font-face` first, `:root` tokens, `.btn`/`.input`). Spender + Books + Duel + WW import it; CoC renders
   it too (CoC carries a copy since it mounts bare).
+  **`font-display` IS `swap` AND MUST NOT GO BACK TO `optional`.** `optional` gives a face a
+  ~100ms block period and then, if it has not arrived, uses the fallback **for the lifetime of
+  the page** — the font still lands in the cache and `document.fonts.check()` starts answering
+  true, but nothing on screen changes. So Spender.jsx's `waitFonts` gate would wait for Cinzel,
+  see it resolve, and then the whole site painted in Georgia; only the SECOND visit looked
+  right. Caught in the shot harness, where every browser context is a cold cache: the wordmark
+  came out in lowercase Georgia with `cinzel:true` in the same probe. `swap` is safe here
+  precisely because of the `size-adjust` metric-matched fallbacks — the worst case is a repaint
+  at the same widths, not a reflow.
 - **`lobby.jsx`** — shared lobby chrome (`LobbyHeader`/`LobbySectionHd`/`LobbyEmpty`/`LobbyLoading`/
   `TurnBadge`, cache helpers) + `GameMenu` (the in-game ☰ dropdown: Return / View rules / Abandon; falsy
   items filtered; Esc/click-outside close) + `CreateModal`/`LobbyCreateRow` (the unified "New Game" modal
@@ -67,6 +76,52 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
   optional props). Verify a splice against the pristine pre-refactor commit `dc1b005`, not a `.bak`.
 - **`AuthScreen.jsx` / `HomeScreen.jsx`** — site-SHELL screens, here for the DEPENDENCY DIRECTION, not
   for semantics. See `games/spender/CLAUDE.md` → Frontend for why, and what finishing the split needs.
+  **THE THREE SHELL SCREENS ARE ONE DESIGN, HELD TOGETHER BY PAIRED SELECTORS**
+  (`.home,.auth-screen,.loading-screen` in `games/spender/Spender.css` — the loading
+  screen still lives in `Spender.jsx`). The ground (fixed warm top light + vignette +
+  a tiled feTurbulence grain), the foiled wordmark and the `HERO_RULE` ornament are
+  written ONCE and listed on all three, and `HERO_RULE`/`SITE_FOOT` are exported from
+  `HomeScreen.jsx` and passed into `AuthScreen`. Do not copy a declaration to a second
+  screen — a user sees two of these ten seconds apart, and a copied rule always drifts.
+  Two layout rules there are load-bearing rather than stylistic:
+  - **The card is a list ROW at 1–2 columns and a POSTER at 3.** At two columns the card
+    is 440–550px wide and ~190 tall (nearly 3:1), and the poster stacks everything down
+    the left, so 40% of every card was empty. One DOM serves both via
+    `grid-template-areas` over four flat children (emblem / text / players / go).
+  - **A card that would be alone on its row SPANS the row** (`:last-child:nth-child(3n+1)`
+    at three columns, `2n+1` at two, and the same for `.home-extra`). It is keyed on the
+    COUNT, not on "seven games": an eighth game turns it off by itself. Centring a
+    partial row instead only lands on the grid for some column/remainder parities, so it
+    was on-grid at the laptop width and straddling a gutter at the tablet width.
+    **The banner's composition is ONE rule shared by both tiers**; only the
+    `flex-basis:100%` lives per tier. It first kept the list-row stack at two columns
+    (everything in the left 40% of a 1400px card) and sent the pill to the far container
+    edge at three (1000px from the description it annotates) — two fallbacks rather than
+    a design. Note the `@media(max-width:559px)` counter-block: at one column EVERY card
+    is `:last-child`-eligible in the sense that matters, so without it the whole list
+    turned into banners.
+  - **`@media(min-width:1000px) and (max-height:880px)` compresses the ramp**, and it is
+    keyed on HEIGHT because that is what runs out. 1280x800 is the one common desktop
+    size where the page overflowed, and the fold landed within ~20px of the "Also here"
+    rule — a section divider and three card tops as the last thing on screen, which is
+    the worst possible cut. A 1280x1100 window keeps the full ramp. It is LAST in the
+    section so it out-orders what it overrides; a media query adds no specificity.
+- **`.home` NEEDS `width:100%`, and this is not tidiness.** It is a flex ITEM (`.app` is a
+  column flex container) and it carries `margin:0 auto`. **Auto inline margins on a flex
+  item switch off the default `stretch`**, so with `max-width:900px` alone the box sized to
+  fit-content — about 516px — and the max-width never applied at any viewport. The site
+  rendered as a narrow ribbon down the middle of every desktop, with the game titles
+  wrapping in 240px columns, for as long as that rule existed. `.offline-hub` already
+  carried `width:100%` and is why IT looked right. **Every DOM-level check passed the whole
+  time**, which is why `screens.mjs`'s `homeScreen` block now asserts a WIDTH.
+- **`--text-soft` (`theme.base-css.css`) is the body-copy dim; `--text-dim` is for labels and
+  `--text-muted` is DECORATION ONLY.** Measured on `--surface`: soft 6.1:1, dim 4.40:1 (fails
+  AA for normal-size text), muted 2.5:1. A sentence in `--text-dim` on a card is below AA.
+- **The home accents are BOUND, not chosen** (`GAMES` in `HomeScreen.jsx`): each is its card
+  title's ink, so ≥4.5:1 on `--surface`; ≥23° apart in hue, or the colour stops doing the
+  identifying job it exists for; and inside a 0.364–0.404 luminance band, or the seven
+  titles read as different weights. `screens.mjs` measures all three off the live page —
+  it caught Spender and Rag Tag landing 21° apart, which looked fine by eye.
 - **`update-nudge.js`** — the stale-tab refresh prompt. It compares frontend-to-frontend via
   `version.json` / `__BUILD_ID__`, **never** against the backend's commit (frontend-only pushes leave the
   two SHAs legitimately different — a cross-comparison would cry wolf on every deploy).

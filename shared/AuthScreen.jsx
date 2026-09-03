@@ -120,6 +120,10 @@ export default function AuthScreen({ siteName, siteFoot, httpBase, css, myId, on
 		<>
 			<style>{css}</style>
 			<div className="app auth-screen">
+				{/* hero + card centre together in the space above the footer; the footer
+				    then lands on the bottom edge as it does on the home menu, instead of
+				    hanging 145px above it because the card happens to be short. */}
+				<div className="auth-main">
 				<div className="auth-hero">
 					<h1 className="auth-logo">{siteName}</h1>
 					{heroRule}
@@ -166,15 +170,15 @@ export default function AuthScreen({ siteName, siteFoot, httpBase, css, myId, on
 										<span className="auth-error-icon" aria-hidden="true">{ICON.alert}</span>{error}
 									</div>}
 								</div>
-								<button className="btn btn-gold btn-full" onClick={submit} disabled={loading}>
-									{loading && <span className="spinner" />}
-									{tab === "login" ? "Sign In" : "Create Account"}
-								</button>
 								<p className="auth-note">
 									{tab === "login"
 										? "Signed-in games are saved and can be resumed from any device."
 										: "A name and a password, nothing else — no email, no verification."}
 								</p>
+								<button className="btn btn-gold btn-full" onClick={submit} disabled={loading}>
+									{loading && <span className="spinner" />}
+									{tab === "login" ? "Sign In" : "Create Account"}
+								</button>
 							</>
 						) : (
 							<>
@@ -192,11 +196,12 @@ export default function AuthScreen({ siteName, siteFoot, httpBase, css, myId, on
 										</li>
 									))}
 								</ul>
-								<button className="btn btn-outline btn-full" onClick={playAsGuest}>
+								<button className="btn btn-gold btn-full" onClick={playAsGuest}>
 									Play as Guest
 								</button>
 							</>
 						)}
+					</div>
 					</div>
 				</div>
 

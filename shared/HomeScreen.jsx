@@ -45,7 +45,7 @@ const SITE_FOOT = "Play in the browser — no download, no ads";
 const GAMES = [
 	{ id: "spender", name: "Spender", tagline: "A gem merchant's game of prestige", status: "ready", screen: "spender", accent: "#cba33c", players: "1–4 players" },
 	{ id: "coc", name: "Castles of Crimson", tagline: "A realm of conquest and intrigue", status: "ready", screen: "coc", accent: "#ef8290", players: "1–4 players" },
-	{ id: "wherewolf", name: "Where Wolf", tagline: "A village of secrets and lies", status: "ready", screen: "werewolf", accent: "#8fa4ea", players: "3–10 players" },
+	{ id: "wherewolf", name: "Where Wolf", tagline: "A village of secrets and lies", status: "ready", screen: "werewolf", accent: "#8ca5f2", players: "3–10 players" },
 	{ id: "duel", name: "Spender Duel", tagline: "A two-player battle of gems and crowns", status: "ready", screen: "duel", accent: "#d18ede", players: "1–2 players" },
 	// APPEND new games only — webapp/test/screens.mjs clicks .home-game-card by INDEX.
 	{ id: "dontminion", name: "Dontminion", tagline: "A kingdom built one card at a time", status: "ready", screen: "dontminion", accent: "#45b3bd", players: "1–4 players" },
