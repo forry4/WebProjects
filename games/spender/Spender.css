@@ -326,7 +326,10 @@
     grid-template-columns:auto minmax(0,1fr) auto;grid-template-rows:auto auto;
     grid-template-areas:"emblem text go" "emblem players go";column-gap:14px;row-gap:9px;
     align-items:start}
-  .home-game-card:last-child:nth-child(2n+1) .home-game-players{justify-self:start}
+  /* ...and its pill's title-line offset, which otherwise made the last card in a
+     single-column list exactly 2px taller than the six above it. */
+  .home-game-card:last-child:nth-child(2n+1) .home-game-players,
+  .home-game-card:last-child:nth-child(3n+1) .home-game-players{justify-self:start;align-self:end;margin-top:0}
   /* ...and its PLATE back to the top, or the last card in the list is the only one
      whose emblem is vertically centred — visible as Rag Tag's plate sitting lower
      than the six above it in a single scrolling column. */
