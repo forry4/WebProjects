@@ -637,56 +637,34 @@ try {
 		check("...and holds its accent's hue", drift.length === 0,
 			drift.map((d) => `${d.text} ${Math.round(d.accentHue)}->${Math.round(d.plateHue)}`).join(", "));
 
-		// THE BANNER'S PLATE SITS ON THE POSTERS' PLATE LINE. The banner spans a row
-		// directly under a 3-wide grid whose plates form a hard vertical, so a few px of
-		// jog lands exactly where the eye is already tracking. Its horizontal padding is
-		// the posters' and only its VERTICAL padding is its own; this is what says so,
-		// because the two are set in different rules at three different tiers and drifted
-		// by 4px at both >=1500 widths while matching at 1280.
-		for (const w of [1180, 1600, 1920]) {
+		// EVERY CARD IS THE SAME SIZE, AT EVERY TIER. There used to be a "banner": a card
+		// alone on its row spanned the row, which made the seventh game a different shape
+		// from the other six and cost three separate bugs on its own (the pill's alignment,
+		// a chevron that leaked into the one-column tier, and a plate 15px below its
+		// siblings'). The user's call, and the right one: seven identical cards, and a last
+		// row that is simply not full. This is the check that keeps it that way.
+		for (const w of [390, 834, 1180, 1600, 1920]) {
 			await page.setViewportSize({ width: w, height: 1000 });
-			await page.waitForTimeout(200);
-			const edges = await page.evaluate(() => {
-				const cards = [...document.querySelectorAll(".home-game-card")];
-				const last = cards[cards.length - 1];
-				const x = (c) => Math.round(c.querySelector(".home-game-emblem").getBoundingClientRect().left
-					- c.getBoundingClientRect().left);
-				// Only meaningful while the last card really is alone on its row.
-				const alone = Math.round(last.getBoundingClientRect().width)
-					> Math.round(cards[0].getBoundingClientRect().width) + 8;
-				return { alone, poster: x(cards[0]), banner: x(last) };
+			await page.waitForTimeout(250);
+			const cards = await page.evaluate(() => {
+				const cs = [...document.querySelectorAll(".home-game-card")];
+				const r = (e) => e.getBoundingClientRect();
+				const at = (c, sel) => { const e = c.querySelector(sel); return e
+					? [Math.round(r(e).left - r(c).left), Math.round(r(e).top - r(c).top)] : null; };
+				return {
+					w: cs.map((c) => Math.round(r(c).width)),
+					h: cs.map((c) => Math.round(r(c).height)),
+					plate: cs.map((c) => String(at(c, ".home-game-emblem"))),
+					title: cs.map((c) => String(at(c, ".home-game-name"))),
+					pill: cs.map((c) => String(at(c, ".home-game-players"))),
+					chevron: cs.map((c) => +getComputedStyle(c.querySelector(".home-game-go")).opacity),
+				};
 			});
-			check(`the banner's plate lands on the posters' plate line at ${w}px`,
-				!edges.alone || edges.poster === edges.banner, JSON.stringify(edges));
+			const one = (k) => new Set(cards[k]).size === 1;
+			check(`all seven cards are identical at ${w}px`,
+				["w", "h", "plate", "title", "pill", "chevron"].every(one),
+				JSON.stringify(cards));
 		}
-		await page.setViewportSize({ width: 1440, height: 900 });
-		await page.waitForTimeout(200);
-
-		// AT ONE COLUMN THE SEVEN CARDS ARE IDENTICAL IN SHAPE, so nothing may single one
-		// out. The banner selector `:last-child:nth-child(3n+1)` also matches when there is
-		// only ONE column and every card is already full width, and this section has now
-		// paid for that three times: the pill's title-line offset, the half-lit chevron,
-		// and the plate's centring — the last of which ALSO needed the row-form rule moved
-		// after the base rules, since a media query buys no specificity and only the
-		// banner's own rule was specific enough to win where it sat. Geometry, measured, is
-		// the only thing that catches all three.
-		await page.setViewportSize({ width: 390, height: 900 });
-		await page.waitForTimeout(250);
-		const singleCol = await page.evaluate(() => {
-			const cards = [...document.querySelectorAll(".home-game-card")];
-			const at = (c, sel) => { const e = c.querySelector(sel); if (!e) return null;
-				return Math.round(e.getBoundingClientRect().top - c.getBoundingClientRect().top); };
-			return {
-				one: new Set(cards.map((c) => Math.round(c.getBoundingClientRect().width))).size === 1,
-				plate: cards.map((c) => at(c, ".home-game-emblem")),
-				title: cards.map((c) => at(c, ".home-game-name")),
-				chevron: cards.map((c) => +getComputedStyle(c.querySelector(".home-game-go")).opacity),
-			};
-		});
-		const uniform = (a) => new Set(a).size === 1;
-		check("at one column no card is singled out", singleCol.one
-			&& uniform(singleCol.plate) && uniform(singleCol.title) && uniform(singleCol.chevron),
-			JSON.stringify(singleCol));
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await page.waitForTimeout(200);
 
@@ -721,17 +699,17 @@ try {
 			const m = await page.evaluate(() => {
 				const cards = [...document.querySelectorAll(".home-game-card")];
 				const box = document.querySelector(".home").getBoundingClientRect();
-				const widths = [...new Set(cards.slice(0, 6).map((c) => Math.round(c.getBoundingClientRect().width)))];
+				// ALL SEVEN, not the first six. The seventh used to be a full-width banner
+				// and had to be excluded here; every card is the same size now, so
+				// including it is the stronger check and this line is the assertion.
+				const widths = [...new Set(cards.map((c) => Math.round(c.getBoundingClientRect().width)))];
 				const outside = cards.filter((c) => {
 					const r = c.getBoundingClientRect();
 					return r.left < box.left - 1 || r.right > box.right + 1;
 				}).length;
-				return { over: document.documentElement.scrollWidth > window.innerWidth, widths, outside,
-					// The seventh card is alone on its row at every column count the
-					// ladder offers, so it must span the full grid at every one of them.
-					bannerSpans: Math.round(cards[6].getBoundingClientRect().width) >= Math.round(box.width - 48) - 1 };
+				return { over: document.documentElement.scrollWidth > window.innerWidth, widths, outside };
 			});
-			if (m.over || m.outside || m.widths.length !== 1 || !m.bannerSpans) bad.push(`${w}px ${JSON.stringify(m)}`);
+			if (m.over || m.outside || m.widths.length !== 1) bad.push(`${w}px ${JSON.stringify(m)}`);
 		}
 		check(`the home grid survives all ${boundaries.length} breakpoint boundaries`, bad.length === 0,
 			bad.slice(0, 3).join(" | "));

@@ -115,22 +115,19 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
   the end of a centred column while the other two pinned it, so at 2560 the same
   sentence sat 207px off the bottom against their 35. All three screens use the same
   `main` + `shell-foot` shell now.
-  **A banner rule must be keyed on the LAYOUT the card landed in, not on its index.**
-  `:last-child:nth-child(3n+1)` also matches at ONE column, where every card is full
-  width and there is nothing to distinguish the last one — so the banner's half-lit
-  chevron made exactly one of seven identical phone rows look selected, on the tier that
-  has no hover to explain it. The `@media(max-width:559px)` counter-block has to undo
-  every banner property, and it has now been missed THREE times: the pill's title-line
-  offset, the half-lit chevron, and the plate's centring. `screens.mjs` measures it now
-  — at 390 every card's plate offset, title offset and chevron opacity must be identical,
-  which catches all three shapes at once and was verified by restoring the bug.
-  **AND A MEDIA QUERY BUYS NO SPECIFICITY.** This section has paid for that three times
-  too, so put every tier block AFTER the base rules it overrides, not next to them. The
-  plate bug needed both fixes: the row-form `@media(max-width:999px)` rule sat above the
-  base `.home-game-emblem{align-self:start}` and so did nothing for six of the seven
-  cards, while the BANNER's rule — specific enough to win wherever it sits — kept
-  applying. That is what made exactly one card differ. A rule that looks right and
-  changes nothing is the worst kind, because the diff reads as a fix.
+  **ALL SEVEN GAME CARDS ARE THE SAME SIZE, AT EVERY TIER — do not reintroduce a
+  "banner".** A card alone on its row used to span the row, which made the seventh game a
+  different SHAPE from the other six, and that one idea cost three separate bugs on its
+  own: the pill aligned to the block instead of the title line, a half-lit chevron leaked
+  into the one-column tier where all seven cards are identical and there is no hover to
+  explain it, and the plate sat 15px below its siblings'. Every one of them came from the
+  same root — `:last-child:nth-child(3n+1)` also matches when there is only ONE column —
+  and each needed its own counter-rule in a `@media(max-width:559px)` block that was
+  missed three times running. The user called it: seven identical cards and a last row
+  that is simply not full. `screens.mjs` measures width, height, plate/title/pill offsets
+  and chevron opacity across all seven at five widths, so the whole class is gated rather
+  than the instance in front of you. The fold still holds at 1280x800 and 1920x1080; the
+  room for the third equal row came out of the two tiers' card padding and plate size.
   **`.auth-panel`'s `min-height` is a MEASURED number and rots on any copy change.** It
   is the tallest tab's natural height, so the three tabs come out one height and the
   centred card cannot move the tab strip under the cursor. Adding one helper line moved

@@ -310,7 +310,6 @@
 @media(min-width:1000px){
   /* Only the SPAN lives per tier; the banner's composition is one rule further down,
      shared by both tiers it can occur at. */
-  .home-game-card:last-child:nth-child(3n+1){flex-basis:100%;padding:30px 18px 30px 22px}
 }
 /* THE BANNER HAS ONE COMPOSITION, at both widths it can occur at. It first kept the
    list-row stack at two columns (everything in the left 40% of a 1400px card) and sent
@@ -319,50 +318,24 @@
    pill immediately after the text so it stays tethered to it, and the chevron alone at
    the right edge. The text column is `auto`, so the pill follows the tagline's actual
    width instead of being pushed away by a 1fr. */
-.home-game-card:last-child:nth-child(2n+1),
-.home-game-card:last-child:nth-child(3n+1){
-  grid-template-columns:auto minmax(0,1fr) auto auto;grid-template-rows:auto;
-  grid-template-areas:"emblem text players go";column-gap:28px;row-gap:0;align-items:center}
-.home-game-card:last-child:nth-child(2n+1) .home-game-emblem,
-.home-game-card:last-child:nth-child(3n+1) .home-game-emblem{align-self:center;margin-bottom:0}
 /* align-self:start puts the pill on the TITLE's line rather than in the blank gap
    between the title and the tagline, which is where centring on the block had left it. */
-.home-game-card:last-child:nth-child(2n+1) .home-game-players,
-.home-game-card:last-child:nth-child(3n+1) .home-game-players{align-self:center;justify-self:end;margin-top:0}
-.home-game-card:last-child:nth-child(2n+1) .home-game-go,
-.home-game-card:last-child:nth-child(3n+1) .home-game-go{align-self:center;justify-self:end;
-  margin-top:0;opacity:.45;transform:none}
-.home-game-card:last-child:nth-child(2n+1):hover .home-game-go,
-.home-game-card:last-child:nth-child(3n+1):hover .home-game-go{opacity:1}
 @media(max-width:559px){
   /* One column: every card is already full width, so the "alone on its row" selectors
      match all seven and must not turn the whole list into banners. */
-  .home-game-card:last-child:nth-child(2n+1),.home-game-card:last-child:nth-child(3n+1){
-    grid-template-columns:auto minmax(0,1fr) auto;grid-template-rows:auto auto;
-    grid-template-areas:"emblem text go" "emblem players go";column-gap:14px;row-gap:9px;
-    align-items:start}
   /* ...and its pill's title-line offset, which otherwise made the last card in a
      single-column list exactly 2px taller than the six above it. */
-  .home-game-card:last-child:nth-child(2n+1) .home-game-players,
-  .home-game-card:last-child:nth-child(3n+1) .home-game-players{justify-self:start;align-self:end;margin-top:0}
   /* ...and its chevron back to hover-only. The banner keeps one lit because it has no
      neighbouring card to close its row; a full-width card in a ONE-column list has six
      identical siblings, and lighting only the last one reads as "this row is selected". */
-  .home-game-card:last-child:nth-child(2n+1) .home-game-go,
-  .home-game-card:last-child:nth-child(3n+1) .home-game-go{opacity:0;transform:translateX(-5px)}
-  .home-game-card:last-child:nth-child(2n+1):hover .home-game-go,
-  .home-game-card:last-child:nth-child(3n+1):hover .home-game-go{opacity:.9;transform:none}
   /* Its plate centres like every other row's. This block exists because the banner
      rule also matches at ONE column, where the last card has six identical siblings and
      must not differ from them in any way; it has been missed twice already. */
-  .home-game-card:last-child:nth-child(2n+1) .home-game-emblem,
-  .home-game-card:last-child:nth-child(3n+1) .home-game-emblem{align-self:center}
 }
 @media(min-width:560px) and (max-width:999px){
   /* Same idea as the three-column tier: the newest game must not read as lighter than
      the utility strip below it. Less padding than there because a two-column card is a
      ROW at 115px, not a 208px poster, so the banner has less to live up to. */
-  .home-game-card:last-child:nth-child(2n+1){flex-basis:100%;padding:26px 16px 26px 20px}
   /* No promotion for the side tier — see .home-extras: it never has a two-column
      step, so it can never orphan one. */
 }
@@ -509,15 +482,18 @@
   .home-logo,.auth-logo,.loading-logo{font-size:4.2rem}
   .home-tagline,.auth-tagline,.loading-sub{font-size:1.26rem}
   .home-games,.home-extras{--gap:22px}
-  .home-game-card{padding:21px 22px 20px 26px}
-  .home-game-card:last-child:nth-child(3n+1){padding:34px 22px 34px 26px}
-  .home-game-emblem{width:58px;height:58px;border-radius:14px}
-  .home-game-emblem svg{width:33px;height:33px}
+  /* Trimmed so THREE equal rows still land on a 1080 fold — seven same-size cards are
+     one more row than the old short banner cost, and a 1920x1080 desktop is common
+     enough to be worth the 9px. Still the most generous card in the ramp by a margin
+     (178px against the laptop tier's 149). */
+  .home-game-card{padding:13px 22px 12px 26px}
+  .home-game-emblem{width:52px;height:52px;border-radius:13px;margin-bottom:11px}
+  .home-game-emblem svg{width:30px;height:30px}
   .home-game-name{font-size:1.42rem}
   .home-game-desc{font-size:1.06rem}
   .home-game-players{font-size:.86rem}
   .home-more-hd{font-size:.8rem}
-  .home-extra{padding:17px 19px}
+  .home-extra{padding:13px 19px}
   .home-extra-icon{width:44px;height:44px}
   .home-extra-icon svg{width:25px;height:25px}
   .home-extra-label{font-size:.96rem}
@@ -605,7 +581,7 @@
    so it out-orders the base rules it overrides — a media query adds no specificity. */
 @media(min-width:1000px) and (max-height:880px){
   .home,.auth-screen,.loading-screen{--shell-top:14px;--shell-hero-gap:10px}
-  .home-hero{margin-bottom:15px}
+  .home-hero{margin-bottom:11px}
   /* ALL THREE LOGOS, not just the menu's. Compressing only `.home-logo` here is what
      made the wordmark 48px on the menu and 64px on the two screens in front of it at
      1280x800 — so the entry sequence was a title that visibly SHRANK by a third
@@ -614,23 +590,25 @@
   .home-logo,.auth-logo,.loading-logo{font-size:3rem}
   .home-rule{height:16px;margin-top:7px}
   .home-tagline,.auth-tagline,.loading-sub{font-size:1rem;margin-top:12px}
-  /* 16, not 12. The card's side padding does NOT compress at this tier (21px, the
-     same as a phone's), so a 12px gutter was the one spacing value that left the
-     system: every other width holds gutter/padding at 0.83-0.86 and this sat at
-     0.57, which is the only breakpoint where the space BETWEEN two cards is
-     smaller than the space inside one's edge -- so the six posters read as one
-     mass rather than six objects. The 10px it costs comes off the banner. */
+  /* 16, not 12: the card's side padding does not compress much at this tier, and a
+     12px gutter was the one spacing value outside the system -- every other width holds
+     gutter/padding at 0.83-0.86 and this sat at 0.57, the only breakpoint where the
+     space BETWEEN two cards was smaller than the space inside one's edge, so the six
+     posters read as one mass rather than six objects. */
   .home-games,.home-extras{--gap:16px}
-  .home-game-card{padding:15px 15px 14px 20px}
-  /* The banner keeps a proportion here too, and the room comes from the three gaps
-     below rather than from the fold: 1280x800 still lands at exactly 800. */
-  .home-game-card:last-child:nth-child(3n+1){padding:17px 16px 17px 20px}
-  .home-game-emblem{margin-bottom:10px}
-  .home-game-players{margin-top:10px}
-  .home-more{margin-top:14px}
+  /* THIS TIER EXISTS FOR THE FOLD, and it now pays for three EQUAL rows rather than two
+     plus a short banner: seven same-size cards are simply more page than 800px, so the
+     compression that used to come free from the banner comes from the cards. Every value
+     below was walked down until `docH === innerH` at 1280x800 exactly. */
+  .home-game-card{padding:11px 15px 10px 20px}
+  .home-game-emblem{width:38px;height:38px;border-radius:10px;margin-bottom:7px}
+  .home-game-emblem svg{width:22px;height:22px}
+  .home-game-name{font-size:1.16rem}
+  .home-game-players{margin-top:8px}
+  .home-more{margin-top:10px}
   .home-more-hd{margin-bottom:8px}
-  .home-extra{padding:10px 14px}
-  .shell-foot{padding-top:10px}
+  .home-extra{padding:8px 14px}
+  .shell-foot{padding-top:8px}
 }
 
 /* ─── Browser ───────────────────────────────────────────────────────────── */
