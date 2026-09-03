@@ -120,7 +120,9 @@
 
 .auth-note{margin:auto 0 20px;color:var(--text-soft);
   font-size:.83rem;line-height:1.5;text-wrap:balance}
-.auth-note-sub{display:block;margin-top:5px;color:var(--text-dim);font-size:.78rem}
+/* NOT --text-dim: at 4.35:1 and ~11px this was the only text on the site under the
+   AA floor. Still clearly subordinate to the primary helper above it. */
+.auth-note-sub{display:block;margin-top:5px;color:#9a8d78;font-size:.78rem}
 .auth-facts{list-style:none;margin:auto 0 20px;padding:0;display:flex;flex-direction:column;gap:12px}
 .auth-fact{display:flex;align-items:flex-start;gap:10px;color:var(--text-soft);
   font-size:.87rem;line-height:1.35;text-wrap:pretty}
@@ -568,21 +570,16 @@
      EVEN, or it breaks after a preposition and leaves a two-word runt. */
   .home-game-desc{text-wrap:balance}
 }
-/* The tagline reserves a second line ONLY where the taglines actually use one. Below
-   ~375px most of the seven wrap and reserving the line for the one or two that do not
-   buys an even scroll for 20px a card. Above it, none of them wrap — so the same rule
-   there put a visible blank line under every tagline and added 149px to a 390px phone
-   in exchange for equalising heights that were already equal. Measured both ways
-   rather than argued by walking the width one pixel at a time: 377px is the last width
-   at which any tagline still wraps, and from 378 up every card is the same height on
-   its own. If the taglines are ever reworded, re-walk it — this number is a property
-   of the COPY, not of any device. */
-@media(max-width:377px){
-  /* ...and the reserve splits above and below the line rather than pooling under it,
-     or the one single-line tagline strands its pill 21px below where every neighbour
-     puts it. */
-  .home-game-desc{min-height:3em;display:flex;align-items:center}
-}
+/* NO HEIGHT RESERVE AT ONE COLUMN, and this replaces two attempts at one.
+   Reserving the second tagline line made all seven cards the same height so their pills
+   aligned down the stack. Both ways of spending the surplus were worse than not having
+   it: pooled under the tagline it stranded the one single-line card's pill 21px below
+   its neighbours', and split around the tagline it left that card's internal gaps 73%
+   and 51% larger than the other six, so the subtitle floated in the middle of a card
+   whose siblings were tight. The alignment bought little -- the cards carry their own
+   borders and sit 18px apart, so there is no perceived column rule to align to -- and
+   variable-height rows in a vertical stack read perfectly well. Card height follows
+   content, and all seven interiors are identical. */
 @media(max-width:360px){
   .home-game-emblem{width:40px;height:40px;border-radius:10px}
   .home-game-emblem svg{width:23px;height:23px}
@@ -608,11 +605,17 @@
   .home-logo,.auth-logo,.loading-logo{font-size:3rem}
   .home-rule{height:16px;margin-top:7px}
   .home-tagline,.auth-tagline,.loading-sub{font-size:1rem;margin-top:12px}
-  .home-games,.home-extras{--gap:12px}
+  /* 16, not 12. The card's side padding does NOT compress at this tier (21px, the
+     same as a phone's), so a 12px gutter was the one spacing value that left the
+     system: every other width holds gutter/padding at 0.83-0.86 and this sat at
+     0.57, which is the only breakpoint where the space BETWEEN two cards is
+     smaller than the space inside one's edge -- so the six posters read as one
+     mass rather than six objects. The 10px it costs comes off the banner. */
+  .home-games,.home-extras{--gap:16px}
   .home-game-card{padding:15px 15px 14px 20px}
   /* The banner keeps a proportion here too, and the room comes from the three gaps
      below rather than from the fold: 1280x800 still lands at exactly 800. */
-  .home-game-card:last-child:nth-child(3n+1){padding:22px 16px 22px 20px}
+  .home-game-card:last-child:nth-child(3n+1){padding:17px 16px 17px 20px}
   .home-game-emblem{margin-bottom:10px}
   .home-game-players{margin-top:10px}
   .home-more{margin-top:14px}

@@ -445,6 +445,60 @@ try {
 				same("tabs") && same("card") && same("field"), JSON.stringify(marks));
 		}
 
+		// EVERY PIECE OF TEXT ON THE FRONT DOOR CLEARS AA, not just the ones someone
+		// thought to check. Three separate review rounds each found a different single
+		// element under 4.5:1 -- a helper line, a section label, a button label -- and each
+		// time it was a token reused one step too far down the hierarchy. This walks the
+		// rendered text instead: for each text node it composites the real background by
+		// walking ancestors to the first opaque fill, so it measures what is actually behind
+		// the glyphs rather than `--bg`. That matters here because the top of the page is
+		// LIT -- the warm lamp raises the local ground and takes the contrast down with it,
+		// which is exactly how "GUEST" measured 4.02 while its token measured 5.9.
+		const thin = await page.evaluate(() => {
+			const cv = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+			const rgb = (v) => { cv.clearRect(0, 0, 1, 1); cv.fillStyle = "#000"; cv.fillStyle = v;
+				cv.fillRect(0, 0, 1, 1); return [...cv.getImageData(0, 0, 1, 1).data]; };
+			const lum = ([r, g, b]) => { const f = (c) => { c /= 255; return c <= .03928 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4; };
+				return .2126 * f(r) + .7152 * f(g) + .0722 * f(b); };
+			const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + .05) / (y + .05); };
+			// First ancestor with a non-transparent background, flattened over the page ground.
+			const groundOf = (el) => {
+				const base = rgb(getComputedStyle(document.body).backgroundColor);
+				let out = [base[0], base[1], base[2]];
+				const stack = [];
+				for (let n = el; n && n !== document.documentElement; n = n.parentElement) stack.unshift(n);
+				for (const n of stack) {
+					const c = rgb(getComputedStyle(n).backgroundColor);
+					const a = c[3] / 255;
+					if (a > 0) out = out.map((v, i) => Math.round(c[i] * a + v * (1 - a)));
+				}
+				return out;
+			};
+			const bad = [];
+			for (const el of document.querySelectorAll(".auth-screen *")) {
+				const txt = [...el.childNodes].filter((n) => n.nodeType === 3)
+					.map((n) => n.textContent.trim()).join(" ").trim();
+				if (!txt) continue;
+				const cs = getComputedStyle(el);
+				if (cs.visibility === "hidden" || cs.display === "none" || +cs.opacity === 0) continue;
+				// The wordmark's glyphs are painted by a gradient through `background-clip:text`,
+				// so its `color` is transparent and compositing it against the ground measures
+				// 1.09:1 on type that is obviously fine. Skip ONLY that case, narrowly: a
+				// transparent colour with no text-clipped background is a genuine bug and must
+				// still be caught.
+				const clipped = (cs.webkitBackgroundClip || cs.backgroundClip) === "text";
+				if (clipped && rgb(cs.color)[3] === 0) continue;
+				const px = parseFloat(cs.fontSize), bold = +cs.fontWeight >= 700;
+				// WCAG "large text": >=24px, or >=18.66px bold.
+				const floor = (px >= 24 || (bold && px >= 18.66)) ? 3 : 4.5;
+				const r = ratio(rgb(cs.color), groundOf(el));
+				if (r < floor) bad.push(`"${txt.slice(0, 28)}" ${r.toFixed(2)}:1 @${px}px (needs ${floor})`);
+			}
+			return bad;
+		});
+		check("every piece of text on the sign-in screen clears its AA floor",
+			thin.length === 0, thin.join(" | ").slice(0, 400));
+
 		check("no page errors during auth", errors.length === 0, errors[0]?.slice(0, 160) || "");
 		await ctx.close();
 	}
