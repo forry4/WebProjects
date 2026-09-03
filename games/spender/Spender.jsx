@@ -67,7 +67,7 @@ import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 // Site-shell screens, extracted out of this file (see shared/AuthScreen.jsx).
 import AuthScreen from "../../shared/AuthScreen.jsx";
-import HomeScreen, { SITE_NAME, SITE_FOOT, GAMES, HERO_RULE } from "../../shared/HomeScreen.jsx";
+import HomeScreen, { SITE_NAME, GAMES, HERO_RULE } from "../../shared/HomeScreen.jsx";
 // The home card and Spender's own lobby must be the same colour; see shared/accents.js.
 import { GAME_ACCENTS } from "../../shared/accents.js";
 // Offline vs-AI: the local game driver (wasm engine + IndexedDB saves) — see offline.js.
@@ -2820,9 +2820,7 @@ export default function SpenderApp() {
 						onClick={() => { pushPath(buildPath("offline")); enterOfflineHub(null); }}>
 						Play offline vs AI
 					</button>
-					</div>
-					<p className="shell-foot">{SITE_FOOT}</p>
-				</div>
+					</div>				</div>
 			</>
 		);
 	}
@@ -2831,7 +2829,7 @@ export default function SpenderApp() {
 	if (screen === "auth") return (
 		// heroRule is the home menu's ornament, handed over rather than re-drawn:
 		// the front door and the menu behind it are one title plate.
-		<AuthScreen siteName={SITE_NAME} siteFoot={SITE_FOOT} httpBase={HTTP_BASE} css={css} myId={myId}
+		<AuthScreen siteName={SITE_NAME} httpBase={HTTP_BASE} css={css} myId={myId}
 			heroRule={HERO_RULE} onAuthenticated={handleAuthenticated} />
 	);
 

@@ -42,13 +42,13 @@
 .auth-screen{display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
   min-height:100vh;padding:calc(env(safe-area-inset-top,0px) + var(--shell-top)) 20px 24px;
   position:relative;z-index:0}
-/* The centring block the footer sits below, shared by all three screens. */
+/* The block that holds each shell screen's content, shared by all three. */
 .auth-main{flex:1 1 auto;width:100%;display:flex;flex-direction:column;align-items:center;
   justify-content:flex-start}
 /* flex-start, NOT centred: centring the column puts a variable slack above the identity
    rail, which moves the wordmark with the viewport height — and the wordmark's whole
-   job is to hold still while the three screens change under it. All three top-anchor
-   and pin the footer, so the slack lands in one place on all of them. */
+   job is to hold still while the three screens change under it. All three top-anchor,
+   so the slack lands in one place on all of them. */
 .home-main{flex:1 1 auto;width:100%;display:flex;flex-direction:column;justify-content:flex-start}
 .loading-screen .auth-main{gap:0;padding-top:calc(var(--shell-rail) + var(--shell-hero-gap))}
 .auth-hero{text-align:center;margin-top:calc(var(--shell-rail) + var(--shell-hero-gap));
@@ -150,14 +150,10 @@
    centre what is left over above --home-w. `.offline-hub` two sections down already
    carried the `width:100%` and is why IT looked right.
 
-   `justify-content:safe center` is the vertical composition. `.app` is 100vh and this
-   fills it, so the catalogue on a 1080p screen leaves a few hundred px spare. Parking
-   the footer on the bottom edge with `margin-top:auto` spent all of it in ONE band
-   under the last row, which reads as content that failed to load; splitting it above
-   the hero and above the footer produced two unequal bands, which reads as a mistake.
-   Centring spends it as two EQUAL bands, which reads as a title page. `safe` is
-   load-bearing: plain `center` on a page taller than the viewport pushes the overflow
-   off the TOP, where no scrollbar can reach it. */
+   The catalogue on a 1080p screen leaves a few hundred px spare, and it is spent
+   BELOW the last row (top-anchored) rather than pooled around the hero: the wordmark
+   sits at the same height on the loading, auth and home screens, and that is what
+   stops the boot sequence reading as three different pages. */
 .home{width:100%;max-width:var(--home-w,1180px);margin:0 auto;flex:1 1 auto;
   display:flex;flex-direction:column;justify-content:flex-start;position:relative;z-index:0;
   padding:calc(env(safe-area-inset-top,0px) + var(--shell-top)) 24px 24px}
@@ -383,8 +379,6 @@
 .home-game-name{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:600;
   font-size:clamp(1.06rem,.99rem + .28vw,1.24rem);line-height:1.18;letter-spacing:.022em;
   color:var(--accent);text-wrap:balance}
-.home-game-desc{color:var(--text-soft);font-size:.95rem;line-height:1.5;font-style:italic;
-  margin-top:6px;text-wrap:pretty}
 /* CRIMSON PRO, NOT CINZEL, and this one is not a taste call. Cinzel's lining "1" is a
    seriffed vertical with full-height serifs top and bottom; set in caps at .1em+
    tracking at 11px it is a capital I, and "1-4 PLAYERS" read as "I-4 PLAYERS" on
@@ -442,21 +436,6 @@
   letter-spacing:.05em;color:#d8caac;line-height:1.2}
 .home-extra-note{font-size:.86rem;font-style:italic;color:#b3a487;line-height:1.35}
 
-/* Says something the wordmark two screens up does not, and short enough to hold one
-   line at 320px. */
-/* ONE CLASS, ON ALL THREE SCREENS. It was `.home-foot` / `.auth-foot` /
-   `.loading-foot`, which is five rules across four different selector lists — and
-   `.loading-foot` had silently missed the <=430px step, so the same sentence set 24%
-   larger on the loading screen than on the two either side of it at a 390px phone,
-   while `.auth-foot` missed the >=1500 one and set 11% smaller at 1920. Three names for
-   one element is the drift; one name is the fix. */
-.shell-foot{margin-top:auto;padding-top:clamp(26px,3.6vh,38px);flex:0 0 auto;text-align:center;
-  font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;letter-spacing:.16em;
-  text-transform:uppercase;color:var(--text-soft)}
-/* Below ~430px the line broke to a two-word widow as the last thing on the page.
-   Tightening it is cheaper than carrying a second string. */
-@media(max-width:430px){.shell-foot{font-size:.6rem;letter-spacing:.09em}}
-
 @media(prefers-reduced-motion:reduce){
   .home-game-card,.home-game-emblem,.home-game-go,.home-extra{transition:none}
   .home-game-card:hover,.home-extra:hover,.home-game-card:active{transform:none}
@@ -490,7 +469,6 @@
   .home-game-emblem{width:52px;height:52px;border-radius:13px;margin-bottom:11px}
   .home-game-emblem svg{width:30px;height:30px}
   .home-game-name{font-size:1.42rem}
-  .home-game-desc{font-size:1.06rem}
   .home-game-players{font-size:.86rem}
   .home-more-hd{font-size:.8rem}
   .home-extra{padding:13px 19px}
@@ -498,7 +476,6 @@
   .home-extra-icon svg{width:25px;height:25px}
   .home-extra-label{font-size:.96rem}
   .home-extra-note{font-size:.95rem}
-  .shell-foot{font-size:.76rem}
   .loading-bar-wrap{width:min(360px,72vw);height:8px}
   .loading-hint{font-size:.92rem}
   .loading-escape{margin-top:36px;min-height:54px;padding:0 32px;font-size:.96rem}
@@ -551,20 +528,7 @@
 }
 @media(max-width:400px){
   .home-game-name{font-size:.98rem;letter-spacing:.012em}
-  /* `pretty` only shortens the LAST line; a tagline that takes exactly two wants them
-     EVEN, or it breaks after a preposition and leaves a two-word runt. */
-  .home-game-desc{text-wrap:balance}
 }
-/* NO HEIGHT RESERVE AT ONE COLUMN, and this replaces two attempts at one.
-   Reserving the second tagline line made all seven cards the same height so their pills
-   aligned down the stack. Both ways of spending the surplus were worse than not having
-   it: pooled under the tagline it stranded the one single-line card's pill 21px below
-   its neighbours', and split around the tagline it left that card's internal gaps 73%
-   and 51% larger than the other six, so the subtitle floated in the middle of a card
-   whose siblings were tight. The alignment bought little -- the cards carry their own
-   borders and sit 18px apart, so there is no perceived column rule to align to -- and
-   variable-height rows in a vertical stack read perfectly well. Card height follows
-   content, and all seven interiors are identical. */
 @media(max-width:360px){
   .home-game-emblem{width:40px;height:40px;border-radius:10px}
   .home-game-emblem svg{width:23px;height:23px}
@@ -608,7 +572,6 @@
   .home-more{margin-top:10px}
   .home-more-hd{margin-bottom:8px}
   .home-extra{padding:8px 14px}
-  .shell-foot{padding-top:8px}
 }
 
 /* ─── Browser ───────────────────────────────────────────────────────────── */

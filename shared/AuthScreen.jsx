@@ -51,7 +51,7 @@ const GUEST_FACTS = [
 	["no", "Cannot resume on another device"],
 ];
 
-export default function AuthScreen({ siteName, siteFoot, httpBase, css, myId, onAuthenticated, heroRule }) {
+export default function AuthScreen({ siteName, httpBase, css, myId, onAuthenticated, heroRule }) {
 	const [tab, setTab] = useState("login");
 	const [name, setName] = useState("");
 	const [password, setPassword] = useState("");
@@ -120,9 +120,9 @@ export default function AuthScreen({ siteName, siteFoot, httpBase, css, myId, on
 		<>
 			<style>{css}</style>
 			<div className="app auth-screen">
-				{/* hero + card centre together in the space above the footer; the footer
-				    then lands on the bottom edge as it does on the home menu, instead of
-				    hanging 145px above it because the card happens to be short. */}
+				{/* hero + card centre together, top-anchored, exactly as on the home
+				    menu — the wordmark must not move as the boot steps through the
+				    three screens. */}
 				<div className="auth-main">
 				<div className="auth-hero">
 					<h1 className="auth-logo">{siteName}</h1>
@@ -209,8 +209,6 @@ export default function AuthScreen({ siteName, siteFoot, httpBase, css, myId, on
 					</div>
 					</div>
 				</div>
-
-				<p className="shell-foot">{siteFoot}</p>
 			</div>
 		</>
 	);

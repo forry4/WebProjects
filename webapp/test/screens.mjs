@@ -786,15 +786,7 @@ try {
 			const el = document.querySelector(".home-logo,.auth-logo,.loading-logo");
 			const cs = getComputedStyle(el), r = el.getBoundingClientRect();
 			const rule = document.querySelector(".home-rule");
-			// THE FOOTER IS PART OF THE LOCKUP. It is one element and one class on all
-			// three screens now, but its distance from the bottom of the page is the
-			// CONTAINER's padding, which is three different rules — so the same
-			// sentence sat 8px lower on the menu than on the two screens in front of
-			// it, and before that, 170px lower. Its size is covered by the shared
-			// class; its POSITION is not, so it is measured here.
-			const foot = document.querySelector(".shell-foot");
-			const fb = foot?.getBoundingClientRect();
-			// ...and WHERE it sits, not only how it is set. The three screens placed it at
+			// WHERE the wordmark sits, not only how it is set. The three screens placed it at
 			// 269 / 98.5 / 68.5 at 1280x800, because loading and auth centred their block
 			// while home top-anchored — so both boot paths moved the brand mark ~200px
 			// while the user watched. Size was identical the whole time, which is why the
@@ -802,9 +794,7 @@ try {
 			return { top: Math.round(r.top + window.scrollY),
 				px: cs.fontSize, track: cs.letterSpacing,
 				ruleW: rule ? Math.round(rule.getBoundingClientRect().width) : null,
-				gap: rule ? Math.round(rule.getBoundingClientRect().top - r.bottom) : null,
-				footPx: foot ? getComputedStyle(foot).fontSize : null,
-				footUp: fb ? Math.round(document.documentElement.scrollHeight - (fb.top + window.scrollY + fb.height)) : null };
+				gap: rule ? Math.round(rule.getBoundingClientRect().top - r.bottom) : null };
 		});
 		// AT TWO VIEWPORTS, AND THE SECOND ONE IS THE POINT. This ran only at 1440x900
 		// and passed while the wordmark was 48px on the menu and 64px on the two screens
@@ -829,9 +819,9 @@ try {
 			marks[name] = await lockup(pg).catch(() => null);
 			await c.close();
 		}
-		const off = ["top", "px", "track", "ruleW", "gap", "footPx", "footUp"].filter((k) =>
+		const off = ["top", "px", "track", "ruleW", "gap"].filter((k) =>
 			new Set(Object.values(marks).map((m) => m?.[k])).size !== 1);
-		check(`the wordmark and footer lockup is identical on loading, auth and home at ${vp.width}x${vp.height}`,
+		check(`the wordmark lockup is identical on loading, auth and home at ${vp.width}x${vp.height}`,
 			marks.auth && marks.loading && off.length === 0,
 			off.length ? `${off.join(",")} differ: ${JSON.stringify(marks)}` : "a screen did not render");
 		}

@@ -10,10 +10,6 @@
 import { GAME_ACCENTS } from "./accents.js";
 
 const SITE_NAME = "Forrest Games";
-// ONE footer line for the whole shell. The menu and the front door had two
-// different strings saying the same thing, which is the sort of thing nobody
-// notices individually and everybody feels.
-const SITE_FOOT = "Play in the browser — no download, no ads";
 
 // `screen` is the shell's SITE-LEVEL screen id for each game (Spender's own
 // browser/waiting/game live in its `spenderScreen`); `accent` drives the card's
@@ -26,14 +22,14 @@ const SITE_FOOT = "Play in the browser — no download, no ads";
 // Dontminion's gold cyan. See shared/accents.js for why hue separation is not a
 // requirement and must not be reintroduced.
 const GAMES = [
-	{ id: "spender", name: "Spender", tagline: "A gem merchant’s game of prestige", status: "ready", screen: "spender", players: "1–4 players" },
-	{ id: "coc", name: "Castles of Crimson", tagline: "A realm of conquest and intrigue", status: "ready", screen: "coc", players: "1–4 players" },
-	{ id: "wherewolf", name: "Where Wolf", tagline: "A village of secrets and lies", status: "ready", screen: "werewolf", players: "3–10 players" },
-	{ id: "duel", name: "Spender Duel", tagline: "A two-player battle of gems and crowns", status: "ready", screen: "duel", players: "1–2 players" },
+	{ id: "spender", name: "Spender", status: "ready", screen: "spender", players: "1–4 players" },
+	{ id: "coc", name: "Castles of Crimson", status: "ready", screen: "coc", players: "1–4 players" },
+	{ id: "wherewolf", name: "Where Wolf", status: "ready", screen: "werewolf", players: "3–10 players" },
+	{ id: "duel", name: "Spender Duel", status: "ready", screen: "duel", players: "1–2 players" },
 	// APPEND new games only — webapp/test/screens.mjs clicks .home-game-card by INDEX.
-	{ id: "dontminion", name: "Dontminion", tagline: "A kingdom built one card at a time", status: "ready", screen: "dontminion", players: "1–4 players" },
-	{ id: "dissonance", name: "Dissonance", tagline: "Winning every trick is a losing plan", status: "ready", screen: "dissonance", players: "2 players" },
-	{ id: "ragtag", name: "Rag Tag", tagline: "Two fighters, one deck you never shuffle", status: "ready", screen: "ragtag", players: "2 players" },
+	{ id: "dontminion", name: "Dontminion", status: "ready", screen: "dontminion", players: "1–4 players" },
+	{ id: "dissonance", name: "Dissonance", status: "ready", screen: "dissonance", players: "2 players" },
+	{ id: "ragtag", name: "Rag Tag", status: "ready", screen: "ragtag", players: "2 players" },
 ].map(g => ({ ...g, accent: GAME_ACCENTS[g.id] }));
 // Local vs AI (the offline hub) is deliberately NOT in the catalogue: with a connection the
 // home menu's real games supersede it, and without one you never get past the loading screen —
@@ -126,7 +122,7 @@ const GO_CHEVRON = (
 	<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round"><path d="M9.5 5.5 16 12l-6.5 6.5" /></svg>
 );
 
-export { SITE_NAME, SITE_FOOT, GAMES, GAME_EMBLEM, HERO_RULE };
+export { SITE_NAME, GAMES, GAME_EMBLEM, HERO_RULE };
 
 export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles, onBooks, onBggFilter, onLogout }) {
 	// Built here rather than at module scope because each entry closes over a prop.
@@ -143,9 +139,8 @@ export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles
 				    .home::before/::after as two fixed layers, so it does not scroll away
 				    under a long catalogue and costs no extra element. */}
 				<div className="home">
-					{/* Same main+foot shell as the auth and loading screens, so the strapline
-					    lands on the bottom edge on all three. Flowing at the end of a centred
-					    column instead put it 207px off the bottom at 2560 against their 35. */}
+					{/* Same main shell as the auth and loading screens, so the three read as
+					    one page as the boot moves through them. */}
 					<div className="home-main">
 					{/* ONE unboxed identity string and ONE chip. It used to be a bordered
 					    "Guest" pill, then a bare username, then a bordered button — three
@@ -179,7 +174,7 @@ export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles
 								    be two different DOMs. In a single column it is a LIST ROW —
 								    emblem rail on the left, everything else in one text column
 								    beside it. From two columns up it is a POSTER — emblem on its
-								    own line, then title, tagline and the player pill down the
+								    own line, then the title and the player pill down the
 								    same left edge. Nesting the text inside a head element made
 								    the row layout easy and the poster impossible; areas make
 								    both a four-line change of one rule.
@@ -189,7 +184,6 @@ export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles
 								<span className="home-game-emblem" aria-hidden="true">{GAME_EMBLEM[gm.id]}</span>
 								<span className="home-game-text">
 									<span className="home-game-name">{gm.name}</span>
-									<span className="home-game-desc">{gm.tagline}</span>
 								</span>
 								<span className="home-game-players">{gm.players}</span>
 								<span className="home-game-go" aria-hidden="true">{GO_CHEVRON}</span>
@@ -212,8 +206,6 @@ export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles
 						</div>
 					</section>
 					</div>
-
-					<footer className="shell-foot">{SITE_FOOT}</footer>
 				</div>
 				{toast && <div className="toast">{toast}</div>}
 			</div>
