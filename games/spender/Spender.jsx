@@ -306,8 +306,17 @@ const css = baseCss + lobbyCss + _cssText
 @keyframes think-blink{0%,100%{opacity:.25;transform:scale(.7)}50%{opacity:1;transform:scale(1.2)}}
 
 /* ─── Toast ─────────────────────────────────────────────────────────────── */
-.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--gold);padding:10px 20px;border-radius:var(--radius);font-family:'Cinzel','Cinzel Fallback',serif;font-size:.8rem;color:var(--gold);z-index:999;pointer-events:none;animation:fadeup .3s ease;white-space:nowrap}
+/* nowrap + no max-width meant a long message ran off both edges of a phone — and it is
+   pointer-events:none, so there is nothing to scroll it back. It wraps and centres now,
+   inside the safe area, and it sits on the same plate treatment as everything else. */
+.toast{position:fixed;bottom:calc(env(safe-area-inset-bottom,0px) + 24px);left:50%;transform:translateX(-50%);
+  max-width:min(30rem,calc(100vw - 32px));text-align:center;text-wrap:balance;line-height:1.4;
+  background:linear-gradient(158deg,#272319,#1d1a15);border:1px solid var(--gold);
+  box-shadow:inset 0 1px 0 rgba(255,240,215,.08),0 10px 26px -14px rgba(0,0,0,1);
+  padding:10px 20px;border-radius:var(--radius);font-family:'Cinzel','Cinzel Fallback',serif;
+  font-size:.8rem;color:var(--gold-light);z-index:999;pointer-events:none;animation:fadeup .3s ease}
 @keyframes fadeup{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+@media(prefers-reduced-motion:reduce){.toast{animation:none}}
 
 /* ─── Discard modal ─────────────────────────────────────────────────────── */
 .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;z-index:100}
