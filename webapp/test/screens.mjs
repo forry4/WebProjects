@@ -3261,7 +3261,23 @@ try {
 				}
 				sawCommit = true;
 				await lead.click({ timeout: 5_000 }).catch(() => {});
-				await sleep(200);
+				// WAIT FOR THE CONDITION, don't sleep a guessed interval. A fixed 200ms
+				// made this check intermittently red — observed selected:true with
+				// goDisabled:true, i.e. the click had landed and the button had simply
+				// not re-rendered yet — and an intermittently red gate here is a failed
+				// Pages deploy, which is this harness's most expensive failure mode. The
+				// cap is generous and the assertion below is unchanged, so a button that
+				// genuinely never frees still fails.
+				// TWO races, not one: the button's `disabled` clears on the next render, and
+				// its fill arrives over a CSS transition — read at t=0 the background is
+				// still the transparent it is animating FROM, which is exactly the value
+				// this check treats as "not visibly selected".
+				await until(page, () => {
+					const go = document.querySelector(".dis-gobtn");
+					const sel = document.querySelector(".dis-annbtn.sel");
+					if (!sel || !go || go.disabled) return false;
+					return getComputedStyle(sel).backgroundColor !== "rgba(0, 0, 0, 0)";
+				}, 5_000);
 				const post = await page.evaluate(() => {
 					const sel = document.querySelector(".dis-annbtn.sel");
 					const go = document.querySelector(".dis-gobtn");
