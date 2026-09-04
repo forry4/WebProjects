@@ -34,6 +34,18 @@
   -webkit-user-select: text;
 }
 
+.or-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .orbit::before {
   content: "";
   position: fixed;
@@ -116,7 +128,7 @@
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(310px, .8fr);
+  grid-template-columns: minmax(0, 1.6fr) minmax(430px, .95fr);
   gap: 14px;
   width: min(1540px, calc(100% - 24px));
   margin: 0 auto;
@@ -125,12 +137,25 @@
 .or-table > * { min-width: 0; }
 
 .or-table > section,
+.or-board-main > section,
 .or-sideboards > section,
 .or-score-rail {
   border: 1px solid var(--or-line);
   border-radius: 15px;
   background: var(--or-panel);
   box-shadow: 0 12px 40px rgba(0, 0, 0, .24);
+}
+
+/* Independent board columns. Previously the right rail spanned rows in the
+   outer grid; its tall technology panel enlarged the influence row, stretching
+   the planet panel into a large blank slab below Jupiter. Each side now sizes
+   itself from its own content. */
+.or-board-main {
+  grid-column: 1;
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  align-content: start;
 }
 
 /* ── Whose is it ────────────────────────────────────────────────────────────
@@ -203,13 +228,13 @@
 .or-capture-disc { width: .62rem; height: .62rem; border-radius: 50%; background: currentColor; }
 
 /* ── Influence board ─────────────────────────────────────────────────────── */
-.or-influence { grid-column: 1; padding: 1rem; }
-.or-track-key, .or-track { display: grid; grid-template-columns: 92px minmax(240px, 1fr) minmax(70px, 190px); gap: .65rem; align-items: center; }
-.or-track-key { margin-bottom: .45rem; color: #7f88a6; font-size: .61rem; letter-spacing: .08em; text-transform: uppercase; }
-.or-track-key b { text-align: center; color: var(--or-dim); }
-.or-track-key span:last-child { text-align: right; }
-.or-track { min-height: 62px; padding: .4rem 0; border-top: 1px solid rgba(255,255,255,.055); }
-.or-track-name { min-width: 0; font-size: .78rem; }
+.or-influence { padding: .8rem 1rem .9rem; }
+.or-influence-head { display: grid; grid-template-columns: 7rem minmax(0, 1fr) 2rem; align-items: center; gap: .7rem; min-height: 2.2rem; padding-bottom: .4rem; }
+.or-influence-head h2 { margin: 0; color: var(--or-ink); font-size: 1rem; }
+.or-influence-head span { grid-column: 2; display: flex; justify-content: space-between; align-items: center; color: #7f88a6; font-size: .6rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+.or-influence-head span i { color: #626c8d; font-size: .7rem; font-style: normal; }
+.or-track { display: grid; grid-template-columns: 7rem minmax(240px, 1fr) 2rem; gap: .7rem; align-items: center; min-height: 48px; padding: .3rem 0; border-top: 1px solid rgba(255,255,255,.065); }
+.or-track-name { min-width: 0; font-size: .84rem; }
 .or-track-name .or-pl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .or-track-spaces { display: grid; grid-template-columns: repeat(9, 1fr); align-items: center; }
 .or-space { position: relative; height: 20px; border-top: 3px solid currentColor; }
@@ -229,70 +254,64 @@
 .or-human { --or-fac: #ffd18a; }
 .or-animod { --or-fac: #8fe3b6; }
 
-/* A face-up bonus token opens its own text — in the compact slots the star is
-   all there is, so the press is the only way to read it. */
+/* A bonus is one physical piece. Rules text never controls its width. */
 .or-bonus {
-  display: inline-flex;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
   align-items: center;
-  gap: .3rem;
-  padding: .32rem .48rem;
-  border: 1px solid #f2d15a66;
-  border-radius: 8px;
-  background: #312b19;
+  width: 1.85rem;
+  height: 1.85rem;
+  padding: 0;
+  border: 1px solid #f2d15a88;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #554821, #292313 72%);
   color: #f2d15a;
-  font-size: .68rem;
-  line-height: 1.16;
-  text-align: left;
+  font-size: .82rem;
+  line-height: 1;
+  text-align: center;
+  box-shadow: inset 0 0 0 2px #0b0d18, 0 2px 5px #0008;
   cursor: pointer;
 }
-.or-bonus i { font-style: normal; }
-.or-bonus:hover { border-color: #f2d15a; background: #3d3520; }
+.or-bonus i { font-style: normal; line-height: 1; }
+.or-bonus:hover { border-color: #ffe489; background: #4a3e1d; transform: translateY(-1px); }
 .or-bonus.compact, .or-bonus.spent { justify-self: end; }
-.or-bonus.compact { min-width: 1.9rem; padding: .26rem .34rem; justify-content: center; }
-.or-bonus.compact .or-bonus-text { display: none; }
-.or-bonus.spent { min-width: 1.9rem; justify-content: center; padding: .26rem .34rem; border-color: var(--or-line); background: transparent; color: #6f7691; font-size: .58rem; cursor: default; }
+.or-bonus.spent { border-color: #4c5472; background: #111429; color: #69728f; font-size: .65rem; box-shadow: inset 0 0 0 2px #0b0d18; cursor: default; }
 
 /* ── Technology board ────────────────────────────────────────────────────── */
-.or-sideboards { grid-column: 2; grid-row: span 2; display: grid; gap: 14px; align-content: start; }
+.or-sideboards { grid-column: 2; display: grid; gap: 14px; min-width: 0; align-content: start; }
 .or-tech { overflow: hidden; }
 .or-tech > header { display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: .8rem 1rem; border-bottom: 1px solid var(--or-line); }
 .or-tech h2, .or-log h2, .or-hand-head h2 { margin: 0; font-size: 1rem; }
 /* The NAMED key. Two dots in one accent colour said "somebody is here"; this
    says who, in the same two colours the rail and the markers use. */
 .or-tech-key { display: flex; flex-wrap: wrap; justify-content: end; gap: .25rem .6rem; }
-.or-tech-key b { display: inline-flex; align-items: center; gap: .3rem; max-width: 8rem; overflow: hidden; color: var(--or-dim); font-size: .63rem; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.or-tech-key b { display: inline-flex; align-items: center; gap: .3rem; max-width: 8rem; overflow: hidden; color: var(--or-dim); font-size: .68rem; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
 .or-tech-key i { flex: none; width: .55rem; height: .55rem; border-radius: 50%; }
 .or-tech-key .mine i { background: var(--or-me); }
 .or-tech-key .theirs i { background: var(--or-them); }
 
 .or-tech-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.or-tech-col { min-width: 0; padding: .5rem .4rem; border-left: 1px solid var(--or-line); color: var(--or-ink); }
+.or-tech-col { min-width: 0; padding: .55rem .45rem .65rem; border-left: 1px solid var(--or-line); color: var(--or-ink); }
 .or-tech-col:first-child { border-left: 0; }
-.or-tech-col h3 { display: flex; align-items: center; gap: .28rem; margin: 0 0 .35rem; color: var(--or-dim); font-size: .66rem; text-transform: uppercase; }
+.or-tech-col h3 { display: flex; align-items: center; gap: .3rem; margin: 0 0 .38rem; color: var(--or-dim); font-size: .72rem; text-transform: uppercase; }
 .or-tech-col h3 i { color: var(--or-fac, var(--lby-accent)); font-style: normal; }
 .or-tech-col h3 em { margin-left: auto; padding: 0 .3rem; border: 1px solid var(--or-line); border-radius: 4px; color: #7f88a6; font-size: .58rem; font-style: normal; }
 
 .or-tech-row { position: relative; }
-/* A SPACE IS TWO ROWS: a furniture row, then the effect.
-   All three earlier shapes put the level number in the text's way — a grid
-   column that ate a third of a 110px measure, then an absolute number with the
-   first line indented past it, which left one short ragged line above a
-   full-width block and read as a mistake. The number, the seat markers and the
-   level-2 token now share a header row of their own, and the description gets
-   the FULL width on every line with no indent and no reserved gutter.
-   The height is FIXED (a `min-height` let each space grow to its own text and
-   the five levels came out visibly ragged — five different-looking things
-   instead of one ladder), the text is clamped into what is left, and the press
-   opens whatever did not fit. `1fr` + `align-self: center` on the text means a
-   short effect sits centred in its space rather than stranded at the top. */
+/* A compact ladder: the number owns a narrow, consistent rail; the description
+   is one normally aligned block, never a first-line indent. Fixed height keeps
+   all fifteen rungs even, while the modal carries the full paragraph. */
 .or-tech-space {
   position: relative;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: 1.35rem minmax(0, 1fr);
+  align-items: center;
+  gap: .34rem;
   width: 100%;
-  height: 4.55rem;
-  margin-top: .26rem;
-  padding: .32rem .34rem;
+  height: 3.6rem;
+  margin-top: .2rem;
+  padding: .28rem .32rem;
   border: 1px solid rgba(255,255,255,.07);
   border-radius: 7px;
   background: rgba(255,255,255,.025);
@@ -301,13 +320,13 @@
   text-align: left;
   cursor: pointer;
 }
-.or-tech-head { display: flex; align-items: center; gap: .3rem; min-height: .9rem; margin-bottom: .16rem; }
-.or-tech-lv { color: var(--lby-accent); font-size: .66rem; font-weight: 900; letter-spacing: .04em; }
-.or-tech-text { align-self: center; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; color: #aeb5cb; font-size: .57rem; line-height: 1.24; }
+.or-tech-rail { align-self: stretch; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .28rem; padding-right: .28rem; border-right: 1px solid rgba(255,255,255,.08); }
+.or-tech-lv { color: var(--lby-accent); font-size: .76rem; font-weight: 950; line-height: 1; letter-spacing: .02em; }
+.or-tech-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; color: #cbd0e1; font-size: .71rem; line-height: 1.24; }
 .or-tech-space.mine { border-color: var(--or-me); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--or-me), transparent 62%); }
 .or-tech-space.theirs { border-color: var(--or-them); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--or-them), transparent 62%); }
 .or-tech-space.mine.theirs { border-color: rgba(255,255,255,.16); box-shadow: inset 3px 0 0 var(--or-me), inset -3px 0 0 var(--or-them); }
-.or-tech-seats { display: flex; gap: .18rem; margin-left: auto; }
+.or-tech-seats { display: flex; gap: .14rem; }
 .or-tech-seats i { width: .58rem; height: .58rem; border-radius: 50%; box-shadow: 0 0 0 1px #0007; }
 .or-tech-seats i.mine { background: var(--or-me); }
 .or-tech-seats i.theirs { background: var(--or-them); }
@@ -316,57 +335,57 @@
    that one space's. It is a button, so it cannot nest inside the space's own
    button and has to be positioned into that header row from outside; the seat
    markers step aside for it on the one row that has one. */
-.or-tech-token { position: absolute; z-index: 2; right: .3rem; top: .3rem; }
-.or-tech-row.has-token .or-tech-seats { margin-right: 2.05rem; }
+.or-tech-token { position: absolute; z-index: 2; right: .22rem; top: .22rem; width: 1.45rem; height: 1.45rem; font-size: .68rem; }
+.or-tech-row.has-token .or-tech-space { padding-right: 1.9rem; }
 
 .or-row-bonus { margin: 0; padding: .6rem .8rem; border-top: 1px solid var(--or-line); color: var(--or-dim); font-size: .62rem; }
 
-.or-log { max-height: 330px; overflow: hidden; }
+.or-log { max-height: 250px; overflow: hidden; }
 .or-log h2 { padding: .8rem 1rem; border-bottom: 1px solid var(--or-line); }
-.or-log > div { max-height: 276px; overflow: auto; padding: .4rem .8rem .8rem; }
-.or-log p { display: grid; grid-template-columns: 2rem 1fr; gap: .35rem; margin: .36rem 0; color: #aeb5cb; font-size: .68rem; line-height: 1.35; }
+.or-log > div { max-height: 196px; overflow: auto; padding: .45rem .85rem .8rem; }
+.or-log p { display: grid; grid-template-columns: 2rem 1fr; gap: .4rem; margin: .42rem 0; color: #bbc1d5; font-size: .74rem; line-height: 1.38; }
 .or-log p b { color: #747d9c; }
 
 /* ── Placed Agents ───────────────────────────────────────────────────────────
    Five planets, always all five, at every width. The face is a chip; the text
    lives in the modal. */
-.or-columns { grid-column: 1; padding: .7rem; }
+.or-columns { padding: .78rem; }
 /* `.or-table > section` sets the panel border, so the seat stripe has to be
    written from the same depth to win rather than reaching for !important. */
 .or-table > .or-columns { border-left: 3px solid var(--or-seat); }
-.or-columns h3 { display: flex; align-items: center; gap: .45rem; margin: 0 0 .5rem; color: var(--or-dim); font-size: .68rem; letter-spacing: .08em; text-transform: uppercase; }
+.or-columns h3 { display: flex; align-items: center; gap: .45rem; margin: 0 0 .55rem; color: var(--or-dim); font-size: .73rem; letter-spacing: .08em; text-transform: uppercase; }
 .or-columns.mine h3 { color: var(--or-ink); }
-.or-column-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .4rem; }
-.or-column { min-width: 0; padding: .3rem; border: 1px solid currentColor; border-radius: 9px; background: rgba(255,255,255,.03); }
-.or-column-head { display: flex; justify-content: space-between; align-items: center; gap: .2rem; margin-bottom: .28rem; font-size: .55rem; }
+.or-column-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .55rem; }
+.or-column { min-width: 0; padding: .36rem .4rem .48rem; border-top: 3px solid currentColor; border-radius: 8px; background: linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.018)); }
+.or-column-head { display: flex; justify-content: center; align-items: center; min-height: 1.1rem; margin-bottom: .35rem; font-size: .62rem; }
 .or-column-head .or-pl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* `:not(.or-pl)` because the planet name is a <b> too — unscoped, this rule
-   clipped the word into a 17px disc. And the fill is NOT `currentColor`: a
-   `background: currentColor` declared beside a `color` in the same block
-   resolves to that new colour, which painted the badge on its own text. */
-.or-column-head > b:not(.or-pl) { flex: none; display: grid; place-items: center; min-width: 1.05rem; height: 1.05rem; padding: 0 .18rem; border-radius: 999px; background: rgba(255,255,255,.13); color: var(--or-ink); font-size: .6rem; font-weight: 900; }
 .or-slot {
+  position: relative;
+  isolation: isolate;
   display: grid;
-  gap: .14rem;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: .18rem;
   width: 100%;
-  min-height: 3.2rem;
-  padding: .28rem;
+  height: 5.15rem;
+  margin: 0 .28rem .28rem 0;
+  padding: .38rem;
   border: 1px solid currentColor;
-  border-radius: 6px;
+  border-radius: 7px;
   background: linear-gradient(160deg, rgba(255,255,255,.14), rgba(13,15,31,.97) 62%);
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
+.or-slot.stacked { box-shadow: 3px 3px 0 -1px #171a31, 3px 3px 0 0 color-mix(in srgb, currentColor 62%, #171a31), 6px 6px 0 -1px #171a31, 6px 6px 0 0 color-mix(in srgb, currentColor 38%, #171a31); }
 .or-slot:hover { box-shadow: 0 0 0 2px var(--lby-accent); }
-.or-slot-top { display: flex; justify-content: space-between; align-items: center; font-size: .6rem; }
-.or-slot-top b { display: grid; place-items: center; width: 1.05rem; height: 1.05rem; border-radius: 50%; background: #f2f0e8; color: #121526; font-size: .6rem; }
+.or-slot.stacked:hover { box-shadow: 3px 3px 0 -1px #171a31, 3px 3px 0 0 color-mix(in srgb, currentColor 62%, #171a31), 6px 6px 0 -1px #171a31, 6px 6px 0 0 color-mix(in srgb, currentColor 38%, #171a31), 0 0 0 2px var(--lby-accent); }
+.or-slot-top { display: flex; justify-content: space-between; align-items: center; font-size: .67rem; }
+.or-slot-top b { display: grid; place-items: center; width: 1.22rem; height: 1.22rem; border-radius: 50%; background: #f2f0e8; color: #121526; font-size: .66rem; }
 .or-slot-top i { color: var(--or-fac, var(--or-dim)); font-style: normal; }
-.or-slot strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--or-ink); font-family: Georgia, serif; font-size: .62rem; line-height: 1.16; }
-.or-column-empty { display: grid; place-items: center; min-height: 3.2rem; color: #5c6482; font-size: .58rem; }
-.or-stack { display: block; width: 100%; margin-top: .24rem; padding: .18rem; border: 1px dashed currentColor; border-radius: 5px; background: transparent; color: inherit; font: inherit; font-size: .53rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; cursor: pointer; }
-.or-stack:hover { background: rgba(255,255,255,.06); }
+.or-slot strong { display: -webkit-box; align-self: center; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--or-ink); font-family: Georgia, serif; font-size: .72rem; line-height: 1.16; }
+.or-slot-count { color: #9098b5; font-size: .55rem; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
+.or-column-empty { display: grid; place-items: center; height: 5.15rem; border: 1px dashed color-mix(in srgb, currentColor, transparent 66%); border-radius: 7px; color: #646d8c; font-size: .6rem; letter-spacing: .05em; text-transform: uppercase; }
 
 /* ── Hand ───────────────────────────────────────────────────────────────── */
 /* THE WHOLE CARD IS OUTLINED IN ITS PLANET'S COLOUR, which is what replaced the
@@ -385,9 +404,9 @@
 .or-agent-top { display: flex; justify-content: space-between; align-items: center; color: currentColor; }
 .or-agent-top i { color: var(--or-fac, currentColor); font-size: 1.05rem; font-style: normal; }
 .or-agent-top b { display: grid; place-items: center; width: 1.8rem; height: 1.8rem; border-radius: 50%; background: #f2f0e8; color: #121526; font-size: .94rem; }
-.or-agent strong { margin: .7rem 0 .45rem; color: var(--or-ink); font-family: Georgia, serif; font-size: .95rem; }
-.or-agent-text { flex: 1; color: #c6cbe0; font-size: .66rem; line-height: 1.35; }
-.or-agent-foot { display: flex; align-items: center; gap: .3rem; color: var(--or-dim); font-size: .55rem; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; }
+.or-agent strong { margin: .7rem 0 .45rem; color: var(--or-ink); font-family: Georgia, serif; font-size: 1rem; }
+.or-agent-text { flex: 1; color: #cbd0e2; font-size: .72rem; line-height: 1.38; }
+.or-agent-foot { display: flex; align-items: center; gap: .3rem; color: var(--or-dim); font-size: .6rem; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; }
 .or-agent-foot .or-pl { letter-spacing: .07em; }
 .or-agent.hidden { align-items: center; justify-content: center; border-color: #697296; background: repeating-linear-gradient(135deg, #161a38 0 8px, #222850 8px 16px); color: #9ba7d7; letter-spacing: .22em; }
 
@@ -474,19 +493,30 @@
    stay readable at full size. */
 @media (max-width: 980px) {
   .or-table { grid-template-columns: minmax(0, 1fr); }
-  .or-influence, .or-columns, .or-hand-zone, .or-decision, .or-status, .or-result, .or-mulligan { grid-column: 1; }
-  .or-sideboards { grid-column: 1; grid-row: auto; }
-  .or-track-key, .or-track { grid-template-columns: 86px minmax(180px, 1fr) auto; }
-  .or-bonus .or-bonus-text { display: none; }
-  .or-bonus { min-width: 1.9rem; padding: .26rem .34rem; justify-content: center; }
+  /* On desktop this wrapper is what lets the left and right board columns size
+     independently. On one-column layouts it disappears so technology returns
+     to the natural board order: influence, technology/log, placed agents,
+     decisions, hand. */
+  .or-board-main { display: contents; }
+  .or-board-main > .or-influence { order: 1; }
+  .or-sideboards { order: 2; }
+  .or-board-main > .or-columns { order: 3; }
+  .or-board-main > .or-columns.mine { order: 4; }
+  .or-decision, .or-status, .or-result { order: 5; }
+  .or-hand-zone { order: 6; }
+  .or-board-main, .or-sideboards, .or-hand-zone, .or-decision, .or-status, .or-result, .or-mulligan { grid-column: 1; }
+  .or-sideboards { grid-row: auto; }
+  .or-track { grid-template-columns: 6.5rem minmax(180px, 1fr) 2rem; }
+  .or-influence-head { grid-template-columns: 6.5rem minmax(0, 1fr) 2rem; }
 }
 
 @media (max-width: 760px) {
-  /* Only the COLUMN chrome tightens on a phone. The space keeps its height, its
-     type size and its four clamped lines — five levels that are all the same
-     size is the point of them. */
+  /* Keep the same five-rung geometry; only the surrounding chrome tightens. */
   .or-tech-col { padding: .42rem .3rem; }
-  .or-tech-col h3 { font-size: .6rem; }
+  .or-tech-col h3 { font-size: .65rem; }
+  .or-tech-space { height: 3.55rem; gap: .26rem; padding-inline: .25rem; }
+  .or-tech-text { font-size: .65rem; }
+  .or-tech-lv { font-size: .72rem; }
 }
 
 @media (max-width: 650px) {
@@ -494,30 +524,30 @@
   .or-score-rail { grid-template-columns: 1fr; }
   .or-player + .or-player { border-left: 0; border-top: 1px solid var(--or-line); }
   .or-player { padding: .7rem .8rem; }
-  .or-influence { padding: .6rem .5rem; }
-  /* The planet's name moves ABOVE its track instead of beside it, which is what
-     buys the nine spaces a full phone width without a sideways drag. */
-  .or-influence .or-track { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; gap: .18rem .4rem; min-height: 0; padding: .5rem 0; }
-  .or-influence .or-track-name { grid-column: 1; grid-row: 1; font-size: .7rem; }
+  .or-board-main { gap: 8px; }
+  .or-influence { padding: .55rem .6rem .7rem; }
+  .or-influence-head { display: flex; justify-content: space-between; gap: .6rem; padding: 0 0 .38rem; }
+  .or-influence-head h2 { font-size: .9rem; }
+  .or-influence-head span { width: 52%; font-size: .53rem; }
+  /* The name and the fixed-size bonus own a real header row; the track owns the
+     next row. No absolute positioning and no shared cell means the token cannot
+     overlap a disc, even at 320px. */
+  .or-influence .or-track { grid-template-columns: minmax(0, 1fr) 1.85rem; grid-template-rows: 1.85rem 1.45rem; gap: .34rem .45rem; min-height: 0; padding: .45rem 0 .38rem; }
+  .or-influence .or-track-name { grid-column: 1; grid-row: 1; align-self: center; font-size: .72rem; }
   .or-influence .or-track > .or-bonus { grid-column: 2; grid-row: 1; }
-  .or-influence .or-track-spaces { grid-column: 1 / -1; grid-row: 2; }
-  .or-track-key { display: none; }
+  .or-influence .or-track-spaces { grid-column: 1 / -1; grid-row: 2; align-self: end; }
   .or-columns { padding: .55rem .4rem; }
-  /* Five columns in ~360px is ~63px of usable width each, and the head has to
-     fit the longest planet ("jupiter") NEXT TO its depth badge — so the tracking
-     goes to nearly nothing and the badge shrinks. Measured, not guessed: at the
-     desktop sizes the word clipped to a single letter and the colour was all
-     that was left of the identity, which is exactly what the name is here to
-     stop being true. */
-  .or-column-grid { gap: .22rem; }
-  .or-column { padding: .2rem; }
-  .or-column-head { gap: .12rem; font-size: .5rem; }
+  .or-column-grid { gap: .26rem; }
+  .or-column { padding: .2rem .2rem .35rem; }
+  .or-column-head { min-height: .95rem; margin-bottom: .25rem; font-size: .51rem; }
   .or-column-head .or-pl { letter-spacing: .005em; }
-  .or-column-head > b:not(.or-pl) { min-width: .84rem; height: .84rem; padding: 0 .1rem; font-size: .5rem; }
-  .or-slot { min-height: 2.9rem; padding: .22rem; }
+  .or-slot { height: 4.35rem; margin: 0 .18rem .18rem 0; padding: .28rem; }
+  .or-slot.stacked { box-shadow: 2px 2px 0 -1px #171a31, 2px 2px 0 0 color-mix(in srgb, currentColor 62%, #171a31), 4px 4px 0 -1px #171a31, 4px 4px 0 0 color-mix(in srgb, currentColor 38%, #171a31); }
+  .or-slot-top b { width: 1rem; height: 1rem; font-size: .57rem; }
+  .or-slot-top { font-size: .58rem; }
   .or-slot strong { font-size: .58rem; }
-  .or-column-empty { min-height: 2.9rem; font-size: .52rem; }
-  .or-stack { font-size: .48rem; }
+  .or-slot-count { font-size: .46rem; letter-spacing: .02em; }
+  .or-column-empty { height: 4.35rem; font-size: .5rem; }
   .or-agent { width: 138px; min-width: 138px; height: 204px; }
   .or-action-bar { align-items: stretch; flex-direction: column; }
   .or-action-bar > div { display: grid; grid-template-columns: 1fr; }

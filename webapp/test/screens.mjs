@@ -5614,14 +5614,24 @@ try {
 		const logAfter = await page.locator(".or-log p").count().catch(() => 0);
 		check("the action resolves and is broadcast into the log", logAfter > logBefore,
 			`${logBefore} -> ${logAfter}`);
-		const geometry = await page.evaluate(() => ({
-			wide: document.documentElement.scrollWidth > window.innerWidth + 1,
-			cards: document.querySelectorAll(".or-hand-zone .or-agent").length,
-			columns: document.querySelectorAll(".or-column").length,
-		}));
+		const geometry = await page.evaluate(() => {
+			const influence = document.querySelector(".or-influence").getBoundingClientRect();
+			const jupiter = [...document.querySelectorAll(".or-track")].at(-1).getBoundingClientRect();
+			return {
+				wide: document.documentElement.scrollWidth > window.innerWidth + 1,
+				cards: document.querySelectorAll(".or-hand-zone .or-agent").length,
+				columns: document.querySelectorAll(".or-column").length,
+				jupiterGap: Math.round(influence.bottom - jupiter.bottom),
+				detachedStackControls: document.querySelectorAll(".or-stack").length,
+			};
+		});
 		check("the complete public table and private hand remain on the page",
 			!geometry.wide && geometry.cards > 0 && geometry.columns === 10,
 			JSON.stringify(geometry));
+		check("the planet panel ends cleanly after Jupiter",
+			geometry.jupiterGap >= 0 && geometry.jupiterGap <= 24, JSON.stringify(geometry));
+		check("placed Agents use one card-stack face, not a detached stack control",
+			geometry.detachedStackControls === 0, JSON.stringify(geometry));
 		await page.setViewportSize({ width: 390, height: 844 });
 		await sleep(250);
 		const phone = await page.evaluate(() => {
@@ -5657,12 +5667,25 @@ try {
 				const r = cell.getBoundingClientRect();
 				return r.left < -1 || r.right > window.innerWidth + 1 || r.width < 8;
 			}).length;
-			return { scrollers, cells: cells.length, offscreen };
+			const bonuses = [...document.querySelectorAll(".or-bonus")].map((el) => {
+				const r = el.getBoundingClientRect();
+				return { w: Math.round(r.width), h: Math.round(r.height) };
+			});
+			const tokenOverlaps = [...document.querySelectorAll(".or-influence .or-track")]
+				.filter((row) => {
+					const a = row.querySelector(".or-bonus").getBoundingClientRect();
+					const b = row.querySelector(".or-track-spaces").getBoundingClientRect();
+					return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+				}).length;
+			return { scrollers, cells: cells.length, offscreen, bonuses, tokenOverlaps };
 		});
 		check("no board on a phone hides content behind a sideways scroll",
 			inner.scrollers.length === 0, JSON.stringify(inner.scrollers));
 		check("all five planet columns are on screen for both seats",
 			inner.cells === 10 && inner.offscreen === 0, JSON.stringify(inner));
+		check("bonus tokens are uniformly compact and clear of every planet track",
+			inner.bonuses.every(({ w, h }) => Math.abs(w - h) <= 1 && w <= 30)
+			&& inner.tokenOverlaps === 0, JSON.stringify(inner));
 
 		// Every readable face opens the same modal, so the condensed column chip
 		// loses no rules text: press one and its Agent's own effect comes back.

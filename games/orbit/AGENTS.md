@@ -46,16 +46,12 @@ were each a real misread on the table, so they are worth not undoing:
   outright: two identically styled panels, distinguished only by a half-read
   possessive, is what made a player read their own recruit into the opponent's
   board.
-- **A technology space is a furniture row, then the effect.** The level number,
-  the seat markers and the level-2 token share a header row; the description
-  gets the FULL width on every line, with no indent and no reserved gutter.
-  Three earlier shapes all put the number in the text's way — a grid column ate
-  a third of a 110px measure, and an absolute number with the first line
-  indented past it left one short ragged line above a full-width block and read
-  as a mistake. All five spaces are ONE fixed height (a `min-height` let each
-  grow to its own text and the ladder came out visibly ragged — five
-  different-looking things instead of one scale), the text is clamped into what
-  is left, and a short effect is centred rather than stranded at the top.
+- **Technology is five compact, equal rungs.** The level has one narrow rail and
+  the effect is one normally aligned block; never indent only its first line.
+  Player tokens live on that rail at the level they are AT, while level 0 is
+  simply no token. All fifteen spaces have one fixed height and readable copy;
+  the modal carries whatever a long effect cannot show. The level-2 bonus is a
+  fixed-size token on that rung, not variable-length text or another section.
 - **The Leader badge renders on BOTH seats**, including its `lv-0` "No badge"
   state — it used to render only under its owner, so no badge and no chip looked
   identical, and the badge is what sets the hand limit printed over the hand.
@@ -68,8 +64,21 @@ were each a real misread on the table, so they are worth not undoing:
   play it, and `screens.mjs` waits on that class for "this seat has legal
   moves". The page selects no text (`user-select: none`, inputs exempt), because
   the hold gesture and the OS callout fight over the same press.
-- **A technology bonus token sits on its LEVEL-2 space**, which is the space
-  that pays it, not above the whole column.
+- **Every bonus is a fixed-size physical token.** Rules text never determines a
+  token's width; pressing it opens the effect. Planet rows give the name/token
+  pair and the disc track separate grid rows on mobile, so they cannot overlap.
+  A technology bonus sits on its LEVEL-2 space, which is the space that pays it,
+  not above the whole column.
+- **Placed Agents are one mini-card stack, not two controls.** The top Agent is
+  the face, up to two subdued offset outlines show depth, and the face says the
+  total. Do not bring back a detached `+N below` button: it looked unrelated to
+  the card it counted. A press opens the full column when its count is above 1.
+- **Desktop board columns size independently.** `.or-board-main` owns influence
+  and both Agent panels; `.or-sideboards` owns technology and the log. Do not
+  span the sideboard through outer-grid rows — that made its height stretch the
+  influence panel into a large empty slab below Jupiter. At one column the
+  wrapper becomes `display: contents` and order is influence → technology/log →
+  placed Agents → decision → hand.
 - **Nothing on the table scrolls sideways except the hand.** The influence rows,
   the technology grid and both placed-Agent grids reflow instead: on a phone a
   planet's name moves above its track, and the placed-Agent columns are chips so
