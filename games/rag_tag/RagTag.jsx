@@ -1938,14 +1938,8 @@ export default function RagTag({ myId, authUser, onExit }) {
         /* Same wording, same order, same icons as every other game: return /
            rules / abandon — and abandon ASKS. Rag Tag was the odd one out: no
            icons, no confirmation, and one stray click ended the fight. */
-        menu={<GameMenu items={[
-          { label: "Return to menu", icon: "←", onClick: leaveToLobby },
-          { label: "View rules", icon: "📖", onClick: () => setShowRules(true) },
-          !over && {
-            label: "Abandon game", icon: "⚑", danger: true,
-            onClick: () => setConfirmAbandon(true),
-          },
-        ].filter(Boolean)} />}
+        menu={<GameMenu onLeave={leaveToLobby} onRules={() => setShowRules(true)}
+          onAbandon={over ? null : () => setConfirmAbandon(true)} />}
       />
       <div className="rt-wrap">
         {!connected && <div className="rt-waitline rt-warn">Reconnecting…</div>}

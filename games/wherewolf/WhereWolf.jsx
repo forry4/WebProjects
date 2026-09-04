@@ -717,7 +717,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
       <div className="ww" style={{ "--lby-accent": GAME_ACCENTS.wherewolf }}><style>{css}</style>
         <div className="ww-wrap">
           <div className="ww-top">
-            <div className="ww-top-left"><GameMenu items={[{ label: "Return to menu", icon: "←", onClick: leaveToLobby }, { label: "View rules", icon: "📖", onClick: () => setShowRules(true) }]} />
+            <div className="ww-top-left"><GameMenu onLeave={leaveToLobby} onRules={() => setShowRules(true)} />
               <span className="ww-title">Where Wolf</span></div>
             <div className="ww-row" style={{ gap: 8 }}>
               {!connected && <button className="ww-btn sm" onClick={() => reconnectNow()} title="Reconnect">⟳ Reconnecting…</button>}
@@ -875,7 +875,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     <div className="ww" style={{ "--lby-accent": GAME_ACCENTS.wherewolf }}><style>{css}</style>
       <div className="ww-wrap">
         <div className="ww-top">
-          <div className="ww-top-left"><GameMenu items={[{ label: "Return to menu", icon: "←", onClick: leaveToLobby }, { label: "View rules", icon: "📖", onClick: () => setShowRules(true) }]} />
+          <div className="ww-top-left"><GameMenu onLeave={leaveToLobby} onRules={() => setShowRules(true)} />
             <span className="ww-title">Where Wolf</span></div>
           <div className="ww-row" style={{ gap: 8 }}>
             {!connected && <button className="ww-btn sm" onClick={() => reconnectNow()} title="Reconnect">⟳ Reconnecting…</button>}

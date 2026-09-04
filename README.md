@@ -1,136 +1,98 @@
 # Forrest Games
 
-A full-stack, real-time board-game website — four multiplayer games plus site
-features — built on **one** FastAPI backend, **one** React shell, and a shared
-auth/persistence platform. Live at **https://forry4.github.io/**.
+Eight real-time multiplayer board games and four site features, on **one** FastAPI
+backend, **one** React shell, and a shared auth/persistence platform.
+Live at **https://forry4.github.io/**.
 
-The interesting engineering is in three places: a **server-authoritative real-time architecture** over WebSockets, a set of **game AIs** that range from
-hand-built heuristics to AlphaZero-style neural nets, and a **Rust→WASM inference core** that ships those nets into the player's browser so search runs ~1000× faster than it could on a free-tier server using Python.
-
----
-
-## Highlights (for the impatient reviewer)
-
-- **Real-time, server-authoritative multiplayer.** Every move is validated by a
-  pure game engine on the server; clients only render and propose. One uvicorn
-  process holds all rooms in memory under a single lock, with reconnect tokens,
-  per-recipient hidden-information redaction, and a save/load layer that survives
-  cold starts.
-- **A genuine AI/ML campaign.** Determinized MCTS/PUCT search,
-  hand-tuned heuristics, and **learned value/policy nets trained offline in PyTorch**
-  — including a card-set **attention** network — selected by paired, equal-time
-  arenas and rigorous ablation methodology. The findings (what moved strength, what
-  saturated, what was noise) are written up in a 
-  [research log](docs/ai-research-log.md).
-- **Rust→WASM model serving.** The search cores for three games are ported to Rust,
-  compiled to WebAssembly, and run client-side — validated **bit-for-bit** against
-  the Python reference via differential parity tests. The server stays a cheap
-  validator; the heavy compute runs on the user's machine.
-- **Reliability treated as a first-class concern.** The codebase carries documented
-  postmortems: an event-loop outage from running sync work under a lock, a libSQL
-  driver quirk that silently dropped admin rights, CORS misconfigurations, cache
-  footguns. Each fix is locked in by tests and notes.
-- **Layered, dependency-directed backend.** `core/` (DB + auth + config) depends on
-  nothing; each game is a self-contained feature; a composition root wires them.
-  This deliberately broke a legacy circular-import knot.
+Three parts are worth a reviewer's time: a **server-authoritative realtime
+architecture** over WebSockets, **per-game AIs** ranging from hand-built heuristics
+to learned nets, and a **Rust→WASM inference path** that runs those nets in the
+player's browser, so search strength isn't capped by a free-tier server.
 
 ---
 
 ## The games
 
-| Game | What it is | Players | AI |
-|------|-----------|---------|----|
-| **Spender** | a faithful port of the Splendor gem-trading / prestige race game | 2–4 (vs-AI is 2p) | heuristics → determinized PUCT → **attention value net** (client-WASM, ~20k sims/move) |
-| **Castles of Crimson** | a faithful port of the Castles of Burgundy dice-and-tile euro | 2–4 | determinized-MCTS bot; two neural champions served via WASM |
-| **Spender Duel** | the 2-player Splendor variant (hidden reserves, privileges, crowns) | 2 | MCTS with a card-set attention value-net leaf (ported to Rust→WASM) |
-| **Where Wolf?** | a One Night Ultimate Werewolf-style social-deduction party game | 3–10 | none — a timed "night conductor" and leak-free hidden roles instead |
+| Game | What it is | Players | Opponent |
+|---|---|---|---|
+| **Spender** | Splendor — gem trading, prestige race | 1–4 | heuristics → determinized PUCT → a learned value net served client-side |
+| **Castles of Crimson** | Castles of Burgundy — dice and tile placement | 1–4 | determinized MCTS; the Expert tier is a net served via WASM |
+| **Spender Duel** | Splendor Duel — hidden reserves, privileges, crowns | 1–2 | MCTS with a card-set **attention** value-net leaf (Rust→WASM) |
+| **Where Wolf?** | One Night Ultimate Werewolf — social deduction | 3–10 | none by design: a timed night conductor and leak-free roles |
+| **Dontminion** | Dominion — 12 sets, 368 cards + 114 landscape cards | 1–4 | heuristic bots, several to a room |
+| **Dissonance** | a 2-player parity trick-taker, in five modes | 1–2 | PIMC / double-dummy search, served in the browser |
+| **Rag Tag** | Tag Team — a simultaneous auto-battler; the deck is never shuffled | 1–2 | random, deliberately: v1 exists to make the game playtestable |
+| **Orbit** | Zenith (2025) — move five planets' discs to control the solar system | 1–2 | random, same as Rag Tag — a first playable release |
 
-Plus two site features: **Books** (a public book ranking + reading suggestions) and
-**Puzzles** (auto-generated single-best-move Spender positions, verified offline by
-re-searching every alternative). A separate **WWSD** service is a browser autoplayer
-for an alternative Splendor site.
+Plus **Books** (ranking + reading suggestions), **Spender Puzzles** (late-game
+positions harvested from self-play and kept only where a forced win exists, the
+line is unique at every decision, and the greedy move does *not* find it), **BGG
+Filter** (a BoardGameGeek harvest behind a frontend-only filter page), and an
+**offline hub** where four of the games run with no server at all — wasm engine,
+IndexedDB saves. **WWSD** is a separate browser autoplayer for a friend's external
+Splendor site.
 
-All four games and both features are **live in production**.
+Everything above is live in production.
 
 ---
 
-## Tech stack
+## Stack
 
 | Layer | Tech |
-|-------|------|
+|---|---|
 | Backend | FastAPI + asyncio, one uvicorn process; WebSockets for realtime |
-| Persistence | SQLite locally / **Turso (libSQL)** in prod, behind one driver-agnostic wrapper with a boot-time self-test + local fallback |
-| Frontend | React 18, plain JS, Vite 6 — one self-contained component per game, one shared shell |
-| AI (search) | determinized MCTS / PUCT; hand-built heuristics |
-| AI (learned) | AlphaZero-style policy+value nets and card-set **attention** nets, **trained in PyTorch offline**, served client-side |
+| Persistence | SQLite locally / **Turso (libSQL)** in prod, behind one driver-agnostic wrapper with a boot-time self-test and local fallback |
+| Frontend | React 18, plain JS, Vite 6 — one self-contained component per game on a shared shell and kit |
+| AI (search) | determinized MCTS / PUCT, PIMC, hand-built heuristics |
+| AI (learned) | AlphaZero-style policy+value nets and card-set **attention** nets, trained offline in PyTorch, served client-side |
 | Model serving | **Rust → WebAssembly** (`wasm-pack`), parity-checked against the Python engine |
-| Auth/security | session + per-room reconnect tokens (CSPRNG), PBKDF2 passwords, in-process rate limiting, security-headers middleware |
-| CI/CD | GitHub Actions (frontend build + smoke gate), Render (backend, test-gated), Cloudflare Worker (staging mirror) |
+| Auth | session + per-room reconnect tokens (CSPRNG), PBKDF2 passwords, in-process rate limiting, security-headers middleware |
+| CI/CD | GitHub Actions (frontend build + two render gates), Render (backend, test-gated), Cloudflare Worker (staging mirror) |
 
 ---
 
-## Why the architecture is shaped the way it is
+## How it fits together
 
-**Server is authoritative for all game state.** Clients render and send moves; the
-server validates every move through a pure `engine.py` before applying it. This is
-what makes client-side AI safe: a tampered client only weakens *its own* opponent,
-because the proposed move is still validated server-side. It's also what makes the
-AI *correct* — the AI holds the true game dict, so it must **determinize** (resample
-everything it can't legally see: decks, blind reserves, future dice) before
-searching, so the search provably can't read hidden order.
+**The server is authoritative.** Clients render and propose; a pure `engine.py`
+validates every move before it applies. That is what makes client-side AI safe — a
+tampered client only weakens its own opponent. It is also what makes the AI
+*correct*: the search holds the true game dict, so it must **determinize**
+(resample decks, blind reserves, future dice) before searching, and provably cannot
+read hidden order.
 
-**Hidden information is a real boundary, not a UI convention.** Each game computes a
-per-recipient view (`player_view`) and broadcasts redacted state — a Werewolf client
-is only ever *sent* the cards it may see this phase; a Duel opponent's reserves
-arrive as `{level, facedown}`. Reconnect and save/load go through the same redaction.
+**Hidden information is a boundary, not a UI convention.** Each game builds a
+per-recipient view and broadcasts redacted state — a Werewolf client is only ever
+*sent* the cards it may see this phase; a Duel opponent's reserves arrive as
+`{level, facedown}`. Reconnect and save/load go through the same redaction, and
+each socket must prove it owns its seat before it can act as one or be sent its view.
 
-**Heavy work never blocks the event loop.** AI turns snapshot state under the lock,
-release it, run search in a thread pool, then re-lock, re-validate that the turn
-hasn't changed, and apply. (This pattern exists because an earlier version that ran
-sync engine work under the lock took production down — the postmortem is in the
-code.)
+**Heavy work never blocks the event loop.** An AI turn snapshots state under the
+room lock, releases it, searches in a thread pool, then re-locks, re-validates that
+the turn hasn't changed, and applies. That shape exists because an earlier version
+that ran sync engine work under the lock took production down.
 
 **The backend is layered so features can't entangle.** `core/` depends on nothing;
-games and Books depend only on `core/`; `app.py` is the composition root that wires
-everything and applies cross-cutting middleware. Books is wired by dependency
-injection specifically so a site feature never imports a game.
+each game and Books depends only on `core/`; `app.py` is the composition root that
+wires them and applies cross-cutting middleware. This deliberately broke a legacy
+circular-import knot, and the direction is one-way in the frontend too — games
+import `shared/`, never the reverse.
 
 ---
 
-## The AI, in one paragraph
-
-Every game's AI subtracts two same-eval seat scores so that *denial* falls out of
-search for free (no special-cased "block the opponent" logic). The consistent lesson
-across dozens of offline experiments — captured in the [research log](docs/ai-research-log.md)
-— is that **search depth (simulations/move) is the dominant strength lever**, and
-that static-eval re-weighting saturates fast. That's what motivated the Rust→WASM
-port: moving inference into the browser buys ~1000× more simulations per move on
-the same free hosting. The learned nets (an AlphaZero-style policy+value net for
-Spender, a card-set **attention** value net for Spender Duel) were each shipped only
-after beating the prior champion in **equal-time**, paired-seed arenas — and the log
-is equally explicit about the experiments that *didn't* work, and why.
-
----
-
-## Repository layout
+## Layout
 
 ```
-app.py                 # composition root: FastAPI app + CORS/security middleware + feature wiring
-core/                  # shared backend platform (DB, auth, rate limiting, config) — imports no game
-games/
-  spender/             # Spender: engine + room server + the full AI stack (ai/, ai/az/)
-  castles_of_crimson/  # Castles of Crimson: engine + bot + AI serving
-  wherewolf/           # Where Wolf?: engine (night conductor, redaction) + room server
-  spender_duel/        # Spender Duel: engine + bot + AI serving
-books/                 # Books site feature (wired via dependency injection)
-shared/                # cross-game frontend kits (theme, lobby, shared card/gem components)
-webapp/                # Vite + React build — the shell that mounts every feature
-rust-cores/            # Per-game Rust → WASM search crates (client-side inference; not the Python core/)
-  spender-core/        #   Spender search core
-  coc-core/            #   Castles of Crimson search core
-  duel-core/           #   Spender Duel search core
-wwsd/                  # standalone browser autoplayer for a friend's external site
-docs/                  # GitHub Pages build output (CI-owned) + ai-research-log.md
+app.py                 # composition root: FastAPI app + middleware + feature wiring
+core/                  # shared backend platform (DB, auth, rooms, rate limiting) — imports no game
+games/<game>/          # engine.py (the rules) + main.py (rooms/WS/REST) + <Game>.jsx + tests/
+                       #   spender, castles_of_crimson, wherewolf, spender_duel,
+                       #   dontminion, dissonance, rag_tag, orbit
+books/  bggfilter/     # site features
+shared/                # cross-game frontend kits: theme, lobby, rules modal, shell screens
+webapp/                # Vite + React build; test/smoke.mjs + test/screens.mjs are the deploy gates
+rust-cores/            # per-game Rust → WASM search crates (spender, coc, duel, dissonance)
+wwsd/                  # standalone browser autoplayer for an external site
+docs/                  # rollback copy of the Pages build + ai-research-log.md
 ```
 
 ---
@@ -138,63 +100,63 @@ docs/                  # GitHub Pages build output (CI-owned) + ai-research-log.
 ## Testing
 
 Rules/engine unit tests are the most valuable asset here and are protected
-accordingly — each game has an engine test suite covering board invariants,
-move legality, scoring, lifecycle, and (for the hidden-info games) the full
-redaction matrix and win-condition matrix. Beyond that:
+accordingly: every game has one covering board invariants, move legality, scoring
+and lifecycle, plus — for the hidden-info games — the full redaction and
+win-condition matrices. The suite is defined once in `pytest.ini` and runs in
+parallel. Beyond that:
 
-- **Python↔Rust differential parity** — generated fixtures are replayed through both
-  the Python engine and the Rust/WASM core; they must match bit-for-bit. This is what
-  makes it safe to serve a Rust port of the "real" engine to browsers.
-- **Token/state conservation soak tests** — e.g. Spender Duel asserts an exact 25-token
-  multiset across board + bag + hands after every move in bot-vs-bot games.
-- **CI gates deploys** — the backend deploy on Render is gated on the test suite; the
-  frontend deploy is gated on a headless smoke test that fails on a blank page or a
-  layout shift.
+- **Python↔Rust differential parity.** Generated fixtures are replayed through both
+  the Python engine and the Rust/WASM core and must match exactly. This is what
+  makes it safe to serve a Rust port of the real engine to browsers.
+- **Conservation soaks.** Spender Duel asserts an exact 25-token multiset across
+  board, bag and hands after every move of bot-vs-bot games; Dontminion replays
+  production saves as its migration gate.
+- **No state-reachability skips, repo-wide,** mechanically enforced: a test that
+  can't reach the state it means to exercise must fail, not opt out.
+- **Deploys are gated.** Render runs the Python suite; Pages runs `smoke` (blank
+  page / layout shift) and `screens`, which boots the real backend and drives every
+  game route in a browser. `smoke` never renders a game — only `screens` does.
 
 ```bash
-python -m pytest              # backend: engines, AI, core (auth/db/ratelimit), books
-cd webapp && npm run smoke    # frontend: builds + headless-loads, fails on a blank page
+python -m pytest                # backend: engines, AI, core, kits, books
+cd webapp && npm run smoke      # frontend: builds + headless-loads
+cd webapp && npm run screens    # frontend: real render gate, against a live backend
 ```
 
 ---
 
 ## Local development
 
-Backend — the composition root serves the whole site (every game and feature):
-
 ```bash
 pip install -r games/spender/requirements.txt
-python -m uvicorn app:app --reload --port 8000
-# health check: http://127.0.0.1:8000/health
+python -m uvicorn app:app --reload --port 8000     # serves every game and feature
+# health: http://127.0.0.1:8000/health
+
+cd webapp && npm install && npm run dev            # MUST be port 5173 — the CORS allowlist
 ```
 
-Frontend — Vite dev server on port 5173 (the backend's CORS allowlist expects it):
-
-```bash
-cd webapp
-npm install
-npm run dev
-```
+Two local players need two *browser profiles*: separate windows share
+`localStorage`, so they collapse into one identity.
 
 ---
 
 ## Deployment
 
-- **Frontend** → GitHub Pages at https://forry4.github.io/. GitHub Actions builds
-  `webapp/`, runs the smoke gate, and publishes on every push to `main` touching the
-  frontend. The build is CI-owned — the committed source is never hand-built.
-- **Backend** → Render — one web service hosts every game and feature; auto-deploys
-  on push to `main`, gated on tests. Prod persistence is Turso (libSQL); Render's
-  filesystem is ephemeral.
-- **Staging** → a Cloudflare Worker mirrors the frontend from the `staging` branch
-  (reusing the prod backend) so UI/layout changes can be validated on a real URL
-  before shipping.
+- **Frontend** → GitHub Pages. Actions builds `webapp/`, runs both gates, and
+  publishes on every push to `main` touching the frontend. The build is CI-owned —
+  never hand-built or committed.
+- **Backend** → Render, one web service for everything, auto-deployed on push to
+  `main` and gated on tests. The deploy job polls `/health` for the pushed commit,
+  because the deploy hook returning 200 only means Render accepted the request.
+- **Staging** → a Cloudflare Worker mirrors the `staging` branch against the prod
+  backend, so layout changes can be checked on a real URL first.
 
 ---
 
 ## More
 
-[`CLAUDE.md`](CLAUDE.md) is the detailed engineering operating manual — architecture
-decisions, invariants, and the hard-won "do not regress" notes for each subsystem.
-[`docs/ai-research-log.md`](docs/ai-research-log.md) is the full AI campaign history:
-what was tried, what shipped, and the rejected-experiment postmortems.
+[`CLAUDE.md`](CLAUDE.md) is the engineering operating manual — architecture
+decisions, invariants, and the "do not regress" notes for each subsystem, with a
+per-area `CLAUDE.md` next to each game.
+[`docs/ai-research-log.md`](docs/ai-research-log.md) is the AI campaign history:
+what shipped, what saturated, and the rejected-experiment postmortems.

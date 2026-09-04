@@ -195,10 +195,15 @@ def test_a_dropped_socket_actually_retries():
 def test_abandoning_asks_first():
     """Every other game confirms. Rag Tag fired on the click that opened the menu."""
     assert "confirmAbandon" in UI, "abandon has no confirmation step"
-    menu = re.search(r"menu=\{<GameMenu items=\{\[(.*?)\]\.filter", UI, re.S)
+    # The menu takes callbacks now (shared/lobby.jsx owns the rows), so what this
+    # reads is the handler Rag Tag hands it — not the row it used to write itself.
+    menu = re.search(r"menu=\{<GameMenu\b(.*?)/>\}", UI, re.S)
     assert menu, "the game menu is gone — this guard has rotted"
+    assert "onAbandon" in menu.group(1), "the menu no longer offers abandon at all"
     assert 'send({ action: "abandon" })' not in menu.group(1), (
         "the menu still abandons directly instead of opening the confirmation")
+    assert "setConfirmAbandon" in menu.group(1), (
+        "abandon does not open the confirmation")
 
 
 def test_a_circular_track_is_drawn_as_a_circle():

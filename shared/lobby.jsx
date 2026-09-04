@@ -79,7 +79,7 @@ export function LobbyUser({ user }) {
 // `user` is the right-side slot (name / guest badge). rulesLabel lets Duel say "How to Play".
 // `menu` is the IN-GAME shape and takes precedence over the buttons: every game
 // shows a single ☰ dropdown once you are at a board, never a row of Back/Rules
-// buttons. Pass `menu={<GameMenu items={…} />}` there and `onBack`/`onRules` in
+// buttons. Pass `menu={<GameMenu onLeave={…} onRules={…} />}` there and `onBack`/`onRules` in
 // the lobby, where a plain Back is right.
 export function LobbyHeader({ onBack, backLabel = "← Back", title, onRules, rulesLabel = "Rules", user, menu }) {
 	return (
@@ -643,14 +643,51 @@ export function CmSeg({ options, value, onChange, wrap = false }) {
 
 // ─── In-game options menu (shared across all four games) ─────────────────────
 // A single hamburger button that opens a dropdown of game actions — replaces the
-// per-game row of Menu / Rules / Abandon buttons in the in-game top bar. Pass an
-// `items` array of { label, onClick, icon?, danger? }; falsy entries are skipped
-// so a game can conditionally omit an action (e.g. Where Wolf has no Abandon).
+// per-game row of Menu / Rules / Abandon buttons in the in-game top bar.
 // Token-driven with hard fallbacks so it renders correctly even in CoC's bare
 // mount (no baseCss). Append `gameMenuCss` to the game's own <style>.
+//
+// THE MENU OWNS ITS OWN ITEMS. It used to take an `items` array, and nine call
+// sites each typed the same three rows out by hand — the chrome was shared and
+// the CONTENT was nine copies, which is the arrangement this repo has already
+// paid for at the lobby row and the create button. It drifted exactly as you
+// would expect: Orbit shipped "How to play" above "Return to lobby" with `?`
+// and `×` for icons, i.e. different words, different glyphs and a different
+// ORDER from the other eight, in the one place on every screen where a player
+// looks for the way out. A game now passes three callbacks and cannot express
+// the drift.
+//
+// The rows are Return to menu / View rules / Abandon game, in that order, and
+// the third is the destructive one so it is painted as such and sits last. A
+// row whose handler is absent is dropped, which is how a game omits an action:
+//   • Where Wolf has NO Abandon and that is deliberate, not an oversight. Its
+//     server-side `abandon` on a game in progress only drops the socket (you are
+//     voted in absentia); there is nothing to forfeit, so the row would promise
+//     an action the game does not have.
+//   • Every game with an `over` state passes `onAbandon={over ? null : …}` —
+//     there is nothing to abandon once the result is on the board.
+//
+// `local` is the ONE variant, and it is a named mode rather than free-text
+// labels precisely so it cannot become a re-theming hook: in the offline hub the
+// destination really is Local Games rather than the site menu, and the action
+// really is deleting a local save rather than forfeiting to an opponent. Saying
+// "Abandon game" there would describe a server the tab is not talking to.
 export const gameMenuCss = _gameMenuCssText;
 
-export function GameMenu({ items, align = "left", label = "Menu" }) {
+export function GameMenu({ onLeave, onRules, onAbandon, local = false,
+	align = "left", label = "Menu" }) {
+	const items = [
+		{ label: local ? "Back to Local Games" : "Return to menu", icon: "←", onClick: onLeave },
+		{ label: "View rules", icon: "📖", onClick: onRules },
+		{ label: local ? "Delete game" : "Abandon game", icon: "⚑", danger: true, onClick: onAbandon },
+	].filter((it) => it.onClick);
+	return <GameMenuChrome items={items} align={align} label={label} />;
+}
+
+// The dropdown mechanics only — kept apart from the rows above so the "what a
+// menu contains" decision and the "how a dropdown behaves" one are not one
+// function. Not exported: the rows are the contract.
+function GameMenuChrome({ items, align, label }) {
 	const [open, setOpen] = useState(false);
 	const ref = useRef(null);
 	useEffect(() => {
@@ -669,7 +706,7 @@ export function GameMenu({ items, align = "left", label = "Menu" }) {
 			</button>
 			{open && (
 				<div className={`gm-menu gm-${align}`} role="menu">
-					{items.filter(Boolean).map((it, i) => (
+					{items.map((it, i) => (
 						<button type="button" key={i} role="menuitem"
 							className={`gm-item${it.danger ? " gm-danger" : ""}`}
 							onClick={() => { setOpen(false); it.onClick(); }}>

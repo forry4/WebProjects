@@ -687,11 +687,8 @@ export default function Orbit({ myId, authUser, onExit }) {
   return <div className="app orbit or-game" style={{ "--lby-accent": GAME_ACCENTS.orbit }}>
     <style>{styles}</style>
     <LobbyHeader title={`Orbit · ${roomId}`} user={<span className={`or-connection${connected ? "" : " lost"}`}>{connected ? (authUser?.name || "Connected") : "Reconnecting…"}</span>}
-      menu={<GameMenu items={[
-        { label: "How to play", onClick: () => setShowRules(true), icon: "?" },
-        { label: "Return to lobby", onClick: leaveToLobby, icon: "←" },
-        !over && { label: "Abandon game", onClick: () => setConfirmAbandon(true), icon: "×", danger: true },
-      ]} />} />
+      menu={<GameMenu onLeave={leaveToLobby} onRules={() => setShowRules(true)}
+        onAbandon={over ? null : () => setConfirmAbandon(true)} />} />
     <main className="or-table">
       <div className="or-score-rail">
         <PlayerRail player={{ ...other, __pid: otherId }} name={names[otherId]} active={!over && game.turn_pid === otherId} leader={game.leader} />

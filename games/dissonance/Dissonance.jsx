@@ -3821,12 +3821,9 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
  *  the header — Dissonance was the last one still showing Back + Rules. */
 function OddMenu({ onLeave, onRules, onAbandon }) {
   return (
-    <GameMenu items={[
-      { label: "Return to menu", icon: "\u2190", onClick: onLeave },
-      { label: "View rules", icon: "\ud83d\udcd6", onClick: onRules },
-      // Only for a live game you are still in.
-      onAbandon && { label: "Abandon game", icon: "\u2691", danger: true, onClick: onAbandon },
-    ]} />
+    // Only for a live game you are still in — the caller passes a null
+    // `onAbandon` otherwise, and the shared menu drops the row.
+    <GameMenu onLeave={onLeave} onRules={onRules} onAbandon={onAbandon} />
   );
 }
 

@@ -2392,11 +2392,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
           <div className="coc-top-left">
             {over
               ? <button className="coc-btn ghost sm" onClick={() => setReviewing(false)}>← Results</button>
-              : <GameMenu items={[
-                  { label: "Return to menu", icon: "←", onClick: leaveToLobby },
-                  { label: "View rules", icon: "📖", onClick: () => setShowRules(true) },
-                  { label: "Abandon game", icon: "⚑", danger: true, onClick: () => setConfirmAbandon(true) },
-                ]} />}
+              : <GameMenu onLeave={leaveToLobby}
+                  onRules={() => setShowRules(true)}
+                  onAbandon={() => setConfirmAbandon(true)} />}
           </div>
           <span className="coc-title">Castles of Crimson</span>
           <div className="coc-top-right coc-top-abandon">

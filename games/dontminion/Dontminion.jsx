@@ -2417,12 +2417,8 @@ export default function Dontminion({ myId, authUser, onExit }) {
           {/* Same wording, same order, same icons as every other game: Return /
               rules / abandon. This was the odd one out — "Back to lobby" with
               no icons and Rules below Abandon. */}
-          <GameMenu items={[
-            { label: "Return to menu", icon: "←", onClick: leaveToLobby },
-            { label: "View rules", icon: "📖", onClick: () => setShowRules(true) },
-            !over && { label: "Abandon game", icon: "⚑", danger: true,
-              onClick: () => setConfirmAbandon(true) },
-          ].filter(Boolean)} label="Menu" />
+          <GameMenu onLeave={leaveToLobby} onRules={() => setShowRules(true)}
+            onAbandon={over ? null : () => setConfirmAbandon(true)} />
         </div>
         <h1 className="dm-title">Dontminion</h1>
         <div className="dm-top-side dm-top-right">

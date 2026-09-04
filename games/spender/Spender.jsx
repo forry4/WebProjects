@@ -3455,15 +3455,15 @@ export default function SpenderApp() {
 						? <button className="btn btn-ghost btn-sm" onClick={exitPuzzle}>← Puzzles</button>
 						: reviewChrome
 						? <button className="btn btn-ghost btn-sm" onClick={() => { setReplayTurn(null); setReviewing(false); setResultReady(true); }}>← Back to Results</button>
-						: <GameMenu items={[
-								// Offline: "menu" is the Local Games hub, and leaving just closes the game
-								// (the save persists) — no socket to tear down, no server forfeit.
-								{ label: offline ? "Back to Local Games" : "Return to menu", icon: "←",
-									onClick: offline ? exitOfflineToHub : goToMenu },
-								{ label: "View rules", icon: "📖", onClick: () => setShowRules(true) },
-								{ label: offline ? "Delete game" : "Abandon game", icon: "⚑", danger: true,
-									onClick: () => setConfirmAbandon(true) },
-							]} />}
+						/* Offline: "menu" is the Local Games hub, and leaving just closes the
+						   game (the save persists) — no socket to tear down, no server forfeit.
+						   `local` re-words both rows; see GameMenu in shared/lobby.jsx. A JSX
+						   `{/* … *​/}` comment is not legal here: this is the expression half of
+						   a ternary, not JSX children. */
+						: <GameMenu local={!!offline}
+								onLeave={offline ? exitOfflineToHub : goToMenu}
+								onRules={() => setShowRules(true)}
+								onAbandon={() => setConfirmAbandon(true)} />}
 					<span className="game-nav-title">Spender{puzzling ? " — Puzzle" : reviewChrome ? " — Review" : ""}</span>
 					{puzzling
 						? <div className="puzzle-nav-aids">

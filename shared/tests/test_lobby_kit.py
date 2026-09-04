@@ -151,22 +151,21 @@ def test_every_game_uses_the_shared_in_game_menu():
         "these render a game board without the shared ☰ menu: " f"{missing}")
 
 
-def test_the_in_game_menu_offers_the_same_three_actions():
-    """Return / rules / abandon, in that order, on every game that can be
-    abandoned. A game that quietly drops one leaves players with no way out of a
-    live room except closing the tab — Dissonance's server had supported abandon
-    since it shipped, with nothing in the UI ever calling it."""
-    for jsx in _lobby_games():
-        text = jsx.read_text(encoding="utf-8")
-        # A window after the tag, not a closing-delimiter match: the six games
-        # format the items array six different ways and a regex that has to find
-        # the end of it fails on formatting rather than on substance.
-        at = text.find("<GameMenu")
-        assert at >= 0, f"{jsx.name} does not render GameMenu"
-        body = text[at:at + 900]
-        assert re.search(r"Return to (menu|lobby)", body), \
-            f"{jsx.name}'s menu has no way back to the lobby"
-        assert "rules" in body.lower(), f"{jsx.name}'s menu does not offer the rules"
+# WHAT THE MENU CONTAINS MOVED TO shared/tests/test_game_menu_kit.py, because the
+# menu now builds its own rows instead of taking an `items` array — so the question
+# changed from "did this game type the right three rows?" to "did this game hand the
+# rows over at all?", and the answer is a property of `shared/lobby.jsx`.
+#
+# The guard that used to live here is worth remembering as a lesson rather than as
+# code. It read `Return to (menu|lobby)` and `"rules" in body.lower()` — an
+# alternation and a case-fold, written wide enough to accept whatever each game
+# happened to say. So when Orbit shipped "How to play" above "Return to lobby" with
+# `?` and `×` for icons, this passed: the guard had been relaxed to fit the drift it
+# existed to catch. A test that accepts two spellings of one label is not enforcing
+# one label. The rule is enforceable now because there is only one spelling to
+# enforce, and it is in one file.
+# (`test_every_game_board_has_the_shared_menu` above still holds, and is the half
+# this file is the right home for: whether a game mounts the kit at all.)
 
 
 def test_a_row_action_uses_the_shared_button():

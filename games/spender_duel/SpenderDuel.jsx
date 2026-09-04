@@ -1746,12 +1746,9 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
       <style>{duelStyles}</style>
       {reconnecting && !connected && !reviewOnly && <div className="duel-reconnbar">Reconnecting…</div>}
       <div className="duel-topbar">
-        <GameMenu items={[
-          { label: "Return to menu", icon: "←", onClick: leaveToLobby },
-          { label: "View rules", icon: "📖", onClick: () => setShowRules(true) },
-          // Abandon only exists for a LIVE game you're still playing.
-          (!over && !reviewOnly && !replaySnapshots) && { label: "Abandon game", icon: "⚑", danger: true, onClick: () => setConfirmAbandon(true) },
-        ]} />
+        {/* Abandon only exists for a LIVE game you're still playing. */}
+        <GameMenu onLeave={leaveToLobby} onRules={() => setShowRules(true)}
+          onAbandon={(!over && !reviewOnly && !replaySnapshots) ? () => setConfirmAbandon(true) : null} />
         <div className="spacer" />
         <h1 className="duel-title">Spender Duel</h1>
         {replaySnapshots && <span className="duel-review-badge">Review</span>}
