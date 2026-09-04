@@ -74,10 +74,15 @@
 /* On touch, :hover STICKS to the last-tapped button until you tap elsewhere, so a
    just-DESELECTED pick-option (a .btn-outline) kept the gold hover fill and looked
    selected (the reported bug). Kill the hover fill where the device can't truly
-   hover — the selected state (.btn-gold, solid gold) then reads unambiguously. */
+   hover — the selected state (.btn-gold, gold) then reads unambiguously.
+   The gold half is `filter`/`transform` rather than `background` now: the shared
+   `.btn-gold` is a lit plate that BRIGHTENS and lifts on hover instead of swapping
+   its fill, so a background override here would have stripped the gradient off every
+   selected option on a phone to cancel a hover that no longer touches it. Cancel what
+   the hover actually does. */
 @media (hover: none) {
   .dm .btn-outline:hover { background: transparent; color: var(--gold, #c9a84c); }
-  .dm .btn-gold:hover { background: var(--gold, #c9a84c); }
+  .dm .btn-gold:hover { filter: none; transform: none; }
 }
 
 /* ── waiting room ── */

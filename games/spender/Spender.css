@@ -212,8 +212,15 @@
        "lit panel behind the title" reading came from. The ground does the lighting. */
     filter:drop-shadow(0 1px 0 rgba(0,0,0,.5))}
 }
-.home-rule{display:block;width:clamp(190px,66vw,340px);height:19px;margin:clamp(8px,1.1vh,11px) auto 0;
-  color:var(--gold);opacity:.9}
+/* HEIGHT COMES FROM THE VIEWBOX, NOT FROM A NUMBER HERE. The rule used to be a
+   240x14 box pinned to 19px; it now carries the site's mark (shared/HomeScreen.jsx)
+   and is 340x52, so a hardcoded height would either crop the tree or letterbox it
+   with `meet`. `aspect-ratio` + `height:auto` keeps one ratio at every width, which
+   is what the clamp on the width was already assuming.
+   No `opacity` here either — see the note on the paths themselves: dimming the
+   element would dim the mark along with the hairlines. */
+.home-rule{display:block;width:clamp(190px,66vw,340px);aspect-ratio:340/52;height:auto;
+  margin:clamp(6px,.95vh,10px) auto 0;color:var(--gold)}
 
 /* THE GRID IS FLEX, NOT GRID, FOR ONE REASON: a partial last row. It is capped at
    THREE columns at every width above 1000px, and that cap is deliberate. Seven cards

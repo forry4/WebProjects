@@ -39,14 +39,14 @@ const ICON = {
 	no: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round"><path d="M6.4 6.4 17.6 17.6M17.6 6.4 6.4 17.6" /></svg>),
 };
 
-// WHAT GUEST MODE COSTS YOU, as three scannable rows rather than a sentence.
-// It is also what makes the Guest panel the same HEIGHT as the other two: that panel
-// has one field where they have two, and pinning all three to one card height (so the
-// tab strip does not move under the cursor) dumped the whole 93px difference into a
-// single gap in the middle of the card, which reads as a failed render. The answer to
-// a hole is content that belongs there, not a smaller hole.
+// WHAT GUEST MODE COSTS YOU, as three scannable rows rather than a sentence: one
+// thing it buys you and the two it takes away, so the trade is read rather than
+// inferred. (An older note here claimed the list also existed to hold the Guest panel
+// to the other two panels' height. That height lock is gone -- the card is
+// top-anchored now, see the `.auth-panel` comment in Spender.css -- so these rows
+// carry their own weight and are free to say less.)
 const GUEST_FACTS = [
-	["yes", "Play immediately, nothing to fill in"],
+	["yes", "Play immediately"],
 	["no", "Game history is not saved"],
 	["no", "Cannot resume on another device"],
 ];
@@ -170,15 +170,20 @@ export default function AuthScreen({ siteName, httpBase, css, myId, onAuthentica
 										<span className="auth-error-icon" aria-hidden="true">{ICON.alert}</span>{error}
 									</div>}
 								</div>
+								{/* Register says ONE thing. The field rules it used to spell out
+								    (1-16 characters, letters and numbers) are enforced by the
+								    maxLength above and by core.auth.validate_credentials, and a
+								    rejected value comes back through the error slot naming what was
+								    wrong -- so the second line was reciting a rule at everyone to
+								    pre-empt it for the few who would hit it. The one line left is the
+								    only thing a new account holder cannot find out by trying. */}
 								<p className="auth-note">
 									{tab === "login"
 										? "Signed-in games are saved and can be resumed from any device."
-										: "A name and a password — no email, and no verification step."}
-									<span className="auth-note-sub">
-										{tab === "login"
-											? "Names are not case-sensitive."
-											: "1–16 characters each; letters and numbers in the name."}
-									</span>
+										: "No email verification required."}
+									{tab === "login" && (
+										<span className="auth-note-sub">Names are not case-sensitive.</span>
+									)}
 								</p>
 								<button className="btn btn-gold btn-full" onClick={submit} disabled={loading}>
 									{loading && <span className="spinner" />}

@@ -43,7 +43,47 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro','Crimson F
 .auth-screen,.browser{padding-top:calc(env(safe-area-inset-top,0px) + 32px)}
 .app{min-height:100vh;display:flex;flex-direction:column}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 20px;border-radius:var(--radius);border:none;cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.88rem;letter-spacing:.06em;font-weight:600;transition:all .15s;white-space:nowrap}
-.btn-gold{background:var(--gold);color:#0f0e0c}.btn-gold:hover{background:var(--gold-light)}
+/* THE FILLED BUTTON IS A LIT PLATE, NOT A FLAT SLAB — the same object as the lobby's
+   `.lby-cta` (shared/lobby.lobby-create-row-css.css), down to the numbers: a top-lit
+   gradient face, a darker edge, a highlight along the top, and a short drop.
+   The site had ONE filled control drawn TWO ways. "+ Create Game" had depth; every
+   Sign In / Create Account / Play as Guest / confirm button was a flat rectangle of
+   colour — and on a near-black page a flat fill reads as a sticker laid ON the page
+   rather than an object sitting on it, which is the reasoning already written down
+   beside `.lby-cta` and `.lby-act-primary`. It just never reached the front door.
+
+   THE EDGE IS AN INSET RING, NOT A BORDER, and that is the one deliberate departure
+   from `.lby-cta`. `.btn` is `border:none` while the other three variants carry 1px,
+   so a real border here would grow every gold button on the site by 2px — including
+   the mixed rows those variants share, where `.duel-actionrow .btn-gold` exists
+   solely to cancel that exact mismatch. An inset ring paints the same line and moves
+   no geometry.
+
+   HOVER BRIGHTENS THE FACE, IT DOES NOT REPLACE IT (it used to swap to --gold-light).
+   `.btn` transitions `all`, and a gradient and a flat colour are not interpolable, so
+   swapping backgrounds makes the first hover re-rasterize the whole face and blink —
+   the bug Dissonance hit on three buttons and wrote up in Dissonance.css. `filter`
+   composites on the layer that is already there.
+
+   `background-color` STAYS SET beneath the gradient: it is the fallback, and it is
+   what the sign-in screen's contrast walk in webapp/test/screens.mjs composites
+   against. That harness reads `backgroundColor` up the ancestor chain, so a
+   gradient-only face would leave it measuring near-black ink against the CARD's dark
+   ground and failing a button that is in fact 8:1. */
+.btn-gold{color:#0f0e0c;background-color:var(--gold);
+  background-image:linear-gradient(180deg,color-mix(in srgb,var(--gold) 84%,#fff5dc),var(--gold));
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--gold) 72%,#000),
+    inset 0 1px 0 rgba(255,255,255,.26),
+    0 3px 9px -7px color-mix(in srgb,var(--gold) 55%,transparent)}
+.btn-gold:hover:not(:disabled){filter:brightness(1.08);transform:translateY(-1px);
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--gold) 72%,#000),
+    inset 0 1px 0 rgba(255,255,255,.3),
+    0 6px 14px -8px color-mix(in srgb,var(--gold) 68%,transparent)}
+/* A disabled plate is not lit and does not hover-lift: the Sign In button spends the
+   whole request disabled, and a button that still rises under the cursor while it is
+   refusing the click is telling the user the opposite of what it is doing. */
+.btn-gold:disabled{filter:none;transform:none;
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--gold) 72%,#000)}
 .btn-outline{background:transparent;color:var(--gold);border:1px solid var(--gold)}.btn-outline:hover{background:var(--gold);color:#0f0e0c}
 .btn-ghost{background:transparent;color:var(--text-soft);border:1px solid var(--border)}.btn-ghost:hover{border-color:var(--text-dim);color:var(--text)}
 .btn-danger{background:transparent;color:var(--red-gem);border:1px solid var(--red-gem)}.btn-danger:hover{background:var(--red-gem);color:#fff}

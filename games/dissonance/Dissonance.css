@@ -96,8 +96,19 @@
 .dis .btn-gold, .dis .lby-cta, .dis-gobtn {
   transition: filter 0.13s ease, box-shadow 0.13s ease, transform 0.08s ease;
 }
-.dis .btn-gold { background: linear-gradient(180deg, var(--accent-hi), var(--accent) 55%); color: var(--ink); }
-.dis .btn-gold:hover:not(:disabled) { filter: brightness(1.09); }
+/* THE EDGE FOLLOWS THE FACE. `.btn-gold` in the shared sheet is a lit plate whose 1px
+   edge and drop are mixed FROM `--gold`, which is the one part of it that does not
+   travel to a green button — the same defect this file already fixes for the fill.
+   Retint it here rather than re-declaring the plate: the lighting is the shared
+   sheet's, only the hue is this game's. */
+.dis .btn-gold { background: linear-gradient(180deg, var(--accent-hi), var(--accent) 55%); color: var(--ink);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 72%, #000),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 3px 9px -7px color-mix(in srgb, var(--accent) 55%, transparent); }
+.dis .btn-gold:hover:not(:disabled) { filter: brightness(1.09);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 72%, #000),
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    0 6px 14px -8px color-mix(in srgb, var(--accent) 68%, transparent); }
 /* THE CREATE-ROW OVERRIDE IS GONE, and its removal is the point. It read: "the
    create row hardcodes var(--gold) rather than --lby-accent, so Create / Join /
    the code field's focus ring stay gold on a green screen — overridden here
