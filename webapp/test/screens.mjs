@@ -5517,9 +5517,67 @@ try {
 			&& await page.locator(".or-track").count() === 5
 			&& await page.locator(".or-tech-col").count() === 3);
 
-		// Seating is random, so wait through the bot's opening action. A clickable
-		// hand card is the server's legal-move list arriving at this seat.
-		const card = page.locator(".or-hand-zone .or-agent:not(:disabled)").first();
+		// WHOSE IS IT. Both rails carry a Leader chip (including the "No badge"
+		// state — it used to render only under its owner, so no badge and no chip
+		// looked the same), and the technology board names both seats in its key
+		// rather than printing two unlabelled pips.
+		const seating = await page.evaluate(() => ({
+			badges: [...document.querySelectorAll(".or-player .or-leader")].map((el) => el.textContent.trim()),
+			key: [...document.querySelectorAll(".or-tech-key b")].map((el) => el.textContent.trim()),
+			mine: document.querySelectorAll(".or-columns.mine h3").length,
+			glyphs: /[☿♀⊕♂♃]/.test(document.querySelector(".or-table").textContent),
+		}));
+		check("both seats show a Leader badge state and are named on the tech key",
+			seating.badges.length === 2 && seating.badges.every((text) => text.length > 0)
+			&& seating.key.length === 2 && seating.mine === 1 && !seating.glyphs,
+			JSON.stringify(seating));
+
+		// A technology bonus token sits on the LEVEL-2 space of its own track,
+		// which is the space that pays it, and opens its effect when pressed.
+		const tokens = await page.evaluate(() => [...document.querySelectorAll(".or-tech-col")]
+			.map((col) => {
+				const rows = [...col.querySelectorAll(".or-tech-row")];
+				const withToken = rows.findIndex((row) => row.querySelector(".or-tech-token"));
+				return withToken < 0 ? null : rows[withToken].querySelector(".or-tech-lv").textContent.trim();
+			}));
+		check("each technology track's bonus token sits on its level-2 space",
+			tokens.length === 3 && tokens.every((level) => level === "2"), JSON.stringify(tokens));
+
+		// FIVE SPACES, ALL THE SAME SIZE. A `min-height` let each space grow to
+		// its own text and the ladder came out visibly ragged; and the seat marker
+		// belongs ON the level a player is at, not in a sixth "level 0" row bolted
+		// under the track. Both are geometry, so both are checkable.
+		const ladder = await page.evaluate(() => {
+			const cols = [...document.querySelectorAll(".or-tech-col")];
+			const heights = new Set();
+			const levels = cols.map((col) => [...col.querySelectorAll(".or-tech-lv")]
+				.map((el) => el.textContent.trim()).join(""));
+			for (const el of document.querySelectorAll(".or-tech-space")) {
+				heights.add(Math.round(el.getBoundingClientRect().height));
+			}
+			return { levels, heights: [...heights] };
+		});
+		check("every technology track is the same five spaces, 5 down to 1",
+			ladder.levels.length === 3 && ladder.levels.every((seq) => seq === "54321"),
+			JSON.stringify(ladder.levels));
+		check("...and every space on them is exactly the same height",
+			ladder.heights.length === 1, JSON.stringify(ladder.heights));
+		await page.locator(".or-tech-token").first().click({ timeout: 10_000 }).catch(() => {});
+		const tokenInfo = await page.evaluate(() => {
+			const panel = document.querySelector(".or-info");
+			return panel ? panel.textContent.replace(/\s+/g, " ").trim() : "";
+		});
+		check("pressing a bonus token opens a modal naming its effect",
+			/bonus token/i.test(tokenInfo) && /(Credits|Zenithium|influence|Leader|Mobilize|Exile|Transfer)/.test(tokenInfo),
+			tokenInfo.slice(0, 120));
+		await page.keyboard.press("Escape").catch(() => {});
+		await page.waitForSelector(".or-info", { state: "detached", timeout: 5_000 }).catch(() => {});
+
+		// Seating is random, so wait through the bot's opening action. A PLAYABLE
+		// hand card is the server's legal-move list arriving at this seat. It is
+		// `.playable`, not `:not(:disabled)`: a card you cannot play is still one
+		// you can open and read, so no hand card is ever disabled any more.
+		const card = page.locator(".or-hand-zone .or-agent.playable").first();
 		const gotTurn = await card.waitFor({ state: "visible", timeout: 30_000 })
 			.then(() => true).catch(() => false);
 		check("the random opponent yields a legal player turn", gotTurn);
@@ -5531,7 +5589,12 @@ try {
 			&& actionCopy.some((text) => text.includes("Zenithium"))
 			&& actionCopy.some((text) => text.includes("Leader")),
 			JSON.stringify(actionCopy));
-		const action = page.locator(".or-action-bar button:not(:disabled)").first();
+		// STEERED to Recruit, and asserted below rather than sampled: the deal is
+		// seeded, so "some games recruit" would be "this game never recruits" for
+		// good, and the placed-Agent panel is exactly what the phone checks read.
+		const recruit = page.locator(".or-action-bar button:not(:disabled)", { hasText: "Recruit" });
+		const action = await recruit.count().catch(() => 0)
+			? recruit.first() : page.locator(".or-action-bar button:not(:disabled)").first();
 		const actionReady = await action.waitFor({ state: "visible", timeout: 10_000 })
 			.then(() => true).catch(() => false);
 		check("a selected Agent offers a server-legal action", actionReady);
@@ -5549,7 +5612,7 @@ try {
 		await page.waitForFunction((n) => document.querySelectorAll(".or-log p").length > n,
 			logBefore, { timeout: 20_000 }).catch(() => {});
 		const logAfter = await page.locator(".or-log p").count().catch(() => 0);
-		check("the action resolves and is broadcast into the chronicle", logAfter > logBefore,
+		check("the action resolves and is broadcast into the log", logAfter > logBefore,
 			`${logBefore} -> ${logAfter}`);
 		const geometry = await page.evaluate(() => ({
 			wide: document.documentElement.scrollWidth > window.innerWidth + 1,
@@ -5575,6 +5638,50 @@ try {
 		});
 		check("the playable board stays inside a phone viewport",
 			!phone.wide && phone.outside.length === 0, JSON.stringify(phone));
+
+		// A SECTION CAN SIT INSIDE THE VIEWPORT AND STILL HIDE ITS CONTENT: the
+		// check above measures the panel's own box, and the influence rows, the
+		// technology grid and both placed-Agent grids used to satisfy it while
+		// scrolling sideways INSIDE themselves, which put two of five planets and
+		// a third of every track behind a horizontal drag on a page that scrolls
+		// vertically. Assert the inner boxes are not scrollers, and that all five
+		// planet columns are actually on screen. The HAND is exempt and stays a
+		// scroller on purpose — full-size cards, and up to six of them.
+		const inner = await page.evaluate(() => {
+			const scrollers = [...document.querySelectorAll(
+				".or-influence, .or-track, .or-track-spaces, .or-tech-grid, .or-column-grid")]
+				.filter((el) => el.scrollWidth > el.clientWidth + 1)
+				.map((el) => `${el.className}:${el.scrollWidth}>${el.clientWidth}`);
+			const cells = [...document.querySelectorAll(".or-columns .or-column")];
+			const offscreen = cells.filter((cell) => {
+				const r = cell.getBoundingClientRect();
+				return r.left < -1 || r.right > window.innerWidth + 1 || r.width < 8;
+			}).length;
+			return { scrollers, cells: cells.length, offscreen };
+		});
+		check("no board on a phone hides content behind a sideways scroll",
+			inner.scrollers.length === 0, JSON.stringify(inner.scrollers));
+		check("all five planet columns are on screen for both seats",
+			inner.cells === 10 && inner.offscreen === 0, JSON.stringify(inner));
+
+		// Every readable face opens the same modal, so the condensed column chip
+		// loses no rules text: press one and its Agent's own effect comes back.
+		const slot = page.locator(".or-columns.mine .or-slot").first();
+		const hasSlot = await slot.count().catch(() => 0);
+		if (hasSlot) {
+			await slot.click({ timeout: 10_000 }).catch(() => {});
+			const cardInfo = await page.evaluate(() => {
+				const panel = document.querySelector(".or-info");
+				return panel ? panel.textContent.replace(/\s+/g, " ").trim() : "";
+			});
+			check("pressing a placed Agent opens its full card text",
+				/Agent/.test(cardInfo) && /Credits/.test(cardInfo) && cardInfo.length > 60,
+				cardInfo.slice(0, 120));
+			await page.keyboard.press("Escape").catch(() => {});
+		} else {
+			check("pressing a placed Agent opens its full card text", false,
+				"the turn played produced no recruited Agent to press");
+		}
 		check("no page errors while playing Orbit", errors.length === 0,
 			errors[0]?.slice(0, 200) || "");
 		await ctx.close();

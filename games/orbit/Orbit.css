@@ -4,12 +4,34 @@
   --or-line: rgba(177, 188, 255, .18);
   --or-ink: #f5f2e9;
   --or-dim: #aeb6d0;
+  /* THE TWO SEAT COLOURS. Yours is the game accent; theirs is a warm contrast
+     that survives both a teal-blind and a red-blind reading of the pair, and
+     never appears as a planet on the influence board. Everything that has to
+     say WHOSE it is — the rail stripe, the seat dots, the technology markers
+     and its named key — resolves `--or-seat` from these two and nothing else,
+     so a seat cannot end up one colour in one panel and another elsewhere. */
+  --or-me: var(--lby-accent);
+  --or-them: #ff9a6c;
   min-height: 100vh;
   color: var(--or-ink);
   background:
     radial-gradient(circle at 15% 5%, rgba(90, 68, 168, .16), transparent 30rem),
     radial-gradient(circle at 84% 20%, rgba(28, 141, 175, .12), transparent 34rem),
     #090b18;
+  /* A GAME SURFACE, NOT A DOCUMENT — same rule and same reasoning as Rag Tag
+     and Dontminion. Cards and tokens are pressed and held to read them, and
+     without this iOS answers the hold first with a selection callout and a
+     magnifier, and a drag across the board paints a text selection on every
+     platform. INPUTS ARE EXEMPT below: the lobby's room-code field is typed
+     and pasted into, and a field whose text cannot be selected is broken. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.orbit input, .orbit textarea, .orbit [contenteditable] {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .orbit::before {
@@ -111,6 +133,22 @@
   box-shadow: 0 12px 40px rgba(0, 0, 0, .24);
 }
 
+/* ── Whose is it ────────────────────────────────────────────────────────────
+   Every panel that belongs to a seat resolves `--or-seat` once, here, and then
+   paints its stripe, its dot and its active glow from that. `.mine` is the
+   opt-in and the default is the opponent, so a panel that forgets to say is
+   never mistaken for yours. */
+.or-player, .or-columns { --or-seat: var(--or-them); }
+.or-player.mine, .or-columns.mine { --or-seat: var(--or-me); }
+.or-seat-dot {
+  flex: none;
+  width: .62rem;
+  height: .62rem;
+  border-radius: 50%;
+  background: var(--or-seat);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--or-seat), transparent 74%);
+}
+
 .or-score-rail {
   grid-column: 1 / -1;
   display: grid;
@@ -119,57 +157,168 @@
 }
 .or-player { padding: .8rem 1rem; border-left: 3px solid transparent; }
 .or-player + .or-player { border-left: 1px solid var(--or-line); }
-.or-player.active { background: linear-gradient(90deg, color-mix(in srgb, var(--lby-accent) 12%, transparent), transparent); border-left-color: var(--lby-accent); }
-.or-player-name { display: flex; align-items: center; gap: .5rem; font-weight: 850; }
+.or-player.active { background: linear-gradient(90deg, color-mix(in srgb, var(--or-seat) 14%, transparent), transparent); border-left-color: var(--or-seat); }
+.or-player-name { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; font-weight: 850; }
+.or-player-name > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .or-player-name em { color: var(--or-dim); font-size: .67rem; font-style: normal; letter-spacing: .1em; text-transform: uppercase; }
-.or-leader { margin-left: auto; padding: .2rem .45rem; border-radius: 999px; color: #17151a; font-size: .67rem; text-transform: uppercase; background: #bac1d1; }
-.or-leader.lv-2 { background: #f3cc5f; }
+
+/* The badge renders on BOTH seats, so "no badge" is a state you can see rather
+   than the absence of a chip you have to remember to look for. */
+.or-leader {
+  display: inline-flex;
+  align-items: center;
+  gap: .32rem;
+  margin-left: auto;
+  padding: .2rem .5rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: .62rem;
+  font-weight: 850;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.or-leader-medal { width: .58rem; height: .58rem; border-radius: 50%; background: currentColor; box-shadow: inset 0 0 0 1px #0006; }
+.or-leader.lv-0 { border-color: var(--or-line); color: #6f7691; }
+.or-leader.lv-1 { border-color: #cdd3e2; background: #cdd3e2; color: #1b1d28; }
+.or-leader.lv-2 { border-color: #f3cc5f; background: #f3cc5f; color: #231c06; }
+
 .or-resources { display: flex; flex-wrap: wrap; gap: .45rem .9rem; margin-top: .45rem; color: var(--or-dim); font-size: .78rem; }
 .or-resources b { color: var(--or-ink); font-size: 1rem; }
-.or-captures { display: flex; gap: .35rem; min-height: 1.6rem; align-items: center; margin-top: .45rem; }
+.or-captures { display: flex; flex-wrap: wrap; gap: .3rem; min-height: 1.6rem; align-items: center; margin-top: .45rem; }
 .or-captures small { color: #777f9d; }
-.or-capture { display: inline-flex; align-items: center; justify-content: center; min-width: 1.7rem; height: 1.7rem; padding: 0 .35rem; border: 1px solid currentColor; border-radius: 99px; font-weight: 900; }
+.or-capture {
+  display: inline-flex;
+  align-items: center;
+  gap: .28rem;
+  height: 1.55rem;
+  padding: 0 .5rem 0 .35rem;
+  border: 1px solid currentColor;
+  border-radius: 99px;
+  font-size: .6rem;
+  font-weight: 900;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.or-capture-disc { width: .62rem; height: .62rem; border-radius: 50%; background: currentColor; }
 
+/* ── Influence board ─────────────────────────────────────────────────────── */
 .or-influence { grid-column: 1; padding: 1rem; }
-.or-track-key, .or-track { display: grid; grid-template-columns: 100px minmax(240px, 1fr) minmax(70px, 190px); gap: .65rem; align-items: center; }
+.or-track-key, .or-track { display: grid; grid-template-columns: 92px minmax(240px, 1fr) minmax(70px, 190px); gap: .65rem; align-items: center; }
 .or-track-key { margin-bottom: .45rem; color: #7f88a6; font-size: .61rem; letter-spacing: .08em; text-transform: uppercase; }
 .or-track-key b { text-align: center; color: var(--or-dim); }
 .or-track-key span:last-child { text-align: right; }
 .or-track { min-height: 62px; padding: .4rem 0; border-top: 1px solid rgba(255,255,255,.055); }
-.or-track-name { font-size: .76rem; font-weight: 900; text-transform: uppercase; }
-.or-track-name i { display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; margin-right: .35rem; border-radius: 50%; background: currentColor; color: #0e1020; font-size: 1rem; font-style: normal; }
+.or-track-name { min-width: 0; font-size: .78rem; }
+.or-track-name .or-pl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .or-track-spaces { display: grid; grid-template-columns: repeat(9, 1fr); align-items: center; }
 .or-space { position: relative; height: 20px; border-top: 3px solid currentColor; }
 .or-space::before { content: ""; position: absolute; left: 50%; top: -7px; width: 10px; height: 10px; transform: translateX(-50%); border: 2px solid currentColor; border-radius: 50%; background: #111429; }
 .or-space.goal::before { width: 16px; height: 16px; top: -10px; border-width: 3px; }
 .or-disc { position: absolute; z-index: 2; left: 50%; top: -12px; width: 21px; height: 21px; transform: translateX(-50%); border: 3px solid #f6f1df; border-radius: 50%; background: currentColor; box-shadow: 0 2px 8px #000; }
+
+/* A planet's name IS its identity — the colour and the word, with no glyph to
+   learn. `.or-<planet>` sets `color`, so this rule must never set one. */
+.or-pl { display: inline-block; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; }
 .or-mercury { color: #a783cf; }
 .or-venus { color: #f1a41b; }
 .or-terra { color: #3aa9e4; }
 .or-mars { color: #e0574a; }
 .or-jupiter { color: #70b59a; }
+.or-robot { --or-fac: #9db4ff; }
+.or-human { --or-fac: #ffd18a; }
+.or-animod { --or-fac: #8fe3b6; }
 
-.or-bonus { display: inline-flex; align-items: center; padding: .35rem .5rem; border: 1px solid #f2d15a66; border-radius: 8px; background: #312b19; color: #f2d15a; font-size: .69rem; line-height: 1.15; }
-.or-bonus.compact { justify-self: end; min-width: 2.4rem; justify-content: center; }
-.or-bonus.spent { border-color: var(--or-line); background: transparent; color: #6f7691; }
+/* A face-up bonus token opens its own text — in the compact slots the star is
+   all there is, so the press is the only way to read it. */
+.or-bonus {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .32rem .48rem;
+  border: 1px solid #f2d15a66;
+  border-radius: 8px;
+  background: #312b19;
+  color: #f2d15a;
+  font-size: .68rem;
+  line-height: 1.16;
+  text-align: left;
+  cursor: pointer;
+}
+.or-bonus i { font-style: normal; }
+.or-bonus:hover { border-color: #f2d15a; background: #3d3520; }
+.or-bonus.compact, .or-bonus.spent { justify-self: end; }
+.or-bonus.compact { min-width: 1.9rem; padding: .26rem .34rem; justify-content: center; }
+.or-bonus.compact .or-bonus-text { display: none; }
+.or-bonus.spent { min-width: 1.9rem; justify-content: center; padding: .26rem .34rem; border-color: var(--or-line); background: transparent; color: #6f7691; font-size: .58rem; cursor: default; }
 
+/* ── Technology board ────────────────────────────────────────────────────── */
 .or-sideboards { grid-column: 2; grid-row: span 2; display: grid; gap: 14px; align-content: start; }
 .or-tech { overflow: hidden; }
-.or-tech > header { display: flex; justify-content: space-between; align-items: baseline; padding: .85rem 1rem; border-bottom: 1px solid var(--or-line); }
+.or-tech > header { display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: .8rem 1rem; border-bottom: 1px solid var(--or-line); }
 .or-tech h2, .or-log h2, .or-hand-head h2 { margin: 0; font-size: 1rem; }
-.or-tech > header span { color: var(--or-dim); font-size: .68rem; }
+/* The NAMED key. Two dots in one accent colour said "somebody is here"; this
+   says who, in the same two colours the rail and the markers use. */
+.or-tech-key { display: flex; flex-wrap: wrap; justify-content: end; gap: .25rem .6rem; }
+.or-tech-key b { display: inline-flex; align-items: center; gap: .3rem; max-width: 8rem; overflow: hidden; color: var(--or-dim); font-size: .63rem; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.or-tech-key i { flex: none; width: .55rem; height: .55rem; border-radius: 50%; }
+.or-tech-key .mine i { background: var(--or-me); }
+.or-tech-key .theirs i { background: var(--or-them); }
+
 .or-tech-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.or-tech-col { min-width: 0; padding: .55rem; border-left: 1px solid var(--or-line); color: var(--or-ink); }
+.or-tech-col { min-width: 0; padding: .5rem .4rem; border-left: 1px solid var(--or-line); color: var(--or-ink); }
 .or-tech-col:first-child { border-left: 0; }
-.or-tech-col h3 { display: flex; align-items: center; gap: .3rem; margin: 0 0 .4rem; color: var(--or-dim); font-size: .68rem; text-transform: uppercase; }
-.or-tech-col h3 i { color: var(--lby-accent); font-style: normal; }
-.or-tech-col > .or-bonus { margin-bottom: .45rem; }
-.or-tech-space { position: relative; min-height: 62px; margin-top: .28rem; padding: .34rem .3rem .34rem 1.5rem; border: 1px solid rgba(255,255,255,.07); border-radius: 7px; background: rgba(255,255,255,.025); }
-.or-tech-space > b { position: absolute; left: .38rem; top: .32rem; color: var(--lby-accent); font-size: .72rem; }
-.or-tech-space > span { display: block; color: #aeb5cb; font-size: .59rem; line-height: 1.26; }
-.or-tech-space.mine { border-color: var(--lby-accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lby-accent), transparent 60%); }
-.or-tech-space.theirs { background: rgba(255,255,255,.08); }
-.or-tech-pips { position: absolute; right: .2rem; bottom: .05rem; color: var(--lby-accent); font-size: .72rem; font-style: normal; }
+.or-tech-col h3 { display: flex; align-items: center; gap: .28rem; margin: 0 0 .35rem; color: var(--or-dim); font-size: .66rem; text-transform: uppercase; }
+.or-tech-col h3 i { color: var(--or-fac, var(--lby-accent)); font-style: normal; }
+.or-tech-col h3 em { margin-left: auto; padding: 0 .3rem; border: 1px solid var(--or-line); border-radius: 4px; color: #7f88a6; font-size: .58rem; font-style: normal; }
+
+.or-tech-row { position: relative; }
+/* A SPACE IS TWO ROWS: a furniture row, then the effect.
+   All three earlier shapes put the level number in the text's way — a grid
+   column that ate a third of a 110px measure, then an absolute number with the
+   first line indented past it, which left one short ragged line above a
+   full-width block and read as a mistake. The number, the seat markers and the
+   level-2 token now share a header row of their own, and the description gets
+   the FULL width on every line with no indent and no reserved gutter.
+   The height is FIXED (a `min-height` let each space grow to its own text and
+   the five levels came out visibly ragged — five different-looking things
+   instead of one ladder), the text is clamped into what is left, and the press
+   opens whatever did not fit. `1fr` + `align-self: center` on the text means a
+   short effect sits centred in its space rather than stranded at the top. */
+.or-tech-space {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: 100%;
+  height: 4.55rem;
+  margin-top: .26rem;
+  padding: .32rem .34rem;
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: 7px;
+  background: rgba(255,255,255,.025);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.or-tech-head { display: flex; align-items: center; gap: .3rem; min-height: .9rem; margin-bottom: .16rem; }
+.or-tech-lv { color: var(--lby-accent); font-size: .66rem; font-weight: 900; letter-spacing: .04em; }
+.or-tech-text { align-self: center; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; color: #aeb5cb; font-size: .57rem; line-height: 1.24; }
+.or-tech-space.mine { border-color: var(--or-me); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--or-me), transparent 62%); }
+.or-tech-space.theirs { border-color: var(--or-them); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--or-them), transparent 62%); }
+.or-tech-space.mine.theirs { border-color: rgba(255,255,255,.16); box-shadow: inset 3px 0 0 var(--or-me), inset -3px 0 0 var(--or-them); }
+.or-tech-seats { display: flex; gap: .18rem; margin-left: auto; }
+.or-tech-seats i { width: .58rem; height: .58rem; border-radius: 50%; box-shadow: 0 0 0 1px #0007; }
+.or-tech-seats i.mine { background: var(--or-me); }
+.or-tech-seats i.theirs { background: var(--or-them); }
+/* THE TOKEN SITS ON LEVEL 2, which is the space that pays it — it used to float
+   above the whole column, where it read as the track's prize rather than as
+   that one space's. It is a button, so it cannot nest inside the space's own
+   button and has to be positioned into that header row from outside; the seat
+   markers step aside for it on the one row that has one. */
+.or-tech-token { position: absolute; z-index: 2; right: .3rem; top: .3rem; }
+.or-tech-row.has-token .or-tech-seats { margin-right: 2.05rem; }
+
 .or-row-bonus { margin: 0; padding: .6rem .8rem; border-top: 1px solid var(--or-line); color: var(--or-dim); font-size: .62rem; }
 
 .or-log { max-height: 330px; overflow: hidden; }
@@ -178,29 +327,69 @@
 .or-log p { display: grid; grid-template-columns: 2rem 1fr; gap: .35rem; margin: .36rem 0; color: #aeb5cb; font-size: .68rem; line-height: 1.35; }
 .or-log p b { color: #747d9c; }
 
-.or-columns { grid-column: 1; padding: .75rem; }
-.or-columns h3 { margin: 0 0 .5rem; color: var(--or-dim); font-size: .68rem; letter-spacing: .08em; text-transform: uppercase; }
-.or-column-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .45rem; }
-.or-column { position: relative; min-width: 0; padding: .35rem; border: 1px solid currentColor; border-radius: 9px; background: rgba(255,255,255,.025); }
-.or-column-head { display: flex; justify-content: space-between; gap: .2rem; margin-bottom: .3rem; font-size: .6rem; font-weight: 850; text-transform: uppercase; }
-.or-column-head b { color: var(--or-ink); }
-.or-column-empty { display: grid; place-items: center; min-height: 82px; color: #606985; font-size: .65rem; }
-.or-stack { display: block; max-height: 2.2em; margin-top: .25rem; overflow: hidden; color: #8089a5; font-size: .5rem; line-height: 1.1; }
+/* ── Placed Agents ───────────────────────────────────────────────────────────
+   Five planets, always all five, at every width. The face is a chip; the text
+   lives in the modal. */
+.or-columns { grid-column: 1; padding: .7rem; }
+/* `.or-table > section` sets the panel border, so the seat stripe has to be
+   written from the same depth to win rather than reaching for !important. */
+.or-table > .or-columns { border-left: 3px solid var(--or-seat); }
+.or-columns h3 { display: flex; align-items: center; gap: .45rem; margin: 0 0 .5rem; color: var(--or-dim); font-size: .68rem; letter-spacing: .08em; text-transform: uppercase; }
+.or-columns.mine h3 { color: var(--or-ink); }
+.or-column-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .4rem; }
+.or-column { min-width: 0; padding: .3rem; border: 1px solid currentColor; border-radius: 9px; background: rgba(255,255,255,.03); }
+.or-column-head { display: flex; justify-content: space-between; align-items: center; gap: .2rem; margin-bottom: .28rem; font-size: .55rem; }
+.or-column-head .or-pl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* `:not(.or-pl)` because the planet name is a <b> too — unscoped, this rule
+   clipped the word into a 17px disc. And the fill is NOT `currentColor`: a
+   `background: currentColor` declared beside a `color` in the same block
+   resolves to that new colour, which painted the badge on its own text. */
+.or-column-head > b:not(.or-pl) { flex: none; display: grid; place-items: center; min-width: 1.05rem; height: 1.05rem; padding: 0 .18rem; border-radius: 999px; background: rgba(255,255,255,.13); color: var(--or-ink); font-size: .6rem; font-weight: 900; }
+.or-slot {
+  display: grid;
+  gap: .14rem;
+  width: 100%;
+  min-height: 3.2rem;
+  padding: .28rem;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: linear-gradient(160deg, rgba(255,255,255,.14), rgba(13,15,31,.97) 62%);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.or-slot:hover { box-shadow: 0 0 0 2px var(--lby-accent); }
+.or-slot-top { display: flex; justify-content: space-between; align-items: center; font-size: .6rem; }
+.or-slot-top b { display: grid; place-items: center; width: 1.05rem; height: 1.05rem; border-radius: 50%; background: #f2f0e8; color: #121526; font-size: .6rem; }
+.or-slot-top i { color: var(--or-fac, var(--or-dim)); font-style: normal; }
+.or-slot strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--or-ink); font-family: Georgia, serif; font-size: .62rem; line-height: 1.16; }
+.or-column-empty { display: grid; place-items: center; min-height: 3.2rem; color: #5c6482; font-size: .58rem; }
+.or-stack { display: block; width: 100%; margin-top: .24rem; padding: .18rem; border: 1px dashed currentColor; border-radius: 5px; background: transparent; color: inherit; font: inherit; font-size: .53rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; cursor: pointer; }
+.or-stack:hover { background: rgba(255,255,255,.06); }
 
-.or-agent { display: flex; flex-direction: column; width: 154px; min-width: 154px; height: 216px; padding: .55rem; overflow: hidden; border: 2px solid currentColor; border-radius: 12px; background: linear-gradient(160deg, rgba(255,255,255,.13), rgba(13,15,31,.98) 36%); color: var(--or-ink); text-align: left; box-shadow: 0 7px 17px #0005; cursor: pointer; transition: transform .14s, box-shadow .14s; }
-.or-agent:hover:not(:disabled), .or-agent.selected { transform: translateY(-5px); box-shadow: 0 10px 24px #0009, 0 0 0 2px var(--lby-accent); }
+/* ── Hand ───────────────────────────────────────────────────────────────── */
+/* THE WHOLE CARD IS OUTLINED IN ITS PLANET'S COLOUR, which is what replaced the
+   planet glyph. It already said `border: 2px solid currentColor` and still came
+   out cream: a `color` declared in the SAME block is what `currentColor` in that
+   block resolves to, so `color: var(--or-ink)` was quietly repainting the border
+   over the `or-<planet>` class. The ink now lives on the children that need it.
+   (`.or-column-head`'s count badge had the identical bug.) */
+.or-agent { display: flex; flex-direction: column; width: 154px; min-width: 154px; height: 216px; padding: .55rem; overflow: hidden; border: 2px solid currentColor; border-radius: 12px; background: linear-gradient(160deg, rgba(255,255,255,.13), rgba(13,15,31,.98) 36%); text-align: left; box-shadow: 0 7px 17px #0005; cursor: pointer; transition: transform .14s, box-shadow .14s; }
+.or-agent:hover { box-shadow: 0 9px 22px #0009, 0 0 0 1px var(--or-line); }
+.or-agent.playable:hover, .or-agent.selected { transform: translateY(-5px); box-shadow: 0 10px 24px #0009, 0 0 0 2px var(--lby-accent); }
 .or-agent:disabled { cursor: default; }
+/* A card you cannot play is still a card you can read, so it stays enabled and
+   only loses the lifted "this click plays it" affordance. */
+.or-agent:not(.playable) { cursor: zoom-in; }
 .or-agent-top { display: flex; justify-content: space-between; align-items: center; color: currentColor; }
-.or-agent-top i { font-style: normal; }
+.or-agent-top i { color: var(--or-fac, currentColor); font-size: 1.05rem; font-style: normal; }
 .or-agent-top b { display: grid; place-items: center; width: 1.8rem; height: 1.8rem; border-radius: 50%; background: #f2f0e8; color: #121526; font-size: .94rem; }
 .or-agent strong { margin: .7rem 0 .45rem; color: var(--or-ink); font-family: Georgia, serif; font-size: .95rem; }
 .or-agent-text { flex: 1; color: #c6cbe0; font-size: .66rem; line-height: 1.35; }
-.or-agent-foot { color: currentColor; font-size: .55rem; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; }
+.or-agent-foot { display: flex; align-items: center; gap: .3rem; color: var(--or-dim); font-size: .55rem; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; }
+.or-agent-foot .or-pl { letter-spacing: .07em; }
 .or-agent.hidden { align-items: center; justify-content: center; border-color: #697296; background: repeating-linear-gradient(135deg, #161a38 0 8px, #222850 8px 16px); color: #9ba7d7; letter-spacing: .22em; }
-.or-agent.small { width: 100%; min-width: 0; height: 83px; padding: .35rem; border-width: 1px; border-radius: 6px; }
-.or-agent.small strong { margin: .25rem 0 0; overflow: hidden; font-size: .62rem; white-space: nowrap; text-overflow: ellipsis; }
-.or-agent.small .or-agent-foot { display: none; }
-.or-agent.small .or-agent-top b { width: 1.2rem; height: 1.2rem; font-size: .65rem; }
 
 .or-hand-zone { grid-column: 1 / -1; padding: 1rem; }
 .or-hand-head { display: flex; justify-content: space-between; align-items: end; margin-bottom: .7rem; }
@@ -230,6 +419,42 @@
 .or-spinner { width: 14px; height: 14px; border: 2px solid #ffffff22; border-top-color: var(--lby-accent); border-radius: 50%; animation: or-spin .8s linear infinite; }
 @keyframes or-spin { to { transform: rotate(360deg); } }
 
+/* ── The one detail modal ────────────────────────────────────────────────── */
+/* The panel takes its `color` from the tint class it is given (`or-terra`,
+   `or-animod`, ...) and paints its border and wash from `currentColor`, so the
+   default must live on the BACKDROP -- set on `.or-info` it would out-order
+   the tint, which is defined earlier in this sheet at the same specificity. */
+.or-info-back { position: fixed; z-index: 1100; inset: 0; display: grid; place-items: center; padding: 1rem; background: #050612d9; backdrop-filter: blur(3px); color: var(--or-dim); }
+.or-info {
+  position: relative;
+  width: min(430px, 100%);
+  max-height: min(80vh, 640px);
+  overflow: auto;
+  padding: 1.15rem 1.25rem 1.3rem;
+  border: 2px solid currentColor;
+  border-radius: 14px;
+  background: linear-gradient(155deg, color-mix(in srgb, currentColor 12%, #171a32), #12152a 58%);
+  box-shadow: 0 26px 80px #000c;
+}
+.or-info h2 { margin: .15rem 0 .7rem; color: var(--or-ink); font-family: Georgia, serif; font-size: 1.32rem; text-transform: capitalize; }
+.or-info .or-eyebrow { color: currentColor; }
+.or-info-x { position: absolute; right: .5rem; top: .4rem; width: 2rem; height: 2rem; border: 0; border-radius: 50%; background: transparent; color: var(--or-dim); font-size: 1.35rem; line-height: 1; cursor: pointer; }
+.or-info-x:hover { background: #ffffff14; color: var(--or-ink); }
+.or-info-tags { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .7rem; margin: 0 0 .7rem; font-size: .68rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.or-info-faction { display: inline-flex; align-items: center; gap: .3rem; color: var(--or-fac, var(--or-dim)); }
+.or-info-faction i { font-style: normal; }
+.or-info-cost { display: inline-flex; align-items: center; gap: .35rem; color: var(--or-dim); }
+.or-info-cost b { display: grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: 50%; background: #f2f0e8; color: #121526; font-size: .82rem; }
+.or-info-text { margin: 0 0 .8rem; color: var(--or-ink); font-size: .92rem; line-height: 1.45; }
+.or-info-note { margin: 0; padding-top: .7rem; border-top: 1px solid var(--or-line); color: #8b93b0; font-size: .7rem; line-height: 1.45; }
+.or-info-list { display: grid; gap: .4rem; margin: 0; padding: 0; list-style: none; }
+.or-info-list button { display: grid; gap: .2rem; width: 100%; padding: .5rem .6rem; border: 1px solid var(--or-line); border-radius: 8px; background: #ffffff08; color: #aeb5cb; font: inherit; font-size: .68rem; line-height: 1.35; text-align: left; cursor: pointer; }
+.or-info-list button:hover { border-color: currentColor; background: #ffffff12; }
+.or-info-li-head { display: flex; align-items: center; gap: .4rem; }
+.or-info-li-head b { display: grid; place-items: center; width: 1.25rem; height: 1.25rem; border-radius: 50%; background: #f2f0e8; color: #121526; font-size: .66rem; }
+.or-info-li-head strong { color: var(--or-ink); font-family: Georgia, serif; font-size: .82rem; }
+.or-info-li-head em { margin-left: auto; color: var(--lby-accent); font-size: .58rem; font-style: normal; letter-spacing: .1em; text-transform: uppercase; }
+
 .or-confirm { position: fixed; z-index: 1000; inset: 0; display: grid; place-items: center; padding: 1rem; background: #050612cc; }
 .or-confirm > div { width: min(420px, 100%); padding: 1.25rem; border: 1px solid var(--or-line); border-radius: 14px; background: #171a32; box-shadow: 0 24px 80px #000c; }
 .or-confirm h2 { margin: 0 0 .4rem; }
@@ -238,25 +463,61 @@
 .or-confirm button { padding: .55rem .75rem; border: 1px solid var(--or-line); border-radius: 7px; background: #202541; color: var(--or-ink); cursor: pointer; }
 .or-confirm button.danger { border-color: #b94c5f; background: #6d2735; }
 
+/* ── Responsive ──────────────────────────────────────────────────────────────
+   NOTHING ON THIS TABLE SCROLLS SIDEWAYS EXCEPT THE HAND. The influence rows,
+   the technology grid and both placed-Agent grids used to be `overflow-x: auto`
+   with a min-width wider than a phone, which put two of five planets and a
+   third of every track behind a horizontal drag inside a vertically scrolling
+   page — the one gesture a board is least able to advertise. They now reflow
+   instead. The hand keeps its scroll on purpose: it is a hand of cards, its
+   size changes with the Leader badge, and its cards are the one thing that must
+   stay readable at full size. */
 @media (max-width: 980px) {
   .or-table { grid-template-columns: minmax(0, 1fr); }
   .or-influence, .or-columns, .or-hand-zone, .or-decision, .or-status, .or-result, .or-mulligan { grid-column: 1; }
   .or-sideboards { grid-column: 1; grid-row: auto; }
-  .or-track-key, .or-track { grid-template-columns: 86px minmax(180px, 1fr) 70px; }
-  .or-bonus:not(.compact) { font-size: .6rem; }
+  .or-track-key, .or-track { grid-template-columns: 86px minmax(180px, 1fr) auto; }
+  .or-bonus .or-bonus-text { display: none; }
+  .or-bonus { min-width: 1.9rem; padding: .26rem .34rem; justify-content: center; }
+}
+
+@media (max-width: 760px) {
+  /* Only the COLUMN chrome tightens on a phone. The space keeps its height, its
+     type size and its four clamped lines — five levels that are all the same
+     size is the point of them. */
+  .or-tech-col { padding: .42rem .3rem; }
+  .or-tech-col h3 { font-size: .6rem; }
 }
 
 @media (max-width: 650px) {
   .or-table { width: calc(100% - 12px); max-width: 1540px; gap: 8px; padding-top: 8px; }
   .or-score-rail { grid-template-columns: 1fr; }
   .or-player + .or-player { border-left: 0; border-top: 1px solid var(--or-line); }
-  .or-influence { padding: .65rem .45rem; overflow-x: auto; }
-  .or-track-key, .or-track { grid-template-columns: 70px 260px 45px; gap: .35rem; min-width: 390px; }
+  .or-player { padding: .7rem .8rem; }
+  .or-influence { padding: .6rem .5rem; }
+  /* The planet's name moves ABOVE its track instead of beside it, which is what
+     buys the nine spaces a full phone width without a sideways drag. */
+  .or-influence .or-track { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; gap: .18rem .4rem; min-height: 0; padding: .5rem 0; }
+  .or-influence .or-track-name { grid-column: 1; grid-row: 1; font-size: .7rem; }
+  .or-influence .or-track > .or-bonus { grid-column: 2; grid-row: 1; }
+  .or-influence .or-track-spaces { grid-column: 1 / -1; grid-row: 2; }
   .or-track-key { display: none; }
-  .or-track-name { font-size: .58rem; }
-  .or-track-name i { width: 1.3rem; height: 1.3rem; }
-  .or-tech-grid { overflow-x: auto; grid-template-columns: repeat(3, minmax(150px, 1fr)); }
-  .or-column-grid { overflow-x: auto; grid-template-columns: repeat(5, 112px); }
+  .or-columns { padding: .55rem .4rem; }
+  /* Five columns in ~360px is ~63px of usable width each, and the head has to
+     fit the longest planet ("jupiter") NEXT TO its depth badge — so the tracking
+     goes to nearly nothing and the badge shrinks. Measured, not guessed: at the
+     desktop sizes the word clipped to a single letter and the colour was all
+     that was left of the identity, which is exactly what the name is here to
+     stop being true. */
+  .or-column-grid { gap: .22rem; }
+  .or-column { padding: .2rem; }
+  .or-column-head { gap: .12rem; font-size: .5rem; }
+  .or-column-head .or-pl { letter-spacing: .005em; }
+  .or-column-head > b:not(.or-pl) { min-width: .84rem; height: .84rem; padding: 0 .1rem; font-size: .5rem; }
+  .or-slot { min-height: 2.9rem; padding: .22rem; }
+  .or-slot strong { font-size: .58rem; }
+  .or-column-empty { min-height: 2.9rem; font-size: .52rem; }
+  .or-stack { font-size: .48rem; }
   .or-agent { width: 138px; min-width: 138px; height: 204px; }
   .or-action-bar { align-items: stretch; flex-direction: column; }
   .or-action-bar > div { display: grid; grid-template-columns: 1fr; }

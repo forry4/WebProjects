@@ -23,3 +23,57 @@ must never calculate resources, influence, captures, or card outcomes itself.
 - BGA replays are the parity oracle. Preserve the imported reference and add
   normalized replay fixtures rather than baking BGA presentation data into the
   engine.
+
+## Client display contract
+
+`Orbit.jsx` renders; `engine.py` decides. These are the presentation rules that
+were each a real misread on the table, so they are worth not undoing:
+
+- **A planet is a COLOUR plus its NAME — never a glyph.** ☿ ♀ ⊕ ♂ ♃ used to sit
+  beside the name in four places at once, on a card whose outline already was
+  that colour. `PlanetName` is the single renderer; `.or-<planet>` sets `color`
+  and everything else — the WHOLE card outline, the track, the disc, the capture
+  chip — reads `currentColor` from it. **Never declare `color` in a block that
+  also uses `currentColor`**: `currentColor` resolves to that block's own new
+  value, which is how `.or-agent` painted a cream border over its planet colour
+  and `.or-column-head`'s badge painted itself on its own text. Factions keep their three glyphs — a faction has no
+  colour, and the alphabet is small.
+- **Two seat colours, resolved once.** `--or-me` (the game accent) and
+  `--or-them`; every seat-owned panel sets `--or-seat` from them and paints its
+  stripe, dot and active glow from that. The technology board NAMES both seats
+  in its key and puts a seat's token on the level it is AT — level 0 is simply
+  no token, not a sixth row under the track. `Columns` says "Your agents"
+  outright: two identically styled panels, distinguished only by a half-read
+  possessive, is what made a player read their own recruit into the opponent's
+  board.
+- **A technology space is a furniture row, then the effect.** The level number,
+  the seat markers and the level-2 token share a header row; the description
+  gets the FULL width on every line, with no indent and no reserved gutter.
+  Three earlier shapes all put the number in the text's way — a grid column ate
+  a third of a 110px measure, and an absolute number with the first line
+  indented past it left one short ragged line above a full-width block and read
+  as a mistake. All five spaces are ONE fixed height (a `min-height` let each
+  grow to its own text and the ladder came out visibly ragged — five
+  different-looking things instead of one scale), the text is clamped into what
+  is left, and a short effect is centred rather than stranded at the top.
+- **The Leader badge renders on BOTH seats**, including its `lv-0` "No badge"
+  state — it used to render only under its owner, so no badge and no chip looked
+  identical, and the badge is what sets the hand limit printed over the hand.
+  The two sides are **Silver** and **Gold**, as the imported BGA card text names
+  them ("place it on the Silver side … flip it to the Gold side").
+- **Every readable face opens the same modal** — a card, a bonus token, a
+  technology space, a whole column. Plain click when the click is free,
+  press-and-hold / right-click (`shared/gestures.js`) when it is not. A hand
+  card is therefore never `disabled`: `.playable` is what says the click will
+  play it, and `screens.mjs` waits on that class for "this seat has legal
+  moves". The page selects no text (`user-select: none`, inputs exempt), because
+  the hold gesture and the OS callout fight over the same press.
+- **A technology bonus token sits on its LEVEL-2 space**, which is the space
+  that pays it, not above the whole column.
+- **Nothing on the table scrolls sideways except the hand.** The influence rows,
+  the technology grid and both placed-Agent grids reflow instead: on a phone a
+  planet's name moves above its track, and the placed-Agent columns are chips so
+  all five fit. A horizontal drag inside a vertically scrolling page is the one
+  gesture a board cannot advertise. `screens.mjs` asserts the inner boxes are
+  not scrollers — the older "section is inside the viewport" check passes while
+  a section hides content inside itself, which is exactly how this shipped.

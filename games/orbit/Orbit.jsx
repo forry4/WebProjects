@@ -10,6 +10,7 @@ import {
 import { GAME_ACCENTS } from "../../shared/accents.js";
 import { buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 import { useAutoReconnect } from "../../shared/useAutoReconnect.js";
+import { useCardInfoGesture } from "../../shared/gestures.js";
 import OrbitRules from "./rules.jsx";
 import orbitCssText from "./Orbit.css?inline";
 
@@ -23,13 +24,22 @@ const styles = baseCss + lobbyCss + gameMenuCss + createModalCss
 
 const PLANETS = ["mercury", "venus", "terra", "mars", "jupiter"];
 const FACTIONS = ["robot", "human", "animod"];
-const PLANET_GLYPH = { mercury: "☿", venus: "♀", terra: "⊕", mars: "♂", jupiter: "♃" };
+/* PLANETS CARRY NO SYMBOL. The five planets used to each print a glyph (☿ ♀ ⊕
+   ♂ ♃) beside their name on the card, the column head, the influence row and
+   every capture chip — four places to learn an alphabet that the colour already
+   said, on a card whose OUTLINE is that same colour. The name plus the colour is
+   the identity now, and `PlanetName` is the one place that renders it, so a
+   planet reads the same everywhere. Factions keep their glyph: a faction has no
+   colour of its own, and three shapes is a small alphabet. */
 const FACTION_GLYPH = { robot: "◇", human: "△", animod: "⬡" };
 const BOARD_LETTER = {
   robot: { 1: "S", 2: "D" },
   human: { 1: "U", 2: "O" },
   animod: { 1: "N", 2: "P" },
 };
+/* The badge's two sides, named as the rulebook and the imported BGA card text
+   name them ("place it on the Silver side … flip it to the Gold side"). */
+const LEADER_SIDES = { 1: "Silver", 2: "Gold" };
 
 
 function useSocket(onMessage) {
@@ -63,26 +73,50 @@ function useSocket(onMessage) {
 }
 
 
+/* ONE renderer for a planet's identity, everywhere it appears. The colour is
+   the `or-<planet>` class (which also drives the card outline, the track and
+   the disc), the word is the label. */
+function PlanetName({ planet, className = "" }) {
+  return <b className={`or-pl or-${planet}${className ? ` ${className}` : ""}`}>{planet}</b>;
+}
+
+
 function captureSummary(captured = []) {
   const counts = {};
   for (const planet of captured) counts[planet] = (counts[planet] || 0) + 1;
   return PLANETS.filter((planet) => counts[planet]).map((planet) => (
     <span className={`or-capture or-${planet}`} key={planet}>
-      {PLANET_GLYPH[planet]}{counts[planet] > 1 ? `×${counts[planet]}` : ""}
+      <i className="or-capture-disc" aria-hidden="true" />
+      {planet}{counts[planet] > 1 ? ` ×${counts[planet]}` : ""}
     </span>
   ));
 }
 
 
+/* The badge is SHOWN FOR BOTH SEATS, including the seat that does not hold it.
+   It used to render only under its owner, so "no badge" and "the panel just
+   doesn't mention it" looked identical — and the badge is what sets a hand
+   limit of 4 / 5 / 6, which is the number printed over the hand. */
+function LeaderBadge({ leader, pid }) {
+  const level = leader?.owner === pid ? (leader.level || 0) : 0;
+  const side = LEADER_SIDES[level];
+  return <b className={`or-leader lv-${level}`}
+    title={side ? `${side} Leader badge — hand limit ${level === 2 ? 6 : 5}`
+      : "No Leader badge — hand limit 4"}>
+    <i className="or-leader-medal" aria-hidden="true" />
+    {side ? `${side} Leader` : "No badge"}
+  </b>;
+}
+
+
 function PlayerRail({ player, name, active, me, leader }) {
   if (!player) return null;
-  return <section className={`or-player${active ? " active" : ""}${me ? " mine" : ""}`}>
+  return <section className={`or-player${active ? " active" : ""}${me ? " mine" : " theirs"}`}>
     <div className="or-player-name">
+      <i className="or-seat-dot" aria-hidden="true" />
       <span>{name || "Player"}</span>
       {me && <em>you</em>}
-      {leader?.owner === player.__pid && (
-        <b className={`or-leader lv-${leader.level}`}>Leader {leader.level === 2 ? "gold" : "silver"}</b>
-      )}
+      <LeaderBadge leader={leader} pid={player.__pid} />
     </div>
     <div className="or-resources">
       <span><b>{player.credits}</b> Credits</span>
@@ -97,16 +131,27 @@ function PlayerRail({ player, name, active, me, leader }) {
 }
 
 
-function Bonus({ token, catalog, compact = false }) {
-  if (token == null) return <span className="or-bonus spent">spent</span>;
+/* A face-up bonus token is a BUTTON: in the narrow slots its whole content is
+   one star, so the only way to learn what it pays is to open it. `compact`
+   keeps it that way (the tech track's level-2 space, and every slot on a
+   phone); the wide influence rows print the effect beside it as well. */
+function Bonus({ token, catalog, onInfo, compact = false, className = "" }) {
+  if (token == null) {
+    return <span className={`or-bonus spent${className ? ` ${className}` : ""}`}
+      title="This bonus has already been claimed">claimed</span>;
+  }
   const bonus = catalog?.bonuses?.[String(token)] || catalog?.bonuses?.[token];
-  return <span className={`or-bonus${compact ? " compact" : ""}`} title={bonus?.description || "Bonus token"}>
-    ✦ {compact ? token : (bonus?.description || `Bonus ${token}`)}
-  </span>;
+  const text = bonus?.description || `Bonus token ${token}`;
+  return <button type="button"
+    className={`or-bonus${compact ? " compact" : ""}${className ? ` ${className}` : ""}`}
+    title={`${text} — tap to read`}
+    onClick={onInfo ? (event) => { event.stopPropagation(); onInfo({ kind: "bonus", token }); } : undefined}>
+    <i aria-hidden="true">✦</i><span className="or-bonus-text">{text}</span>
+  </button>;
 }
 
 
-function InfluenceBoard({ game, myId, catalog }) {
+function InfluenceBoard({ game, myId, catalog, onInfo }) {
   const mineIsPositive = game.order?.[0] === myId;
   const spaces = [-4, -3, -2, -1, 0, 1, 2, 3, 4];
   return <section className="or-influence" aria-label="Planet influence board">
@@ -115,68 +160,123 @@ function InfluenceBoard({ game, myId, catalog }) {
       const raw = game.influence?.[planet];
       const position = raw == null ? null : (mineIsPositive ? raw : -raw);
       return <div className={`or-track or-${planet}`} key={planet}>
-        <div className="or-track-name"><i>{PLANET_GLYPH[planet]}</i>{planet}</div>
+        <div className="or-track-name"><PlanetName planet={planet} /></div>
         <div className="or-track-spaces">
           {spaces.map((space) => <span className={`or-space${Math.abs(space) === 4 ? " goal" : ""}`} key={space}>
             {position === space && <i className="or-disc" />}
           </span>)}
         </div>
-        <Bonus token={game.planet_bonus?.[planet]} catalog={catalog} compact />
+        <Bonus token={game.planet_bonus?.[planet]} catalog={catalog} onInfo={onInfo} />
       </div>;
     })}
   </section>;
 }
 
 
-function TechBoard({ game, myId, otherId, catalog }) {
+/* WHO IS WHERE ON A TRACK is the whole point of the technology board, and the
+   old pips did not say it: two unlabelled dots in the same accent colour. Each
+   seat now has a COLOUR (yours the game accent, theirs `--or-them`) and a NAMED
+   key above the grid, and its token sits on the level it is at — level 0 is
+   simply no token, not a sixth row. The bonus token sits on level 2, which is
+   the space that pays it. Every space is the SAME height whatever its text is
+   long enough to say; the press opens the rest. */
+function TechBoard({ game, myId, otherId, myName, theirName, catalog, onInfo }) {
   const me = game.players?.[myId];
   const them = game.players?.[otherId];
   return <section className="or-tech" aria-label="Technology board">
-    <header><h2>Technology</h2><span>Configuration {FACTIONS.map((f) => BOARD_LETTER[f][game.board_sides?.[f]]).join(".")}</span></header>
+    <header>
+      <h2>Technology</h2>
+      <span className="or-tech-key">
+        <b className="mine"><i aria-hidden="true" />{myName || "You"}</b>
+        <b className="theirs"><i aria-hidden="true" />{theirName || "Opponent"}</b>
+      </span>
+    </header>
     <div className="or-tech-grid">
-      {FACTIONS.map((faction) => <div className={`or-tech-col or-${faction}`} key={faction}>
-        <h3><i>{FACTION_GLYPH[faction]}</i>{faction}</h3>
-        <Bonus token={game.technology_bonus?.[faction]} catalog={catalog} compact />
-        {[...(game.board?.[faction] || [])].reverse().map((space) => {
-          const mine = (me?.technology?.[faction] || 0) === space.level;
-          const theirs = (them?.technology?.[faction] || 0) === space.level;
-          return <div className={`or-tech-space${mine ? " mine" : ""}${theirs ? " theirs" : ""}`} key={space.level}>
-            <b>{space.level}</b><span>{space.description}</span>
-            <i className="or-tech-pips">{mine ? "●" : ""}{theirs ? "○" : ""}</i>
-          </div>;
-        })}
-      </div>)}
+      {FACTIONS.map((faction) => {
+        const mineLevel = me?.technology?.[faction] || 0;
+        const theirLevel = them?.technology?.[faction] || 0;
+        const rows = [...(game.board?.[faction] || [])].reverse();
+        const seats = (level) => <span className="or-tech-seats">
+          {mineLevel === level && <i className="mine" title={`${myName || "You"} — level ${level}`} />}
+          {theirLevel === level && <i className="theirs" title={`${theirName || "Opponent"} — level ${level}`} />}
+        </span>;
+        return <div className={`or-tech-col or-${faction}`} key={faction}>
+          <h3><i>{FACTION_GLYPH[faction]}</i>{faction}<em title="Board strip in play">{BOARD_LETTER[faction][game.board_sides?.[faction]]}</em></h3>
+          {rows.map((space) => <div className={`or-tech-row${space.level === 2 ? " has-token" : ""}`} key={space.level}>
+            <button type="button"
+              className={`or-tech-space${mineLevel === space.level ? " mine" : ""}${theirLevel === space.level ? " theirs" : ""}`}
+              title={`Level ${space.level}: ${space.description}`}
+              onClick={() => onInfo({ kind: "tech", faction, level: space.level, description: space.description })}>
+              <span className="or-tech-head">
+                <b className="or-tech-lv">{space.level}</b>
+                {seats(space.level)}
+              </span>
+              <span className="or-tech-text">{space.description}</span>
+            </button>
+            {space.level === 2 && <Bonus token={game.technology_bonus?.[faction]}
+              catalog={catalog} onInfo={onInfo} compact className="or-tech-token" />}
+          </div>)}
+        </div>;
+      })}
     </div>
     <p className="or-row-bonus">Complete all three tracks: level 1 → +1 influence · level 2 → +2 · level 3 → +3</p>
   </section>;
 }
 
 
-function AgentCard({ card, selected, onClick, hidden = false, small = false }) {
+/* A hand card is NEVER disabled any more: on the opponent's turn its click had
+   nothing to do, and reading your own hand while you wait is the most ordinary
+   thing a player does. `playable` — not the `disabled` attribute — is now what
+   says the click will PLAY it, which is also the signal `screens.mjs` waits on
+   for "this seat has legal moves". Click plays when it can and otherwise reads;
+   press-and-hold / right-click always reads (see shared/gestures.js). */
+function AgentCard({ card, selected, onClick, onInfo, hidden = false }) {
+  const info = useCardInfoGesture(onInfo && card && !card.hidden
+    ? () => onInfo({ kind: "card", card }) : null);
   if (hidden || card?.hidden) return <div className="or-agent hidden" aria-label="Hidden Agent"><span>ORBIT</span></div>;
   if (!card) return null;
-  return <button type="button" className={`or-agent or-${card.planet} or-${card.faction}${selected ? " selected" : ""}${small ? " small" : ""}`}
-    onClick={onClick} disabled={!onClick} title={card.description}>
-    <span className="or-agent-top"><i>{PLANET_GLYPH[card.planet]}</i><b>{card.cost}</b><i>{FACTION_GLYPH[card.faction]}</i></span>
+  return <button type="button" className={`or-agent or-${card.planet} or-${card.faction}${selected ? " selected" : ""}${onClick ? " playable" : ""}`}
+    onClick={onClick || (onInfo ? () => onInfo({ kind: "card", card }) : undefined)}
+    disabled={!onClick && !onInfo} title={card.description} {...info}>
+    <span className="or-agent-top"><b>{card.cost}</b><i>{FACTION_GLYPH[card.faction]}</i></span>
     <strong>{card.name}</strong>
-    {!small && <span className="or-agent-text">{card.description}</span>}
-    <span className="or-agent-foot">{card.planet} · {card.faction}</span>
+    <span className="or-agent-text">{card.description}</span>
+    <span className="or-agent-foot"><PlanetName planet={card.planet} /> · {card.faction}</span>
   </button>;
 }
 
 
-function Columns({ game, pid, name, opponent = false }) {
+/* THE PLACED-AGENT COLUMNS, CONDENSED SO ALL FIVE PLANETS FIT — including at
+   390px, where five 154px cards could only be reached by scrolling the row
+   sideways and three planets sat off-screen. A column shows its planet, its
+   depth (the number that discounts the next recruit there), and the TOP card as
+   a chip; anything buried opens as a list. The full text of any of them is one
+   tap away, so nothing was lost by shrinking the face.
+   The section names its OWNER unambiguously — "Your agents" with a seat dot,
+   never a bare possessive a player has to match against a half-read name.
+   Reading your own recruit into the opponent's panel is the exact mistake the
+   old pair of identical panels invited. */
+function Columns({ game, pid, name, mine, onInfo }) {
   const player = game.players?.[pid];
-  return <section className={`or-columns${opponent ? " opponent" : ""}`}>
-    <h3>{name || "Player"}’s agents</h3>
+  return <section className={`or-columns${mine ? " mine" : " theirs"}`}>
+    <h3><i className="or-seat-dot" aria-hidden="true" />{mine ? "Your agents" : `${name || "Opponent"} · agents`}</h3>
     <div className="or-column-grid">
       {PLANETS.map((planet) => {
         const cards = player?.columns?.[planet] || [];
         const top = cards[cards.length - 1];
-        return <div className={`or-column or-${planet}`} key={planet} title={top?.description || "Empty column"}>
-          <span className="or-column-head">{PLANET_GLYPH[planet]} {planet}<b>{cards.length}</b></span>
-          {top ? <AgentCard card={top} small /> : <span className="or-column-empty">empty</span>}
-          {cards.length > 1 && <span className="or-stack">{cards.slice(0, -1).map((c) => c.name).join(" · ")}</span>}
+        const buried = cards.length - 1;
+        return <div className={`or-column or-${planet}`} key={planet}>
+          <span className="or-column-head"><PlanetName planet={planet} /><b>{cards.length}</b></span>
+          {top ? <button type="button" className="or-slot" title={`${top.name} — ${top.description}`}
+            onClick={() => onInfo({ kind: "card", card: top })}>
+            <span className="or-slot-top"><b>{top.cost}</b><i>{FACTION_GLYPH[top.faction]}</i></span>
+            <strong>{top.name}</strong>
+          </button> : <span className="or-column-empty">empty</span>}
+          {buried > 0 && <button type="button" className="or-stack"
+            title={`${buried} more Agent${buried === 1 ? "" : "s"} under ${top.name}`}
+            onClick={() => onInfo({ kind: "column", planet, cards, owner: mine ? "Your" : `${name || "Opponent"}’s` })}>
+            +{buried} below
+          </button>}
         </div>;
       })}
     </div>
@@ -184,9 +284,88 @@ function Columns({ game, pid, name, opponent = false }) {
 }
 
 
+/* One modal, four shapes — a card, a bonus token, a technology space, or a
+   whole column. Every readable thing on the table opens it, so no piece of
+   rules text on this page is a dead end. */
+function InfoModal({ info, catalog, onClose, onInfo }) {
+  useEffect(() => {
+    if (!info) return undefined;
+    const onKey = (event) => { if (event.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [info, onClose]);
+  if (!info) return null;
+
+  let tint = "";
+  let eyebrow = "";
+  let title = "";
+  let body = null;
+  if (info.kind === "card") {
+    const card = info.card;
+    tint = `or-${card.planet}`;
+    eyebrow = "Agent";
+    title = card.name;
+    body = <>
+      <p className="or-info-tags">
+        <PlanetName planet={card.planet} />
+        <span className="or-info-faction"><i>{FACTION_GLYPH[card.faction]}</i>{card.faction}</span>
+        <span className="or-info-cost"><b>{card.cost}</b> Credits</span>
+      </p>
+      <p className="or-info-text">{card.description}</p>
+      <p className="or-info-note">Recruiting costs the printed price minus the Agents already in
+        its <PlanetName planet={card.planet} /> column, and gains 1 influence there before this
+        text resolves.</p>
+    </>;
+  } else if (info.kind === "bonus") {
+    const bonus = catalog?.bonuses?.[String(info.token)] || catalog?.bonuses?.[info.token];
+    eyebrow = "Bonus token";
+    title = bonus?.description || `Bonus token ${info.token}`;
+    body = <p className="or-info-note">A planet’s token is claimed by the first player to capture a
+      disc from that planet. A technology token sits on level 2 and is claimed by the first player
+      to reach it, resolving after that level’s own effect.</p>;
+  } else if (info.kind === "tech") {
+    tint = `or-${info.faction}`;
+    eyebrow = `${info.faction} technology`;
+    title = `Level ${info.level}`;
+    body = <>
+      <p className="or-info-text">{info.description}</p>
+      <p className="or-info-note">Developing costs the new level in Zenithium, then resolves that
+        level and every level below it, top to bottom.</p>
+    </>;
+  } else if (info.kind === "column") {
+    tint = `or-${info.planet}`;
+    eyebrow = `${info.owner} column`;
+    title = info.planet;
+    body = <ul className="or-info-list">
+      {[...info.cards].reverse().map((card, index) => <li key={card.id}>
+        <button type="button" onClick={() => onInfo({ kind: "card", card })}>
+          <span className="or-info-li-head"><b>{card.cost}</b><strong>{card.name}</strong>
+            {index === 0 && <em>top</em>}</span>
+          <span>{card.description}</span>
+        </button>
+      </li>)}
+    </ul>;
+  }
+
+  return <div className="or-info-back" onClick={onClose}>
+    <div className={`or-info ${tint}`} role="dialog" aria-modal="true" aria-label={title}
+      onClick={(event) => event.stopPropagation()}>
+      <button type="button" className="or-info-x" onClick={onClose} aria-label="Close">×</button>
+      <span className="or-eyebrow">{eyebrow}</span>
+      <h2>{title}</h2>
+      {body}
+    </div>
+  </div>;
+}
+
+
 function choiceLabel(move, pending, game, catalog) {
-  if ("planet" in move) return `${PLANET_GLYPH[move.planet] || ""} ${move.planet}`;
-  if ("planets" in move) return move.planets.map((p) => `${PLANET_GLYPH[p]} ${p}`).join(" + ");
+  if ("planet" in move) return <PlanetName planet={move.planet} />;
+  if ("planets" in move) {
+    return <>{move.planets.map((planet, index) => <span key={planet}>
+      {index ? " + " : ""}<PlanetName planet={planet} />
+    </span>)}</>;
+  }
   if ("accept" in move) return move.accept ? "Do it" : "Skip";
   if ("faction" in move) return `${FACTION_GLYPH[move.faction]} ${move.faction}`;
   if ("tier" in move) return move.tier ? `Exile ${move.tier} cards` : "Skip";
@@ -314,6 +493,10 @@ export default function Orbit({ myId, authUser, onExit }) {
   const [createSetup, setCreateSetup] = useState("sun");
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   const [selectedCard, setSelectedCard] = useState(null);
+  // ONE descriptor, one modal, one gesture. `info` is {kind:"card"|"bonus"|
+  // "tech"|"column", ...} — see InfoModal. Every readable face on the table
+  // sets it, so nothing on the page is a dead press.
+  const [info, setInfo] = useState(null);
   const [mulligan, setMulligan] = useState([]);
   const urlAttempt = useRef(null);
   const [historyShown, historyMore] = useProgressiveList(history);
@@ -524,7 +707,7 @@ export default function Orbit({ myId, authUser, onExit }) {
       {game.phase === "mulligan" && isMyTurn && <section className="or-mulligan">
         <span className="or-eyebrow">Opening hand</span><h2>Replace any Agents?</h2>
         <p>Select any cards you want to discard, then confirm. You draw back to four.</p>
-        <div className="or-hand">{me.hand.map((card) => <AgentCard card={card} key={card.id} selected={mulligan.includes(card.id)}
+        <div className="or-hand">{me.hand.map((card) => <AgentCard card={card} key={card.id} selected={mulligan.includes(card.id)} onInfo={setInfo}
           onClick={() => setMulligan((old) => old.includes(card.id) ? old.filter((id) => id !== card.id) : [...old, card.id])} />)}</div>
         <button type="button" className="or-primary" onClick={() => sendMove({ action: "mulligan", card_ids: [...mulligan].sort((a, b) => a - b) })}>
           {mulligan.length ? `Replace ${mulligan.length} card${mulligan.length === 1 ? "" : "s"}` : "Keep this hand"}
@@ -533,12 +716,13 @@ export default function Orbit({ myId, authUser, onExit }) {
       {game.phase === "mulligan" && !isMyTurn && <section className="or-status"><span className="or-spinner" /> Waiting for the other mulligan…</section>}
 
       {game.phase !== "mulligan" && <>
-        <InfluenceBoard game={game} myId={myId} catalog={catalog} />
-        <div className="or-sideboards"><TechBoard game={game} myId={myId} otherId={otherId} catalog={catalog} />
-          <section className="or-log"><h2>Chronicle</h2><div>{(game.log || []).slice(-14).map((entry, i) => <p key={`${entry.turn}-${i}`}><b>{entry.turn}</b>{entry.message}</p>)}</div></section>
+        <InfluenceBoard game={game} myId={myId} catalog={catalog} onInfo={setInfo} />
+        <div className="or-sideboards"><TechBoard game={game} myId={myId} otherId={otherId} catalog={catalog}
+          myName={names[myId]} theirName={names[otherId]} onInfo={setInfo} />
+          <section className="or-log"><h2>Log</h2><div>{(game.log || []).slice(-14).map((entry, i) => <p key={`${entry.turn}-${i}`}><b>{entry.turn}</b>{entry.message}</p>)}</div></section>
         </div>
-        <Columns game={game} pid={otherId} name={names[otherId]} opponent />
-        <Columns game={game} pid={myId} name={names[myId]} />
+        <Columns game={game} pid={otherId} name={names[otherId]} onInfo={setInfo} />
+        <Columns game={game} pid={myId} name={names[myId]} mine onInfo={setInfo} />
 
         {!over && game.pending && game.pending_pid === myId && <DecisionPanel game={game} catalog={catalog} sendMove={sendMove} />}
         {!over && game.pending && game.pending_pid !== myId && <section className="or-status"><span className="or-spinner" /> {names[game.pending_pid] || "Opponent"} is resolving {game.pending.source}…</section>}
@@ -547,7 +731,7 @@ export default function Orbit({ myId, authUser, onExit }) {
         <section className="or-hand-zone">
           <div className="or-hand-head"><div><span className="or-eyebrow">Your hand</span><h2>{isMyTurn && !game.pending ? "Choose an Agent" : "Agents in reserve"}</h2></div>
             <span>{me.hand.length} / {game.leader?.owner === myId ? (game.leader.level === 2 ? 6 : 5) : 4}</span></div>
-          <div className="or-hand">{me.hand.map((card) => <AgentCard card={card} key={card.id} selected={selectedCard === card.id}
+          <div className="or-hand">{me.hand.map((card) => <AgentCard card={card} key={card.id} selected={selectedCard === card.id} onInfo={setInfo}
             onClick={isMyTurn && !game.pending ? () => setSelectedCard(card.id) : null} />)}</div>
           {selectedCard != null && isMyTurn && !game.pending && <div className="or-action-bar">
             <span>Play <b>{me.hand.find((card) => card.id === selectedCard)?.name}</b> as:</span>
@@ -564,6 +748,7 @@ export default function Orbit({ myId, authUser, onExit }) {
         </section>
       </>}
     </main>
+    <InfoModal info={info} catalog={catalog} onInfo={setInfo} onClose={() => setInfo(null)} />
     {showRules && <RulesModal title="How to play — Orbit" onClose={() => setShowRules(false)}><OrbitRules /></RulesModal>}
     {confirmAbandon && <div className="or-confirm" onClick={() => setConfirmAbandon(false)}><div role="dialog" onClick={(e) => e.stopPropagation()}>
       <h2>Abandon this game?</h2><p>Your opponent will win immediately.</p><span><button type="button" onClick={() => setConfirmAbandon(false)}>Keep playing</button>
