@@ -33,6 +33,7 @@ export const GAME_ACCENTS = {
 	dontminion: "#b08d57",
 	dissonance: "#6fe0a0",
 	ragtag: "#e8663c",
+	orbit: "#42d1c7",
 };
 
 // Titles that do not clear the 4.5:1 AA floor on the card, and are shipped anyway

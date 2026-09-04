@@ -1,0 +1,1680 @@
+{
+  "_source": "https://en.boardgamearena.com/archive/replay/260527-0929/?table=859129967&player=87155663&comments=",
+  "_note": "Public BGA replay setup; mechanical data only; no artwork.",
+  "card_ref": {
+    "201": {
+      "num": 201,
+      "col": 1,
+      "row": 1,
+      "goodies": 0,
+      "planet": 2,
+      "cost": 1,
+      "race": 2,
+      "rule": "4,4_5,1=1,4,2",
+      "desc": "Gain 4 Credits and you can give 1 Zenithium to your opponent to gain 2 influence on MARS",
+      "name": "Hiroshi Sun"
+    },
+    "202": {
+      "num": 202,
+      "col": 2,
+      "row": 1,
+      "goodies": 0,
+      "planet": 2,
+      "cost": 1,
+      "race": 2,
+      "rule": "7,1",
+      "desc": "Gain 1 Zenithium per first level you have reached in the Technology board",
+      "name": "Ilda Flores"
+    },
+    "203": {
+      "num": 203,
+      "col": 3,
+      "row": 1,
+      "goodies": 0,
+      "planet": 2,
+      "cost": 2,
+      "race": 1,
+      "rule": "40=6,2,2>3,2|6,2,4>3,4|6,2,7>3,7",
+      "desc": "Exile 2/4/7 of your VENUS cards and gain 2/4/7 Zenithium respectively",
+      "name": "LUC4S"
+    },
+    "204": {
+      "num": 204,
+      "col": 1,
+      "row": 2,
+      "goodies": 0,
+      "planet": 2,
+      "cost": 6,
+      "race": 2,
+      "rule": "1,5,1_8,1",
+      "desc": "Gain 1 influence on JUPITER and gain the Leader badge",
+      "name": "King Harold"
+    },
+    "205": {
+      "num": 205,
+      "col": 2,
+      "row": 2,
+      "goodies": 0,
+      "planet": 2,
+      "cost": 6,
+      "race": 1,
+      "rule": "6,-1,2_3,2",
+      "desc": "Exile 2 opponent's cards and gain 2 Zenithium",
+      "name": "V4N VØGT"
+    },
+    "206": {
+      "num": 206,
+      "col": 3,
+      "row": 2,
+      "goodies": 0,
+      "planet": 2,
+      "cost": 3,
+      "race": 3,
+      "rule": "3,1,-1_3,3",
+      "desc": "Your opponent gains 1 Zenithium, you gain 3 Zenithium",
+      "name": "Felis"
+    },
+    "207": {
+      "num": 207,
+      "col": 1,
+      "row": 3,
+      "goodies": 0,
+      "planet": 2,
+      "cost": 9,
+      "race": 2,
+      "rule": "3,4",
+      "desc": "Gain 4 Zenithium",
+      "name": "Professor Zed"
+    },
+    "208": {
+      "num": 208,
+      "col": 2,
+      "row": 3,
+      "goodies": 0,
+      "planet": 2,
+      "cost": 10,
+      "race": 1,
+      "rule": "52_9,0,2",
+      "desc": "Develop a Technology of your choice with a reduction of 2 Zenithium",
+      "name": "AS1MØV"
+    },
+    "209": {
+      "num": 209,
+      "col": 3,
+      "row": 3,
+      "goodies": 0,
+      "planet": 2,
+      "cost": 1,
+      "race": 3,
+      "rule": "4,6",
+      "desc": "Gain 6 Credits",
+      "name": "Cresus"
+    },
+    "210": {
+      "num": 210,
+      "col": 4,
+      "row": 1,
+      "goodies": 0,
+      "planet": 2,
+      "cost": 6,
+      "race": 2,
+      "rule": "52_9,2,1",
+      "desc": "Develop a HUMAN Technology with a reduction of 1 Zenithium",
+      "name": "Doc Wissen"
+    },
+    "211": {
+      "num": 211,
+      "col": 5,
+      "row": 1,
+      "goodies": 0,
+      "planet": 2,
+      "cost": 6,
+      "race": 1,
+      "rule": "52_9,1,1",
+      "desc": "Develop a ROBOT Technology with a reduction of 1 Zenithium",
+      "name": "BR4DBURY"
+    },
+    "212": {
+      "num": 212,
+      "col": 6,
+      "row": 1,
+      "goodies": 0,
+      "planet": 2,
+      "cost": 6,
+      "race": 3,
+      "rule": "52_9,3,1",
+      "desc": "Develop an ANIMOD Technology with a reduction of 1 Zenithium",
+      "name": "Archimedes"
+    },
+    "213": {
+      "num": 213,
+      "col": 4,
+      "row": 2,
+      "goodies": 0,
+      "planet": 2,
+      "cost": 2,
+      "race": 3,
+      "rule": "10,4",
+      "desc": "Gain 4 Credits per first level you have reached in the Technology board",
+      "name": "Moussa"
+    },
+    "214": {
+      "num": 214,
+      "col": 5,
+      "row": 2,
+      "goodies": 0,
+      "planet": 2,
+      "cost": 7,
+      "race": 1,
+      "rule": "9,4,10",
+      "desc": "Develop one of your lowest Technologies for free",
+      "name": "BUJØLD"
+    },
+    "215": {
+      "num": 215,
+      "col": 6,
+      "row": 2,
+      "goodies": 0,
+      "planet": 2,
+      "cost": 3,
+      "race": 3,
+      "rule": "40=6,2,2>1,2,1|6,2,4>1,2,2|6,2,7>1,2,3",
+      "desc": "Exile 2/4/7 of your VENUS cards and respectively gain 1/2/3 influence(s) on VENUS",
+      "name": "Pachacuti"
+    },
+    "216": {
+      "num": 216,
+      "col": 4,
+      "row": 3,
+      "goodies": 0,
+      "planet": 2,
+      "cost": 4,
+      "race": 1,
+      "rule": "11=1,2,1",
+      "desc": "If you have the Leader badge, gain influence on VENUS",
+      "name": "C1X1N"
+    },
+    "217": {
+      "num": 217,
+      "col": 5,
+      "row": 3,
+      "goodies": 0,
+      "planet": 2,
+      "cost": 2,
+      "race": 3,
+      "rule": "12,1=4,2",
+      "desc": "Gain 2 Credits per Influence track where you have at least one card",
+      "name": "Geronimo"
+    },
+    "218": {
+      "num": 218,
+      "col": 6,
+      "row": 3,
+      "goodies": 0,
+      "planet": 2,
+      "cost": 3,
+      "race": 2,
+      "rule": "40=3,-1>1,-2,1|3,-2>1,-2,2|3,-4>1,-2,3",
+      "desc": "You can spend 1/2/4 Zenithium to respectively gain 1/2/3 influence(s) on a track other than VENUS",
+      "name": "Stessy Power"
+    },
+    "219": {
+      "num": 219,
+      "col": 7,
+      "row": 7,
+      "goodies": 1,
+      "planet": 2,
+      "cost": 0,
+      "race": 2,
+      "rule": "1,7,1",
+      "desc": "Gain 1 influence on 1 track where the influence disc is on your opponent's side",
+      "name": "Dandy Müller"
+    },
+    "220": {
+      "num": 220,
+      "col": 8,
+      "row": 7,
+      "goodies": 1,
+      "planet": 2,
+      "cost": 5,
+      "race": 1,
+      "rule": "1,0,1_27,15,1=1,0,1",
+      "desc": "Gain 1 influence. If your opponent has at least 15 credits, gain 1 influence.",
+      "name": "B0ull3"
+    },
+    "101": {
+      "num": 101,
+      "col": 7,
+      "row": 1,
+      "goodies": 0,
+      "planet": 1,
+      "cost": 1,
+      "race": 2,
+      "rule": "4,4_5,1=1,3,2",
+      "desc": "Gain 4 Credits and you can give 1 Zenithium to your opponent to gain 2 influences on TERRA",
+      "name": "Lula Smart"
+    },
+    "102": {
+      "num": 102,
+      "col": 8,
+      "row": 1,
+      "goodies": 0,
+      "planet": 1,
+      "cost": 1,
+      "race": 3,
+      "rule": "52_38",
+      "desc": "Exile 2 of your cards to a track other than MERCURY to gain 10 Credits",
+      "name": "Chaka"
+    },
+    "103": {
+      "num": 103,
+      "col": 9,
+      "row": 1,
+      "goodies": 0,
+      "planet": 1,
+      "cost": 2,
+      "race": 1,
+      "rule": "40=6,1,2>3,2|6,1,4>3,4|6,1,7>3,7",
+      "desc": "Exile 2/4/7 of your MERCURY cards and gain 2/4/7 Zenithium respectively",
+      "name": "WµL"
+    },
+    "104": {
+      "num": 104,
+      "col": 7,
+      "row": 2,
+      "goodies": 0,
+      "planet": 1,
+      "cost": 6,
+      "race": 2,
+      "rule": "1,4,1_8,1",
+      "desc": "Gain 1 influence on MARS and gain the Leader badge",
+      "name": "Master Din"
+    },
+    "105": {
+      "num": 105,
+      "col": 8,
+      "row": 2,
+      "goodies": 0,
+      "planet": 1,
+      "cost": 5,
+      "race": 1,
+      "rule": "1,0,1_11=4,3",
+      "desc": "Gain 1 influence AND gain 3 Credits if you have the Leader badge",
+      "name": "HUXL3Y"
+    },
+    "106": {
+      "num": 106,
+      "col": 9,
+      "row": 2,
+      "goodies": 0,
+      "planet": 1,
+      "cost": 7,
+      "race": 3,
+      "rule": "3,3",
+      "desc": "Gain 3 Zenithium",
+      "name": "Nero"
+    },
+    "107": {
+      "num": 107,
+      "col": 7,
+      "row": 3,
+      "goodies": 0,
+      "planet": 1,
+      "cost": 1,
+      "race": 1,
+      "rule": "51_2_16=4,7",
+      "desc": "Draw 1 BONUS token and gain 7 additional Credits if you give the Leader badge",
+      "name": "ORW3LL"
+    },
+    "108": {
+      "num": 108,
+      "col": 8,
+      "row": 3,
+      "goodies": 0,
+      "planet": 1,
+      "cost": 3,
+      "race": 2,
+      "rule": "4,5_51_11=2",
+      "desc": "Gain 5 Credits and gain 1 BONUS token if you have the Leader badge",
+      "name": "Guy Gambler"
+    },
+    "109": {
+      "num": 109,
+      "col": 9,
+      "row": 3,
+      "goodies": 0,
+      "planet": 1,
+      "cost": 9,
+      "race": 1,
+      "rule": "1,0,2_5,1=1,-6,2",
+      "desc": "Gain 2 influence on one track and gain 2 influences on another track if you give 1 Zenithium to your opponent",
+      "name": "CL4RKE"
+    },
+    "110": {
+      "num": 110,
+      "col": 10,
+      "row": 1,
+      "goodies": 0,
+      "planet": 1,
+      "cost": 10,
+      "race": 3,
+      "rule": "1,0,1_1,-6,1_14,1,1_14,1,2_14,1,3_14,1,4_14,1,5",
+      "desc": "Gain 1 influence on two different planets. Transfer 1 card from each column",
+      "name": "Magellan"
+    },
+    "111": {
+      "num": 111,
+      "col": 11,
+      "row": 1,
+      "goodies": 0,
+      "planet": 1,
+      "cost": 5,
+      "race": 2,
+      "rule": "3,2_16=3,2",
+      "desc": "Gain 2 Zenithium. Gain 2 additional Zenithium if you give the Leader badge",
+      "name": "Double Joe"
+    },
+    "112": {
+      "num": 112,
+      "col": 12,
+      "row": 1,
+      "goodies": 0,
+      "planet": 1,
+      "cost": 9,
+      "race": 3,
+      "rule": "1,0,2_16=1,-6,2",
+      "desc": "Gain 2 influence on one track and gain 2 influences on another track if you give the Leader badge",
+      "name": "Khan"
+    },
+    "113": {
+      "num": 113,
+      "col": 10,
+      "row": 2,
+      "goodies": 0,
+      "planet": 1,
+      "cost": 2,
+      "race": 1,
+      "rule": "51_17,2_16=17,3",
+      "desc": "Mobilize 2 cards. Mobilize 3 additional cards if you give the Leader badge",
+      "name": "H4MILTØN"
+    },
+    "114": {
+      "num": 114,
+      "col": 11,
+      "row": 2,
+      "goodies": 0,
+      "planet": 1,
+      "cost": 2,
+      "race": 2,
+      "rule": "18,3=1,-1,2",
+      "desc": "You can give 3 Credits to your opponent to gain 2 influences on a track other than MERCURY",
+      "name": "Secret Kali"
+    },
+    "115": {
+      "num": 115,
+      "col": 12,
+      "row": 2,
+      "goodies": 0,
+      "planet": 1,
+      "cost": 3,
+      "race": 3,
+      "rule": "40=6,1,2>1,1,1|6,1,4>1,1,2|6,1,7>1,1,3",
+      "desc": "Exile 2/4/7 of your MERCURY cards and respectively gain 1/2/3 influence(s) on MERCURY",
+      "name": "Amytis"
+    },
+    "116": {
+      "num": 116,
+      "col": 10,
+      "row": 3,
+      "goodies": 0,
+      "planet": 1,
+      "cost": 4,
+      "race": 1,
+      "rule": "11=1,1,1",
+      "desc": "If you have the Leader badge, gain 1 influence on MERCURY",
+      "name": "W3LLS"
+    },
+    "117": {
+      "num": 117,
+      "col": 11,
+      "row": 3,
+      "goodies": 0,
+      "planet": 1,
+      "cost": 3,
+      "race": 3,
+      "rule": "19,1_8,1",
+      "desc": "Discard 1 card from your hand to gain the Leader badge",
+      "name": "Atlas"
+    },
+    "118": {
+      "num": 118,
+      "col": 12,
+      "row": 3,
+      "goodies": 0,
+      "planet": 1,
+      "cost": 7,
+      "race": 2,
+      "rule": "19,0_1,0,2",
+      "desc": "Discard your entire hand to gain 2 influences on a track of your choice",
+      "name": "Punk Mari"
+    },
+    "119": {
+      "num": 119,
+      "col": 9,
+      "row": 7,
+      "goodies": 1,
+      "planet": 1,
+      "cost": 0,
+      "race": 1,
+      "rule": "28,8",
+      "desc": "The 2 players go up to 8 Credits",
+      "name": "S1mm0ns"
+    },
+    "120": {
+      "num": 120,
+      "col": 10,
+      "row": 7,
+      "goodies": 1,
+      "planet": 1,
+      "cost": 5,
+      "race": 2,
+      "rule": "11,1=31,1,1",
+      "desc": "If your opponent has the Leader badge, gain 1 influence on 2 adjacent planets.",
+      "name": "Princess Uxmal"
+    },
+    "301": {
+      "num": 301,
+      "col": 1,
+      "row": 4,
+      "goodies": 0,
+      "planet": 3,
+      "cost": 1,
+      "race": 2,
+      "rule": "4,4_5,1=1,8,2",
+      "desc": "Gain 4 Credits and you can give 1 Zenithium to your opponent to gain 2 influences on a track where the influence disc is on its middle space",
+      "name": "Sneaky Jules"
+    },
+    "302": {
+      "num": 302,
+      "col": 2,
+      "row": 4,
+      "goodies": 0,
+      "planet": 3,
+      "cost": 1,
+      "race": 3,
+      "rule": "4,2,-1_4,8",
+      "desc": "Your opponent gains 2 Credits, you gain 8 Credits",
+      "name": "Zenon"
+    },
+    "303": {
+      "num": 303,
+      "col": 3,
+      "row": 4,
+      "goodies": 0,
+      "planet": 3,
+      "cost": 2,
+      "race": 1,
+      "rule": "40=6,3,2>3,2|6,3,4>3,4|6,3,7>3,7",
+      "desc": "Exile 2/4/7 of your TERRA cards and gain 2/4/7 Zenithium respectively",
+      "name": "V3RN3"
+    },
+    "304": {
+      "num": 304,
+      "col": 1,
+      "row": 5,
+      "goodies": 0,
+      "planet": 3,
+      "cost": 5,
+      "race": 2,
+      "rule": "1,7,1_8,1",
+      "desc": "Gain 1 influence on a dominated planet and gain the Leader badge",
+      "name": "Lord Creep"
+    },
+    "305": {
+      "num": 305,
+      "col": 2,
+      "row": 5,
+      "goodies": 0,
+      "planet": 3,
+      "cost": 2,
+      "race": 3,
+      "rule": "19,1_3,1",
+      "desc": "Discard 1 card from your hand to gain 1 Zenithium",
+      "name": "Elisabeth"
+    },
+    "306": {
+      "num": 306,
+      "col": 3,
+      "row": 5,
+      "goodies": 0,
+      "planet": 3,
+      "cost": 1,
+      "race": 1,
+      "rule": "3,1",
+      "desc": "Gain 1 Zenithium",
+      "name": "BRUSSØLØ"
+    },
+    "307": {
+      "num": 307,
+      "col": 1,
+      "row": 6,
+      "goodies": 0,
+      "planet": 3,
+      "cost": 4,
+      "race": 2,
+      "rule": "1,-3,-1_3,3",
+      "desc": "Give 1 influence to your opponent on a track other than TERRA to gain 3 Zenithium",
+      "name": "Baron Goro"
+    },
+    "308": {
+      "num": 308,
+      "col": 2,
+      "row": 6,
+      "goodies": 0,
+      "planet": 3,
+      "cost": 7,
+      "race": 2,
+      "rule": "20,0",
+      "desc": "Return 1 influence disc to its middle space",
+      "name": "Sir Sam"
+    },
+    "309": {
+      "num": 309,
+      "col": 3,
+      "row": 6,
+      "goodies": 0,
+      "planet": 3,
+      "cost": 8,
+      "race": 3,
+      "rule": "43,1",
+      "desc": "Gain 1 influence on 3 different tracks",
+      "name": "Charlemagne"
+    },
+    "310": {
+      "num": 310,
+      "col": 4,
+      "row": 4,
+      "goodies": 0,
+      "planet": 3,
+      "cost": 6,
+      "race": 1,
+      "rule": "47,1=1,1,1_47,2=1,2,1_47,4=1,4,1_47,5=1,5,1",
+      "desc": "For each track other than TERRA, you can exile 1 of your cards to gain 1 influence on the corresponding track",
+      "name": "H3RB3RT"
+    },
+    "311": {
+      "num": 311,
+      "col": 5,
+      "row": 4,
+      "goodies": 0,
+      "planet": 3,
+      "cost": 6,
+      "race": 2,
+      "rule": "1,-3,2",
+      "desc": "Gain 2 influences on a track other than TERRA",
+      "name": "Helena Kerr"
+    },
+    "312": {
+      "num": 312,
+      "col": 6,
+      "row": 4,
+      "goodies": 0,
+      "planet": 3,
+      "cost": 9,
+      "race": 3,
+      "rule": "1,0,2_1,7,2",
+      "desc": "Gain 2 influences. Gain 2 influences on 1 track where the Influence disk is on your opponent's side",
+      "name": "Gilgamesch"
+    },
+    "313": {
+      "num": 313,
+      "col": 4,
+      "row": 5,
+      "goodies": 0,
+      "planet": 3,
+      "cost": 6,
+      "race": 1,
+      "rule": "1,0,1_1,-6,1",
+      "desc": "Gain 1 influence on 2 different tracks",
+      "name": "F4RM3R"
+    },
+    "314": {
+      "num": 314,
+      "col": 5,
+      "row": 5,
+      "goodies": 0,
+      "planet": 3,
+      "cost": 10,
+      "race": 3,
+      "rule": "22,2,1",
+      "desc": "Gain 2 influences on a track. Gain 1 influence on each of the neighboring tracks",
+      "name": "Augustus"
+    },
+    "315": {
+      "num": 315,
+      "col": 6,
+      "row": 5,
+      "goodies": 0,
+      "planet": 3,
+      "cost": 3,
+      "race": 3,
+      "rule": "40=6,3,2>1,3,1|6,3,4>1,3,2|6,3,7>1,3,3",
+      "desc": "Exile 2/4/7 of your TERRA cards and respectively gain 1/2/3 influence(s) on TERRA",
+      "name": "Tiberius"
+    },
+    "316": {
+      "num": 316,
+      "col": 4,
+      "row": 6,
+      "goodies": 0,
+      "planet": 3,
+      "cost": 4,
+      "race": 1,
+      "rule": "11=1,3,1",
+      "desc": "If you have the Leader badge, gain 1 influence on TERRA",
+      "name": "M4TH3SØN"
+    },
+    "317": {
+      "num": 317,
+      "col": 5,
+      "row": 6,
+      "goodies": 0,
+      "planet": 3,
+      "cost": 5,
+      "race": 1,
+      "rule": "47,1=3,1_47,2=3,1_47,4=3,1_47,5=3,1",
+      "desc": "For each track other than TERRA, you can exile 1 of your cards to gain 1 Zenithium",
+      "name": "LØV3CR4FT"
+    },
+    "318": {
+      "num": 318,
+      "col": 6,
+      "row": 6,
+      "goodies": 0,
+      "planet": 3,
+      "cost": 4,
+      "race": 2,
+      "rule": "57=",
+      "desc": "Discard 1 card from your hand and gain 1 influence on the planet of the corresponding color",
+      "name": "Ice June"
+    },
+    "319": {
+      "num": 319,
+      "col": 11,
+      "row": 7,
+      "goodies": 1,
+      "planet": 3,
+      "cost": 0,
+      "race": 2,
+      "rule": "9,4,0",
+      "desc": "Develop one of your lowest Technologies by paying its cost",
+      "name": "Célestin Petit"
+    },
+    "320": {
+      "num": 320,
+      "col": 12,
+      "row": 7,
+      "goodies": 1,
+      "planet": 3,
+      "cost": 5,
+      "race": 3,
+      "rule": "37=1,11,1|1,12,1",
+      "desc": "Gain 1 influence on Mercury and Venus OR Gain 1 influence on Mars and Jupiter.",
+      "name": "Mungo"
+    },
+    "401": {
+      "num": 401,
+      "col": 7,
+      "row": 4,
+      "goodies": 0,
+      "planet": 4,
+      "cost": 1,
+      "race": 2,
+      "rule": "4,4_52_5,1=1,1,2",
+      "desc": "Gain 4 Credits and you can give 1 Zenithium to your opponent to gain 2 influences on MERCURY",
+      "name": "Jack Curry"
+    },
+    "402": {
+      "num": 402,
+      "col": 8,
+      "row": 4,
+      "goodies": 0,
+      "planet": 4,
+      "cost": 1,
+      "race": 3,
+      "rule": "1,-4,-1_4,10",
+      "desc": "Give 1 influence to your opponent on a track other than MARS to gain 10 Credits",
+      "name": "Titus"
+    },
+    "403": {
+      "num": 403,
+      "col": 9,
+      "row": 4,
+      "goodies": 0,
+      "planet": 4,
+      "cost": 2,
+      "race": 1,
+      "rule": "40=6,4,2>3,2|6,4,4>3,4|6,4,7>3,7",
+      "desc": "Exile 2/4/7 of your MARS cards and gain 2/4/7 Zenithium respectively",
+      "name": "RØB1NSØN"
+    },
+    "404": {
+      "num": 404,
+      "col": 7,
+      "row": 5,
+      "goodies": 0,
+      "planet": 4,
+      "cost": 6,
+      "race": 2,
+      "rule": "1,2,1_8,1",
+      "desc": "Gain 1 influence on VENUS and gain the Leader badge",
+      "name": "Don Dune"
+    },
+    "405": {
+      "num": 405,
+      "col": 8,
+      "row": 5,
+      "goodies": 0,
+      "planet": 4,
+      "cost": 2,
+      "race": 3,
+      "rule": "37=3,1|4,7",
+      "desc": "Gain 1 Zenithium OR gain 7 Credits",
+      "name": "Caesar"
+    },
+    "406": {
+      "num": 406,
+      "col": 9,
+      "row": 5,
+      "goodies": 0,
+      "planet": 4,
+      "cost": 4,
+      "race": 1,
+      "rule": "3,2",
+      "desc": "Gain 2 Zenithium",
+      "name": "MC4FFR3Y"
+    },
+    "407": {
+      "num": 407,
+      "col": 7,
+      "row": 6,
+      "goodies": 0,
+      "planet": 4,
+      "cost": 2,
+      "race": 1,
+      "rule": "37=14,1|3,1",
+      "desc": "Transfer a card OR gain 1 Zenithium",
+      "name": "V4NC3"
+    },
+    "408": {
+      "num": 408,
+      "col": 8,
+      "row": 6,
+      "goodies": 0,
+      "planet": 4,
+      "cost": 3,
+      "race": 3,
+      "rule": "37=14,2|4,8",
+      "desc": "Transfer two cards OR gain 8 Credits",
+      "name": "Ramses"
+    },
+    "409": {
+      "num": 409,
+      "col": 9,
+      "row": 6,
+      "goodies": 0,
+      "planet": 4,
+      "cost": 6,
+      "race": 1,
+      "rule": "23,2",
+      "desc": "Gain 2 influences on a track where the influence disc is in its middle space",
+      "name": "4ND3RSØN"
+    },
+    "410": {
+      "num": 410,
+      "col": 10,
+      "row": 4,
+      "goodies": 0,
+      "planet": 4,
+      "cost": 1,
+      "race": 1,
+      "rule": "51_17,1_4,5",
+      "desc": "Mobilize 1 card and gain 5 Credits",
+      "name": "W4TSØN"
+    },
+    "411": {
+      "num": 411,
+      "col": 11,
+      "row": 4,
+      "goodies": 0,
+      "planet": 4,
+      "cost": 5,
+      "race": 3,
+      "rule": "14,1,0,1_1,6,1",
+      "desc": "Transfer 1 card and gain 1 influence on the planet of the corresponding color",
+      "name": "Caligula"
+    },
+    "412": {
+      "num": 412,
+      "col": 12,
+      "row": 4,
+      "goodies": 0,
+      "planet": 4,
+      "cost": 4,
+      "race": 2,
+      "rule": "51_17,1_14,1_6,-1,1",
+      "desc": "Mobilize 1 card. Transfer 1 opposing card. Exile 1 opposing card.",
+      "name": "Charlize Gun"
+    },
+    "413": {
+      "num": 413,
+      "col": 10,
+      "row": 5,
+      "goodies": 0,
+      "planet": 4,
+      "cost": 10,
+      "race": 2,
+      "rule": "6,-1,1_1,6,1_6,-1,1_1,6,1_6,-1,1_1,6,1",
+      "desc": "Exile 1 opposing card and gain 1 influence on the planet of the corresponding color (x3)",
+      "name": "Lady Moore"
+    },
+    "414": {
+      "num": 414,
+      "col": 11,
+      "row": 5,
+      "goodies": 0,
+      "planet": 4,
+      "cost": 3,
+      "race": 2,
+      "rule": "1,-4,1",
+      "desc": "Gain 1 influence on a track other than MARS",
+      "name": "Little Bob"
+    },
+    "415": {
+      "num": 415,
+      "col": 12,
+      "row": 5,
+      "goodies": 0,
+      "planet": 4,
+      "cost": 3,
+      "race": 3,
+      "rule": "40=6,4,2>1,4,1|6,4,4>1,4,2|6,4,7>1,4,3",
+      "desc": "Exile 2/4/7 of your MARS cards and gain 1/2/3 influence(s) on MARS respectively",
+      "name": "Septimus"
+    },
+    "416": {
+      "num": 416,
+      "col": 10,
+      "row": 6,
+      "goodies": 0,
+      "planet": 4,
+      "cost": 4,
+      "race": 1,
+      "rule": "11=1,4,1",
+      "desc": "If you have the Leader badge, gain 1 influence on MARS",
+      "name": "BISHØP"
+    },
+    "417": {
+      "num": 417,
+      "col": 11,
+      "row": 6,
+      "goodies": 0,
+      "planet": 4,
+      "cost": 4,
+      "race": 2,
+      "rule": "45",
+      "desc": "Take 1 BONUS token from those in play",
+      "name": "Handy Luke"
+    },
+    "418": {
+      "num": 418,
+      "col": 12,
+      "row": 6,
+      "goodies": 0,
+      "planet": 4,
+      "cost": 9,
+      "race": 3,
+      "rule": "51_17,1_1,6,1_17,1_1,6,1_17,1_1,6,1",
+      "desc": "Mobilize 3 cards and gain the corresponding influences",
+      "name": "Domitian"
+    },
+    "419": {
+      "num": 419,
+      "col": 7,
+      "row": 8,
+      "goodies": 1,
+      "planet": 4,
+      "cost": 0,
+      "race": 3,
+      "rule": "29,2",
+      "desc": "The 2 players go up to 2 Zenithium",
+      "name": "Ragnar"
+    },
+    "420": {
+      "num": 420,
+      "col": 8,
+      "row": 8,
+      "goodies": 1,
+      "planet": 4,
+      "cost": 5,
+      "race": 1,
+      "rule": "1,-4,-2_1,-6,2_8,2",
+      "desc": "Give 2 influences on a planet other than Mars. Gain 2 influences on a different planet and the Gold Side Leader badge",
+      "name": "W1ll1s"
+    },
+    "501": {
+      "num": 501,
+      "col": 1,
+      "row": 7,
+      "goodies": 0,
+      "planet": 5,
+      "cost": 1,
+      "race": 2,
+      "rule": "4,4_5,1=1,2,2",
+      "desc": "Gain 4 Credits and you can give 1 Zenithium to your opponent to gain 2 influence on VENUS",
+      "name": "Agent Ezra"
+    },
+    "502": {
+      "num": 502,
+      "col": 2,
+      "row": 7,
+      "goodies": 0,
+      "planet": 5,
+      "cost": 10,
+      "race": 2,
+      "rule": "1,0,2_3,2_8,2",
+      "desc": "Gain 2 influences on a track, 2 Zenithium and the gold side Leader badge",
+      "name": "Queen Suzanne"
+    },
+    "503": {
+      "num": 503,
+      "col": 3,
+      "row": 7,
+      "goodies": 0,
+      "planet": 5,
+      "cost": 2,
+      "race": 1,
+      "rule": "40=6,5,2>3,2|6,5,4>3,4|6,5,7>3,7",
+      "desc": "Exile 2/4/7 of your JUPITER cards and gain 2/4/7 Zenithium respectively",
+      "name": "B4RJ4V3L"
+    },
+    "504": {
+      "num": 504,
+      "col": 1,
+      "row": 8,
+      "goodies": 0,
+      "planet": 5,
+      "cost": 3,
+      "race": 3,
+      "rule": "37=8,2|4,8",
+      "desc": "Gain the gold side Leader badge OR gain 8 Credits",
+      "name": "Geta"
+    },
+    "505": {
+      "num": 505,
+      "col": 2,
+      "row": 8,
+      "goodies": 0,
+      "planet": 5,
+      "cost": 4,
+      "race": 2,
+      "rule": "15_52_14,1_4,0",
+      "desc": "Transfer 1 opposing card and gain its cost in Credits",
+      "name": "Captain Andreev"
+    },
+    "506": {
+      "num": 506,
+      "col": 3,
+      "row": 8,
+      "goodies": 0,
+      "planet": 5,
+      "cost": 2,
+      "race": 2,
+      "rule": "4,3,-1_3,2",
+      "desc": "Your opponent gains 3 Credits, you gain 2 Zenithium",
+      "name": "Lisa Charity"
+    },
+    "507": {
+      "num": 507,
+      "col": 1,
+      "row": 9,
+      "goodies": 0,
+      "planet": 5,
+      "cost": 6,
+      "race": 2,
+      "rule": "1,3,1_8,1",
+      "desc": "Gain 1 influence on TERRA and gain the Leader badge",
+      "name": "Milady Jones"
+    },
+    "508": {
+      "num": 508,
+      "col": 2,
+      "row": 9,
+      "goodies": 0,
+      "planet": 5,
+      "cost": 5,
+      "race": 1,
+      "rule": "1,0,1_11=3,1",
+      "desc": "Gain 1 influence AND 1 Zenithium if you have the Leader badge",
+      "name": "P.K.D1CK"
+    },
+    "509": {
+      "num": 509,
+      "col": 3,
+      "row": 9,
+      "goodies": 0,
+      "planet": 5,
+      "cost": 8,
+      "race": 1,
+      "rule": "3,3_11=3,1",
+      "desc": "Gain 3 Zenithium. Gain 1 additional Zenithium if you have the Leader badge",
+      "name": "CH4MB3RS"
+    },
+    "510": {
+      "num": 510,
+      "col": 4,
+      "row": 7,
+      "goodies": 0,
+      "planet": 5,
+      "cost": 3,
+      "race": 3,
+      "rule": "6,-1,1_4,0",
+      "desc": "Exile 1 opponent's card and gain its cost in Credits",
+      "name": "Bajazet"
+    },
+    "511": {
+      "num": 511,
+      "col": 5,
+      "row": 7,
+      "goodies": 0,
+      "planet": 5,
+      "cost": 8,
+      "race": 1,
+      "rule": "1,0,2_27,6=1,-6,1",
+      "desc": "Gain 2 influence on one track and gain 1 influence on another track if you have at least 6 Credits",
+      "name": "THØMPSØN"
+    },
+    "512": {
+      "num": 512,
+      "col": 6,
+      "row": 7,
+      "goodies": 0,
+      "planet": 5,
+      "cost": 1,
+      "race": 3,
+      "rule": "4,5_16=4,7",
+      "desc": "Gain 5 Credits and gain an additional 7 Credits if you give the Leader badge",
+      "name": "Annie"
+    },
+    "513": {
+      "num": 513,
+      "col": 4,
+      "row": 8,
+      "goodies": 0,
+      "planet": 5,
+      "cost": 1,
+      "race": 3,
+      "rule": "12,-1=4,2",
+      "desc": "Gain 2 Credits per track where the opponent has at least one card",
+      "name": "Ivan"
+    },
+    "514": {
+      "num": 514,
+      "col": 5,
+      "row": 8,
+      "goodies": 0,
+      "planet": 5,
+      "cost": 4,
+      "race": 1,
+      "rule": "14,2_16=14,2",
+      "desc": "Transfer 2 opponent's cards and transfer 2 additional cards if you give the Leader badge",
+      "name": "GIBSØN"
+    },
+    "515": {
+      "num": 515,
+      "col": 6,
+      "row": 8,
+      "goodies": 0,
+      "planet": 5,
+      "cost": 3,
+      "race": 3,
+      "rule": "40=6,5,2>1,5,1|6,5,4>1,5,2|6,5,7>1,5,3",
+      "desc": "Exile 2/4/7 of your JUPITER cards and respectively gain 1/2/3 influence(s) on JUPITER",
+      "name": "Arnulf"
+    },
+    "516": {
+      "num": 516,
+      "col": 4,
+      "row": 9,
+      "goodies": 0,
+      "planet": 5,
+      "cost": 4,
+      "race": 1,
+      "rule": "11=1,5,1",
+      "desc": "If you have the Leader badge, gain 1 influence on JUPITER",
+      "name": "M4RT1N"
+    },
+    "517": {
+      "num": 517,
+      "col": 5,
+      "row": 9,
+      "goodies": 0,
+      "planet": 5,
+      "cost": 2,
+      "race": 2,
+      "rule": "56",
+      "desc": "Discard 1 card from your hand and gain its cost in Credits",
+      "name": "Donald Smooth"
+    },
+    "518": {
+      "num": 518,
+      "col": 6,
+      "row": 9,
+      "goodies": 0,
+      "planet": 5,
+      "cost": 1,
+      "race": 3,
+      "rule": "40=46,3>1,-5,1|46,7>1,-5,2|46,12>1,-5,3",
+      "desc": "Spend 3/7/12 Credits to gain respectively 1/2/3 influence(s) on a track other than JUPITER",
+      "name": "Suleiman"
+    },
+    "519": {
+      "num": 519,
+      "col": 9,
+      "row": 8,
+      "goodies": 1,
+      "planet": 5,
+      "cost": 0,
+      "race": 3,
+      "rule": "19,0_4,5",
+      "desc": "Discard your entire hand and gain 5 Credits",
+      "name": "Démétrios"
+    },
+    "520": {
+      "num": 520,
+      "col": 10,
+      "row": 8,
+      "goodies": 1,
+      "planet": 5,
+      "cost": 5,
+      "race": 2,
+      "rule": "1,0,1_13,3,1=1,-6,1",
+      "desc": "Gain 1 influence. If your opponent has at least 3 Zenithiums, gain 1 influence on a different track.",
+      "name": "Admiral Jack"
+    }
+  },
+  "bonus_ref": {
+    "1": {
+      "num": 1,
+      "nb": 2,
+      "rule": "4,3",
+      "desc": "Gain 3 Credits"
+    },
+    "2": {
+      "num": 2,
+      "nb": 2,
+      "rule": "4,4",
+      "desc": "Gain 4 Credits"
+    },
+    "3": {
+      "num": 3,
+      "nb": 4,
+      "rule": "1,-7,1,1",
+      "desc": "Gain 1 influence on a planet of your choice"
+    },
+    "4": {
+      "num": 4,
+      "nb": 2,
+      "rule": "8,1",
+      "desc": "Take the Leader badge"
+    },
+    "5": {
+      "num": 5,
+      "nb": 3,
+      "rule": "3,1",
+      "desc": "Gain 1 Zenithium"
+    },
+    "6": {
+      "num": 6,
+      "nb": 1,
+      "rule": "51_17,2,1",
+      "desc": "Mobilize 2 cards"
+    },
+    "7": {
+      "num": 7,
+      "nb": 1,
+      "rule": "6,-1,1,1_6,-1,1,1",
+      "desc": "Exile 2 cards"
+    },
+    "8": {
+      "num": 8,
+      "nb": 1,
+      "rule": "14,1",
+      "desc": "Transfer 1 card"
+    }
+  },
+  "tech_ref": {
+    "1": {
+      "id": 1,
+      "race": 1,
+      "ab": 1,
+      "step": 5,
+      "rule": "1,0,2",
+      "desc": "Gain 2 influences on 1 single planet of your choice."
+    },
+    "2": {
+      "id": 2,
+      "race": 1,
+      "ab": 1,
+      "step": 4,
+      "rule": "4,20",
+      "desc": "Gain 20 Credits"
+    },
+    "3": {
+      "id": 3,
+      "race": 1,
+      "ab": 1,
+      "step": 3,
+      "rule": "1,0,2_1,-6,1",
+      "desc": "Gain 2 influences on the planet of your choice. Gain 1 influence on another planet of your choice."
+    },
+    "4": {
+      "id": 4,
+      "race": 1,
+      "ab": 1,
+      "step": 2,
+      "rule": "8,1",
+      "desc": "Gain the Leader badge"
+    },
+    "5": {
+      "id": 5,
+      "race": 1,
+      "ab": 1,
+      "step": 1,
+      "rule": "14,1",
+      "desc": "Transfer 1 card"
+    },
+    "6": {
+      "id": 6,
+      "race": 2,
+      "ab": 1,
+      "step": 5,
+      "rule": "1,0,2",
+      "desc": "Gain 2 influences on 1 single planet of your choice."
+    },
+    "7": {
+      "id": 7,
+      "race": 2,
+      "ab": 1,
+      "step": 4,
+      "rule": "31,2,1",
+      "desc": "Gain 2 influences on 2 adjacent planets"
+    },
+    "8": {
+      "id": 8,
+      "race": 2,
+      "ab": 1,
+      "step": 3,
+      "rule": "51_17,3",
+      "desc": "Mobilize 3 cards"
+    },
+    "9": {
+      "id": 9,
+      "race": 2,
+      "ab": 1,
+      "step": 2,
+      "rule": "32,1",
+      "desc": "Steal 1 Zenithium from your opponent"
+    },
+    "10": {
+      "id": 10,
+      "race": 2,
+      "ab": 1,
+      "step": 1,
+      "rule": "51_2,1",
+      "desc": "Draw 1 Bonus token"
+    },
+    "11": {
+      "id": 11,
+      "race": 3,
+      "ab": 1,
+      "step": 5,
+      "rule": "1,0,2",
+      "desc": "Gain 2 influences on 1 single planet of your choice."
+    },
+    "12": {
+      "id": 12,
+      "race": 3,
+      "ab": 1,
+      "step": 4,
+      "rule": "1,5,1_1,4,1_1,3,1_1,2,1_1,1,1",
+      "desc": "Gain 1 influence on each of the 5 planets"
+    },
+    "13": {
+      "id": 13,
+      "race": 3,
+      "ab": 1,
+      "step": 3,
+      "rule": "51_2_1,0,1",
+      "desc": "Draw 1 bonus token from the supply and gain 1 influence on a planet of your choice"
+    },
+    "14": {
+      "id": 14,
+      "race": 3,
+      "ab": 1,
+      "step": 2,
+      "rule": "4,5",
+      "desc": "Gain 5 Credits"
+    },
+    "15": {
+      "id": 15,
+      "race": 3,
+      "ab": 1,
+      "step": 1,
+      "rule": "6,-1,1",
+      "desc": "Exile an opposing card"
+    },
+    "16": {
+      "id": 16,
+      "race": 1,
+      "ab": 2,
+      "step": 5,
+      "rule": "1,0,2",
+      "desc": "Gain 2 influences on 1 single planet of your choice."
+    },
+    "17": {
+      "id": 17,
+      "race": 1,
+      "ab": 2,
+      "step": 4,
+      "rule": "6,0,1_1,6,2_6,6,1_1,6,2",
+      "desc": "Exile 1 card and gain 2 influences on the corresponding planet. Exile 1 card of a different color and gain 2 influences on the corresponding planet."
+    },
+    "18": {
+      "id": 18,
+      "race": 1,
+      "ab": 2,
+      "step": 3,
+      "rule": "4,10",
+      "desc": "Gain 10 Credits"
+    },
+    "19": {
+      "id": 19,
+      "race": 1,
+      "ab": 2,
+      "step": 2,
+      "rule": "51_17,1_6,-1,1_14,1",
+      "desc": "Mobilize 1 card. Exile 1 opponent's card. Transfer 1 card"
+    },
+    "20": {
+      "id": 20,
+      "race": 1,
+      "ab": 2,
+      "step": 1,
+      "rule": "51_17,1",
+      "desc": "Mobilize 1 card"
+    },
+    "21": {
+      "id": 21,
+      "race": 2,
+      "ab": 2,
+      "step": 5,
+      "rule": "1,0,2",
+      "desc": "Gain 2 influences on 1 single planet of your choice."
+    },
+    "22": {
+      "id": 22,
+      "race": 2,
+      "ab": 2,
+      "step": 4,
+      "rule": "22,1,1",
+      "desc": "Gain 1 influence on 3 adjacent planets"
+    },
+    "23": {
+      "id": 23,
+      "race": 2,
+      "ab": 2,
+      "step": 3,
+      "rule": "33,3",
+      "desc": "Steal 3 Credits from your opponent"
+    },
+    "24": {
+      "id": 24,
+      "race": 2,
+      "ab": 2,
+      "step": 2,
+      "rule": "51_17,2",
+      "desc": "Mobilize 2 cards"
+    },
+    "25": {
+      "id": 25,
+      "race": 2,
+      "ab": 2,
+      "step": 1,
+      "rule": "1,0,1",
+      "desc": "Gain 1 influence on the planet of your choice"
+    },
+    "26": {
+      "id": 26,
+      "race": 3,
+      "ab": 2,
+      "step": 5,
+      "rule": "1,0,2",
+      "desc": "Gain 2 influences on 1 single planet of your choice."
+    },
+    "27": {
+      "id": 27,
+      "race": 3,
+      "ab": 2,
+      "step": 4,
+      "rule": "51_17,1_1,6,1_17,1_1,6,1_17,1_1,6,1",
+      "desc": "Mobilize 3 cards and gain 1 influence on the planets of the 3 corresponding colors"
+    },
+    "28": {
+      "id": 28,
+      "race": 3,
+      "ab": 2,
+      "step": 3,
+      "rule": "14,3",
+      "desc": "Transfer 3 opponent's cards"
+    },
+    "29": {
+      "id": 29,
+      "race": 3,
+      "ab": 2,
+      "step": 2,
+      "rule": "31,1,1",
+      "desc": "Gain 1 influence on 2 adjacent planets"
+    },
+    "30": {
+      "id": 30,
+      "race": 3,
+      "ab": 2,
+      "step": 1,
+      "rule": "4,2",
+      "desc": "Gain 2 Credits"
+    }
+  },
+  "planet_ref": {
+    "1": {
+      "num": 1,
+      "color": "976cb1",
+      "light": "c39dd9",
+      "name": "Mercury"
+    },
+    "2": {
+      "num": 2,
+      "color": "cba622",
+      "light": "ffb11e",
+      "name": "Venus"
+    },
+    "3": {
+      "num": 3,
+      "color": "0066b1",
+      "light": "4b9dd9",
+      "name": "Terra"
+    },
+    "4": {
+      "num": 4,
+      "color": "9a2511",
+      "light": "de6a56",
+      "name": "Mars"
+    },
+    "5": {
+      "num": 5,
+      "color": "528e75",
+      "light": "97c1af",
+      "name": "Jupiter"
+    }
+  },
+  "race_ref": {
+    "1": {
+      "num": 1,
+      "name": "Robot"
+    },
+    "2": {
+      "num": 2,
+      "name": "Human"
+    },
+    "3": {
+      "num": 3,
+      "name": "Animod"
+    }
+  },
+  "help_ref": {
+    "1": {
+      "id": 1,
+      "num": 2,
+      "text": "Gain 1 Influence on the planet of your choice."
+    },
+    "2": {
+      "id": 2,
+      "num": 14,
+      "text": "Take the last card from any of your opponent’s columns, then add it to your column of the same color WITHOUT applying its effects."
+    },
+    "3": {
+      "id": 3,
+      "num": 16,
+      "text": "Draw the top card of the deck and add it to your column of the same color WITHOUT applying its effects."
+    },
+    "4": {
+      "id": 4,
+      "num": 15,
+      "text": "Discard the last card in your opponent’s corresponding column."
+    },
+    "5": {
+      "id": 5,
+      "num": 17,
+      "text": "Take the Leader badge and place it on the Silver side. If you already have the Leader badge on the Silver side, flip it to the Gold side."
+    },
+    "6": {
+      "id": 6,
+      "num": 1,
+      "text": "The gray color indicates that you can choose the color the effect applies to."
+    },
+    "7": {
+      "id": 7,
+      "num": 13,
+      "text": "Gain the Gold Leader Badge OR 8 Credits"
+    },
+    "8": {
+      "id": 8,
+      "num": 21,
+      "text": "Gain 1 Influence on any planet whose disc is on your opponent’s side."
+    },
+    "9": {
+      "id": 9,
+      "num": 10,
+      "text": "This icon is always paired with another icon and indicates that the entire effect refers to your opponent."
+    },
+    "10": {
+      "id": 10,
+      "num": 11,
+      "text": "Your opponent gains 2 Credits."
+    },
+    "11": {
+      "id": 11,
+      "num": 5,
+      "text": "Take the indicated gain if you are in possession of an element."
+    },
+    "12": {
+      "id": 12,
+      "num": 6,
+      "text": "Take 1 Zenithium if you have the Leader badge whether it is on the Silver or Gold side."
+    },
+    "13": {
+      "id": 13,
+      "num": 3,
+      "text": "Take an element (card, Credit, Zenithium) from your opponent and place it on your side."
+    },
+    "14": {
+      "id": 14,
+      "num": 4,
+      "text": "Take, if available, 1 Zenithium from your opponent's resources and add it to your own resources."
+    },
+    "15": {
+      "id": 15,
+      "num": 7,
+      "text": "You MUST apply the left effect to gain the right effect. However, you may ignore the entire effect if you do not want to or cannot apply it."
+    },
+    "16": {
+      "id": 16,
+      "num": 8,
+      "text": "Give your opponent, from your resources, the corresponding element to earn the indicated gain."
+    },
+    "17": {
+      "id": 17,
+      "num": 9,
+      "text": "Give the Leader token to gain 2 Zenithium."
+    },
+    "18": {
+      "id": 18,
+      "num": 18,
+      "text": "Immediately develop the indicated Technology with a discount of 1 Zenithium."
+    },
+    "19": {
+      "id": 19,
+      "num": 19,
+      "text": "Immediately develop any Technology with a discount of 2 Zenithium."
+    },
+    "20": {
+      "id": 20,
+      "num": 20,
+      "text": "Develop, without spending any Zenithium, your lowest Technology. If multiple Technologies are tied for lowest, choose only 1 of them."
+    },
+    "21": {
+      "id": 21,
+      "num": 22,
+      "text": "Exile the 2/4/7 last cards from the corresponding column to gain 1/2/3 Influence respectively."
+    },
+    "22": {
+      "id": 22,
+      "num": 23,
+      "text": "Gain 2 Credits per different card color in your columns (2/4/6/8/10 Credits for 1/2/3/4/5 card colors)."
+    },
+    "23": {
+      "id": 23,
+      "num": 24,
+      "text": "Gain 2 Credits per different card color in your opponent’s columns."
+    },
+    "24": {
+      "id": 24,
+      "num": 25,
+      "text": "Gain 4/8/12 Credits if you have developed 1/2/3 Level 1 Technologies respectively."
+    }
+  },
+  "techs": {
+    "1": {
+      "tech_race": "1",
+      "tech_ab": "2"
+    },
+    "2": {
+      "tech_race": "2",
+      "tech_ab": "2"
+    },
+    "3": {
+      "tech_race": "3",
+      "tech_ab": "2"
+    }
+  }
+}

@@ -70,7 +70,7 @@ app = FastAPI(title="Forrest Games API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_allowed_origins(),
-    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
 app.add_middleware(SecurityHeadersMiddleware)
@@ -148,3 +148,13 @@ try:
     LOG.info("mounted Rag Tag at /ragtag")
 except Exception as _rt_err:  # pragma: no cover - optional package
     LOG.warning("Rag Tag not mounted: %s", _rt_err)
+
+# Orbit — faithful 1v1 Zenith with a random server opponent for the first
+# release. Keep the defensive mount: one optional game must never take down the
+# shared backend.
+try:
+    from games.orbit.main import orbit_app
+    app.mount("/orbit", orbit_app)
+    LOG.info("mounted Orbit at /orbit")
+except Exception as _orbit_err:  # pragma: no cover - optional package
+    LOG.warning("Orbit not mounted: %s", _orbit_err)

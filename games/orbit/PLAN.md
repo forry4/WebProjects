@@ -18,6 +18,20 @@ later, after the engine reproduces real games.
 
 This plan was created on branch `Orbit`, based on synced `main` commit `50110820`.
 
+### Implementation status — 2026-09-04
+
+Stages 0–3 are implemented on `Orbit`: the reviewed 90-card corpus, both faces
+of all three technology strips, the complete bonus inventory, pure rules
+engine, random opponent, room/persistence/security layer, responsive browser
+game, shared shell integration, and rules UI are all present. The release gates
+now include a real browser action at desktop and phone widths, plus a reusable
+2,000-game seeded soak.
+
+Stage 5 remains intentionally open until the user supplies additional BGA
+replays. Production-restart persistence and the Pages deployment fallback are
+post-merge deployment checks; local save/load, reconnect, direct-route, and
+production-build behavior are covered now.
+
 ---
 
 ## Source of truth and what is already known
@@ -116,8 +130,10 @@ mode id `orbit`, and CSS namespace `.orbit`.
 | `games/orbit/Orbit.jsx` | Lobby, waiting room, game, result, review, and decisions |
 | `games/orbit/Orbit.css` | Responsive game surface; shared lobby rules remain shared |
 | `games/orbit/data/*.json` | Reviewed mechanical source data with provenance notes |
-| `games/orbit/tools/import_data.py` | Validates source data and regenerates `cards.py`/`boards.py` |
-| `games/orbit/tools/bga_*.py` | Later replay inspection, normalization, and parity runners |
+| `games/orbit/tools/extract_bga.py` | Extracts the public mechanical reference without publisher artwork |
+| `games/orbit/tools/audit_reference.py` | Audits card/faction/board/token counts and compact BGA op coverage |
+| `games/orbit/tools/soak.py` | Runs reproducible random full-game legality/invariant soaks |
+| `games/orbit/tools/bga_*.py` | Later replay normalization and parity runners |
 | `games/orbit/tests/` | Engine, data, bot, persistence, redaction, server, WebSocket, and parity tests |
 | `games/orbit/AGENTS.md` | Per-game invariants and settled rulings once implementation starts |
 

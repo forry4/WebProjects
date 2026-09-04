@@ -54,6 +54,9 @@ const GAME_EMBLEM = {
 	// make it read as swords rather than as a multiplication sign at the size it is
 	// actually drawn.
 	ragtag: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinejoin="round" strokeLinecap="round"><path d="M19 4.2 10.2 14.2 8.6 16" /><path d="M8.2 12.5 12.2 15.9" /><circle cx="7.6" cy="16.8" r="1.35" fill="currentColor" stroke="none" /><path d="M5 4.2 13.8 14.2 15.4 16" /><path d="M15.8 12.5 11.8 15.9" /><circle cx="16.4" cy="16.8" r="1.35" fill="currentColor" stroke="none" /></svg>),
+	// A planet and its tilted orbital path — five worlds moving around one
+	// centre, reduced to the one relationship that survives at menu size.
+	orbit: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><circle cx="12" cy="12" r="3.1" /><ellipse cx="12" cy="12" rx="8.3" ry="4.2" transform="rotate(-24 12 12)" /><circle cx="18.3" cy="7.9" r="1.1" fill="currentColor" stroke="none" /></svg>),
 };
 
 export { GAME_EMBLEM };

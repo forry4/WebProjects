@@ -44,6 +44,7 @@ const SpenderDuel = lazyChunk("SpenderDuel", () => import("../spender_duel/Spend
 const Dontminion = lazyChunk("Dontminion", () => import("../dontminion/Dontminion.jsx"));
 const Dissonance = lazyChunk("Dissonance", () => import("../dissonance/Dissonance.jsx"));
 const RagTag = lazyChunk("RagTag", () => import("../rag_tag/RagTag.jsx"));
+const Orbit = lazyChunk("Orbit", () => import("../orbit/Orbit.jsx"));
 const Books = lazyChunk("Books", () => import("../../books/Books.jsx"));
 const BggFilter = lazyChunk("BggFilter", () => import("../../bggfilter/BggFilter.jsx"));
 
@@ -112,8 +113,8 @@ const HTTP_BASE = WS_BASE.replace(/^ws/, "http").replace(/\/ws$/, "");
 // tables — GAMES[].id ≠ path for wherewolf; Spender is one site-level screen now.
 // The shell owns segment 1; each sub-game owns its own segment 2 (room id). The Spender
 // Spender's own waiting/game map to "spender" (or "puzzles" while puzzling) in applyPopRoute.
-const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", books: "books", puzzles: "puzzles", bggfilter: "bggfilter", offline: "offline" };
-const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", books: "books", puzzles: "puzzles", bggfilter: "bggfilter", offline: "offline" };
+const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", books: "books", puzzles: "puzzles", bggfilter: "bggfilter", offline: "offline" };
+const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", books: "books", puzzles: "puzzles", bggfilter: "bggfilter", offline: "offline" };
 
 // Per-game emblem — inline SVG tinted via currentColor (=the card's --accent), so no
 // raster asset / CDN (keeps the self-hosted, no-CLS constraint). Small motifs that read
@@ -2921,6 +2922,15 @@ export default function SpenderApp() {
 		return (
 			<Suspense fallback={<GameChunkLoading />}>
 				<RagTag myId={myId} authUser={authUser} onExit={() => nav("home")} />
+			</Suspense>
+		);
+	}
+
+	// Orbit — faithful two-player Zenith with a random first-release opponent.
+	if (screen === "orbit") {
+		return (
+			<Suspense fallback={<GameChunkLoading />}>
+				<Orbit myId={myId} authUser={authUser} onExit={() => nav("home")} />
 			</Suspense>
 		);
 	}

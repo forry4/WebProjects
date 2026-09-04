@@ -19,6 +19,7 @@ const LOBBIES = [
 	{ tag: "dontminion", path: "/dontminion", marker: ".dm" },
 	{ tag: "dissonance", path: "/dissonance", marker: ".dis" },
 	{ tag: "ragtag", path: "/ragtag", marker: ".ragtag" },
+	{ tag: "orbit", path: "/orbit", marker: ".orbit" },
 ];
 const VIEWS = {
 	phone: { w: 390, h: 844 }, tablet: { w: 834, h: 1112 },

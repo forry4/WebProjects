@@ -42,6 +42,7 @@ const SCREENS = [
 	{ path: "/dontminion", chunk: "Dontminion", marker: ".dm" },
 	{ path: "/dissonance", chunk: "Dissonance", marker: ".dis" },
 	{ path: "/ragtag", chunk: "RagTag", marker: ".ragtag" },
+	{ path: "/orbit", chunk: "Orbit", marker: ".orbit" },
 	{ path: "/books", chunk: "Books", marker: ".bk-app" },
 	{ path: "/bggfilter", chunk: "BggFilter", marker: ".bgf" },
 ];
@@ -521,7 +522,7 @@ try {
 	//     catches it, so this asserts the column really does use the screen.
 	//  2. THE ACCENT PALETTE. Each game's colour is its card title's ink, so it has
 	//     to clear AA on the card (the titles are ~1.2rem — under the large-text
-	//     exemption), and the seven have to be tellable APART or the colour is not
+	//     exemption), and all game accents have to be tellable APART or the colour is not
 	//     doing the identifying job it exists for. Two of them were the same gold.
 	//     Both are properties of a hex literal in shared/HomeScreen.jsx, i.e. exactly
 	//     the kind of thing a new game copies from its neighbour and gets wrong; the
@@ -641,10 +642,10 @@ try {
 			drift.map((d) => `${d.text} ${Math.round(d.accentHue)}->${Math.round(d.plateHue)}`).join(", "));
 
 		// EVERY CARD IS THE SAME SIZE, AT EVERY TIER. There used to be a "banner": a card
-		// alone on its row spanned the row, which made the seventh game a different shape
+		// alone on its row spanned the row, which made the final game a different shape
 		// from the other six and cost three separate bugs on its own (the pill's alignment,
 		// a chevron that leaked into the one-column tier, and a plate 15px below its
-		// siblings'). The user's call, and the right one: seven identical cards, and a last
+		// siblings'). The user's call, and the right one: identical cards, and a last
 		// row that is simply not full. This is the check that keeps it that way.
 		for (const w of [390, 834, 1180, 1600, 1920]) {
 			await page.setViewportSize({ width: w, height: 1000 });
@@ -664,7 +665,7 @@ try {
 				};
 			});
 			const one = (k) => new Set(cards[k]).size === 1;
-			check(`all seven cards are identical at ${w}px`,
+			check(`all game cards are identical at ${w}px`,
 				["w", "h", "plate", "title", "pill", "chevron"].every(one),
 				JSON.stringify(cards));
 		}
@@ -711,6 +712,7 @@ try {
 			{ id: "dontminion", path: "/dontminion", marker: ".dm" },
 			{ id: "dissonance", path: "/dissonance", marker: ".dis" },
 			{ id: "ragtag", path: "/ragtag", marker: ".ragtag" },
+			{ id: "orbit", path: "/orbit", marker: ".orbit" },
 		];
 		// Every game in the catalogue must be listed, or a new one joins unmeasured —
 		// the roster is derived, not hand-kept.
@@ -759,7 +761,7 @@ try {
 			const m = await page.evaluate(() => {
 				const cards = [...document.querySelectorAll(".home-game-card")];
 				const box = document.querySelector(".home").getBoundingClientRect();
-				// ALL SEVEN, not the first six. The seventh used to be a full-width banner
+				// ALL GAME CARDS, not just the first row. The final card used to be a full-width banner
 				// and had to be excluded here; every card is the same size now, so
 				// including it is the stronger check and this line is the assertion.
 				const widths = [...new Set(cards.map((c) => Math.round(c.getBoundingClientRect().width)))];
@@ -1025,7 +1027,7 @@ try {
 	}
 
 	// ── The shared lobby Rules button + how-to-play modal ─────────────────────
-	// One kit, six lobbies — so it is worth driving all six rather than one. The
+	// One kit, every lobby — so it is worth driving all of them rather than one. The
 	// three contracts that regress silently:
 	//   1. every lobby actually PASSES onRules (the button is opt-in, so a game
 	//      that forgets it renders a perfectly fine lobby with no way in);
@@ -1047,7 +1049,7 @@ try {
 			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 
-		for (const route of ["/spender", "/coc", "/werewolf", "/duel", "/dontminion", "/dissonance"]) {
+		for (const route of ["/spender", "/coc", "/werewolf", "/duel", "/dontminion", "/dissonance", "/ragtag", "/orbit"]) {
 			await page.goto(`http://localhost:${PORT}${route}`, { waitUntil: "networkidle" });
 			await page.waitForSelector(".lby-rules", { timeout: 25_000 }).catch(() => {});
 			const hasBtn = await page.locator(".lby-rules").count().catch(() => 0);
@@ -2494,7 +2496,7 @@ try {
 		// shared one, so it resolves these ties in the opposite order.
 		for (const [route, marker] of [["/spender", ".sp-lobby, .lby-cols"],
 			["/duel", ".duel"], ["/coc", ".coc"], ["/dontminion", ".dm"],
-			["/dissonance", ".dis"], ["/ragtag", ".ragtag"]]) {
+			["/dissonance", ".dis"], ["/ragtag", ".ragtag"], ["/orbit", ".orbit"]]) {
 			await page.goto(`http://localhost:${PORT}${route}`, { waitUntil: "networkidle" });
 			await page.waitForSelector(marker, { timeout: 25_000 }).catch(() => {});
 			await page.waitForSelector(".lby-tabs", { timeout: 15_000 }).catch(() => {});
@@ -5480,6 +5482,104 @@ try {
 		await ctx.close();
 	}
 
+	// ── Orbit: real room, mulligan, one complete player action ────────────────
+	async function orbitPlay(log) {
+		const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "orbit-harness", name: "Orbiter", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		await page.goto(`http://localhost:${PORT}/orbit`, { waitUntil: "networkidle" });
+		const lobby = await page.waitForSelector(".orbit .lby-create-row", { timeout: 25_000 })
+			.then(() => true).catch(() => false);
+		check("Orbit lobby is reachable", lobby);
+		await page.locator(".lby-cta").click({ timeout: 10_000 }).catch(() => {});
+		const modal = await page.waitForSelector(".cm-panel", { timeout: 10_000 })
+			.then(() => true).catch(() => false);
+		check("Orbit offers friend/AI and S.U.N./random setup", modal
+			&& await page.locator(".cm-seg-btn").count() === 4);
+		await page.locator(".cm-create").click({ timeout: 10_000 }).catch(() => {});
+
+		const mulligan = await page.waitForSelector(".or-mulligan", { timeout: 30_000 })
+			.then(() => true).catch(() => false);
+		check("a vs-AI room deals a four-card opening hand", mulligan
+			&& await page.locator(".or-mulligan .or-agent").count() === 4);
+		await page.locator(".or-mulligan .or-primary").click({ timeout: 10_000 }).catch(() => {});
+		const board = await page.waitForSelector(".or-influence", { timeout: 30_000 })
+			.then(() => true).catch(() => false);
+		check("the five-planet and three-track boards render", board
+			&& await page.locator(".or-track").count() === 5
+			&& await page.locator(".or-tech-col").count() === 3);
+
+		// Seating is random, so wait through the bot's opening action. A clickable
+		// hand card is the server's legal-move list arriving at this seat.
+		const card = page.locator(".or-hand-zone .or-agent:not(:disabled)").first();
+		const gotTurn = await card.waitFor({ state: "visible", timeout: 30_000 })
+			.then(() => true).catch(() => false);
+		check("the random opponent yields a legal player turn", gotTurn);
+		if (gotTurn) await card.click().catch(() => {});
+		const actionCopy = await page.locator(".or-action-bar button").allTextContents().catch(() => []);
+		check("all three card uses show their exact price or faction",
+			actionCopy.length === 3
+			&& actionCopy.some((text) => text.includes("Credits"))
+			&& actionCopy.some((text) => text.includes("Zenithium"))
+			&& actionCopy.some((text) => text.includes("Leader")),
+			JSON.stringify(actionCopy));
+		const action = page.locator(".or-action-bar button:not(:disabled)").first();
+		const actionReady = await action.waitFor({ state: "visible", timeout: 10_000 })
+			.then(() => true).catch(() => false);
+		check("a selected Agent offers a server-legal action", actionReady);
+		const logBefore = await page.locator(".or-log p").count().catch(() => 0);
+		if (actionReady) await action.click().catch(() => {});
+
+		// Some Agent/technology programs ask several questions. Answer every one
+		// until the turn passes; this is the reconnect-safe generic decision path.
+		for (let i = 0; i < 12; i++) {
+			const choice = page.locator(".or-decision button").first();
+			if (!await choice.count().catch(() => 0)) break;
+			await choice.click().catch(() => {});
+			await sleep(120);
+		}
+		await page.waitForFunction((n) => document.querySelectorAll(".or-log p").length > n,
+			logBefore, { timeout: 20_000 }).catch(() => {});
+		const logAfter = await page.locator(".or-log p").count().catch(() => 0);
+		check("the action resolves and is broadcast into the chronicle", logAfter > logBefore,
+			`${logBefore} -> ${logAfter}`);
+		const geometry = await page.evaluate(() => ({
+			wide: document.documentElement.scrollWidth > window.innerWidth + 1,
+			cards: document.querySelectorAll(".or-hand-zone .or-agent").length,
+			columns: document.querySelectorAll(".or-column").length,
+		}));
+		check("the complete public table and private hand remain on the page",
+			!geometry.wide && geometry.cards > 0 && geometry.columns === 10,
+			JSON.stringify(geometry));
+		await page.setViewportSize({ width: 390, height: 844 });
+		await sleep(250);
+		const phone = await page.evaluate(() => {
+			const inside = (el) => {
+				const r = el.getBoundingClientRect();
+				return r.left >= -1 && r.right <= window.innerWidth + 1;
+			};
+			const sections = [...document.querySelectorAll(
+				".or-influence, .or-tech, .or-columns, .or-hand-zone, .or-decision")];
+			return {
+				wide: document.documentElement.scrollWidth > window.innerWidth + 1,
+				outside: sections.filter((section) => !inside(section)).map((section) => section.className),
+			};
+		});
+		check("the playable board stays inside a phone viewport",
+			!phone.wide && phone.outside.length === 0, JSON.stringify(phone));
+		check("no page errors while playing Orbit", errors.length === 0,
+			errors[0]?.slice(0, 200) || "");
+		await ctx.close();
+	}
+
 	// skat → Hard → beat stay contiguous and in order, preserving the adjacency the
 	// comments in those blocks were written against.
 	// `ragtagFight` is lane A, and LAST, for a reason that is not lane A's usual
@@ -5500,7 +5600,7 @@ try {
 	const laneB = [routeMounts, shellNav, authScreen, homeScreen, spenderPlayTurn, spenderWaitingRoom,
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, lastDifficulty,
-		dissonanceQuartet];
+		dissonanceQuartet, orbitPlay];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant
 	// writing it — it then ran because it was simply the next statement. Now it has
