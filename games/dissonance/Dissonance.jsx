@@ -1,7 +1,7 @@
 import { Fragment, useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { baseCss } from "../../shared/theme.js";
 import {
-  lobbyCss, LobbyHeader, LobbySectionHd, LobbyEmpty, TurnBadge, LobbyLoading,
+  lobbyCss, LobbyHeader, LobbySectionHd, LobbyEmpty, TurnBadge, LobbyMatchup, LobbyLoading,
   LobbyTabs, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss,
@@ -2201,9 +2201,10 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
           {activeMine.map((g) => (
             <div key={g.id} className="lby-card">
               <div className="lby-card-info">
-                <div className="lby-card-title">
-                  {(g.you_are_p1 ? g.player2_name : g.player1_name) || "Waiting…"}
-                </div>
+                <LobbyMatchup placeholder="Waiting…" seats={[
+                  { name: g.player1_name, you: g.you_are_p1 },
+                  { name: g.player2_name, you: !g.you_are_p1 },
+                ]} />
                 <div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}<ModeBadge mode={g.mode} /></div>
               </div>
               {/* THE TURN PILL LIVES ON THE ACTIONS RAIL, beside Resume, which is

@@ -352,6 +352,15 @@ def list_user_games(user_id: str) -> list[dict]:
             "id": r["id"], "status": r["status"],
             "players": list(players.values()),
             "opponents": others,
+            # SEAT ORDER, with your own seat flagged — what the lobby's matchup line
+            # renders. `players`/`opponents` cannot express it: the first is a bare
+            # name list with no way to say which one is you, and the second answers
+            # that by deleting you, which is exactly the row this list stopped
+            # showing. Two seats sharing a display name (two guests) also collapse
+            # under any name-based match, and the pid does not.
+            # ADDITIVE: a bundle cached before this shipped ignores the field, and
+            # the frontend falls back to `opponents` against a backend without it.
+            "seats": [{"name": n, "you": p == user_id} for p, n in players.items()],
             "your_turn": your_turn,
             "created_at": r["created_at"], "updated_at": r["updated_at"],
         })

@@ -60,7 +60,7 @@ import { lobbyCss, LobbyHeader, LobbyLoading, GameMenu, gameMenuCss, readLobbyCa
 	useLastDifficulty,
 	createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss, LobbyHero, LobbyUser,
 	RulesModal, rulesModalCss,
-	useProgressiveList, LobbySectionHd, LobbyTabs, TurnBadge, LobbyAction, useListFade } from "../../shared/lobby.jsx";
+	useProgressiveList, LobbySectionHd, LobbyTabs, TurnBadge, LobbyMatchup, LobbyAction, useListFade } from "../../shared/lobby.jsx";
 import SpenderRules from "./rules.jsx";
 import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
 	splendorPanelCss, splendorCardCss, splendorCardExtraCss, splendorPillCss,
@@ -3315,11 +3315,8 @@ export default function SpenderApp() {
 										return (
 											<div key={g.id} className="lby-card">
 												<div className="lby-card-info">
-													<div className="lby-card-title matchup">
-														{seats.map(([id, nm], i) => (
-															<div key={id || i}>{i > 0 && <span className="lby-vs">vs</span>}{displayName(nm)}{id === myId ? " (you)" : ""}</div>
-														))}
-													</div>
+													<LobbyMatchup seats={seats.map(([id, nm]) => (
+														{ name: displayName(nm), you: id === myId }))} />
 													<div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
 												</div>
 												<div className="lby-card-actions">

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { baseCss } from "../../shared/theme.js";
 import {
-  lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, LobbyEmpty,
+  lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyMatchup, LobbyLoading, LobbyEmpty,
   LobbyAction, LobbyTabs, notWaiting, GameMenu, gameMenuCss,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss, useProgressiveList, LobbyHero, LobbyUser, useListFade,
@@ -233,7 +233,7 @@ function Lobby({ authUser, myId, onExit, openGames, myGames, history, historySho
     <LobbyHeader onBack={onExit} user={<LobbyUser user={authUser} />} />
     <div className="lby-page"><div className="lby-page-in">
       <LobbyHero game="orbit">
-        <LobbyCreateRow createLabel="+ Create Orbit" onCreate={() => setShowCreate(true)}
+        <LobbyCreateRow onCreate={() => setShowCreate(true)}
           onJoin={joinGame} onRefresh={fetchGames} refreshing={refreshing}
           onRules={() => setShowRules(true)} />
       </LobbyHero>
@@ -259,7 +259,9 @@ function Lobby({ authUser, myId, onExit, openGames, myGames, history, historySho
           <LobbySectionHd title="Active Games" note={`${active.length} in progress`} />
           {!active.length && <LobbyEmpty>No games in progress.</LobbyEmpty>}
           <div className="lby-list">{active.map((g) => <div className="lby-card" key={g.id}>
-            <div className="lby-card-info"><div className="lby-card-title">{(g.you_are_p1 ? g.player2_name : g.player1_name) || "Opponent"}</div>
+            <div className="lby-card-info"><LobbyMatchup placeholder="Opponent" seats={[
+              { name: g.player1_name, you: g.you_are_p1 }, { name: g.player2_name, you: !g.you_are_p1 },
+            ]} />
               <div className="lby-card-meta">{g.turn ? `turn ${g.turn} · ` : ""}{timeAgo(g.updated_at)}</div></div>
             <div className="lby-card-actions"><TurnBadge mine={g.your_turn}>{g.your_turn ? "Your turn" : "Their turn"}</TurnBadge>
               <LobbyAction onClick={() => resumeGame(g.id)}>Resume</LobbyAction></div>

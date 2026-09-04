@@ -206,3 +206,85 @@ def test_an_active_list_built_from_games_mine_filters_out_waiting_rooms():
         assert "notWaiting" in near or "notWaiting" in text, (
             f"{jsx.name} builds its Active column from /games/mine without "
             "notWaiting(), so rooms still waiting for a player show as active")
+
+
+def test_the_create_button_says_the_same_thing_in_every_lobby():
+    """`+ Create Game`, everywhere. Two lobbies had themed the label to their own
+    vocabulary — Rag Tag `+ Create Fight`, Orbit `+ Create Orbit` — which is a
+    defensible instinct (every OTHER string in those lobbies says fight/orbit) and
+    still the wrong place for it: this is the same control, in the same corner, on
+    eight pages, and a player moving between them was re-reading a button they had
+    already learned. The theming belongs on the rows, the empty states and the
+    create modal, which are actually about the game.
+
+    Enforced rather than remembered because the label is a PROP with a default: a
+    new game gets this right by writing nothing at all, and gets it wrong by
+    writing one plausible-looking line that nothing else in the repo contradicts.
+    """
+    themed = {}
+    for jsx in _lobby_games():
+        for m in re.finditer(r'createLabel=(?:"([^"]*)"|\{[^}]*\})',
+                             jsx.read_text(encoding="utf-8")):
+            themed[jsx.name] = m.group(1) or "<expression>"
+    assert not themed, (
+        "these lobbies override the shared create-button label; delete the prop "
+        f"and take the default: {themed}")
+
+
+def test_an_active_game_names_the_seat_you_are_sitting_in():
+    """Your own name goes in your own Active row, via the kit's `LobbyMatchup`.
+
+    Five lobbies printed the OPPONENT alone, on the reasoning that one of the two
+    seats in a `/games/mine` list is always you. It is not noise: with a few games
+    on the go the Active column is the only place the seat you hold is written
+    down, and Spender and Castles of Crimson — whose Active columns are PUBLIC, so
+    they never had the option — had been showing the full matchup all along. Two
+    treatments of the same row, decided by which endpoint a game happened to have.
+
+    The check is for the shared COMPONENT, not for the string: a game that
+    hand-rolls "(you)" into its own markup is exactly the drift this kit exists to
+    stop, and it is how the `.lby-vs` lead came to be set two different ways.
+    """
+    # Self-policing, like the History exemption above: a game listed here that
+    # STARTS rendering a matchup fails as stale, so the row gets deleted rather
+    # than excusing something that no longer needs excusing.
+    no_names = {"WhereWolf.jsx": "hidden-role party game: /games/mine carries no "
+                                 "opponent names, so the room code is the title"}
+    for jsx in _lobby_games():
+        text = jsx.read_text(encoding="utf-8")
+        has = re.search(r"<LobbyMatchup[ />]", text) is not None
+        if jsx.name in no_names:
+            assert not has, (
+                f"{jsx.name} now renders a matchup — delete its row from "
+                f"`no_names` ({no_names[jsx.name]})")
+            continue
+        assert has, (
+            f"{jsx.name}'s Active column does not use LobbyMatchup, so it either "
+            "hides your own seat or spells it out per-game")
+
+
+def test_no_game_restyles_the_shared_actions_rail():
+    """The rail — the row's buttons with the turn pill UNDER them — is a GRID, and
+    a game sheet can silently undo it.
+
+    `.lby-card-actions` lays its children out with `grid-auto-flow:column` plus an
+    explicit row for the pill. Six of the seven game sheets are concatenated AFTER
+    the shared one, so a per-game `display:flex` on the same class out-orders it at
+    equal specificity and the pill goes back beside the button — in one game, on
+    one page, looking like a bug in that game rather than a stylesheet ordering
+    accident. Same rule, and the same reason, as the lobby GRID one in CLAUDE.md.
+
+    Only the layout properties are refused. A game may still tune the rail's
+    spacing or margins (Duel's phone block does).
+    """
+    layout = re.compile(r"(display|grid-auto-flow|grid-template|flex-direction|flex-flow)\s*:")
+    bad = {}
+    for css in sorted((ROOT / "games").glob("*/*.css")):
+        text = css.read_text(encoding="utf-8")
+        for m in re.finditer(r"[^{}]*\.lby-card-actions[^{}]*\{([^}]*)\}", text):
+            hits = set(layout.findall(m.group(1)))
+            if hits:
+                bad.setdefault(css.name, set()).update(hits)
+    assert not bad, (
+        "these game sheets re-lay-out the shared actions rail, which breaks the "
+        f"pill-under-the-button placement in that game only: {bad}")

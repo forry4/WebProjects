@@ -3,7 +3,7 @@ import { baseCss } from "../../shared/theme.js";
 import ragtagCssText from "./RagTag.css?inline";
 import RagTagRules from "./rules.jsx";
 import {
-  lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, LobbyEmpty,
+  lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyMatchup, LobbyLoading, LobbyEmpty,
   LobbyAction, LobbyTabs, notWaiting, GameMenu, gameMenuCss,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss, useProgressiveList, LobbyHero, LobbyUser, useListFade,
@@ -1727,11 +1727,14 @@ export default function RagTag({ myId, authUser, onExit }) {
         />
         <div className="lby-page"><div className="lby-page-in">
         <LobbyHero game="ragtag">
-        {/* "+ Create Fight". Every string in this lobby says fight — the rows, the
-            three empty states, the create modal's own title — and the one control the
-            player actually presses said "Game". */}
+        {/* THE CREATE BUTTON SAYS "CREATE GAME" IN EVERY LOBBY. It said "+ Create
+            Fight" here (and "+ Create Orbit" in Orbit) to match this lobby's own
+            vocabulary — the rows, the empty states and the create modal all say
+            fight — but the button is not part of that vocabulary: it is the same
+            control in the same place on eight pages, and a player moving between
+            them was re-reading a button they had already learned. The theming
+            belongs on the things that are actually this game's. */}
         <LobbyCreateRow
-          createLabel="+ Create Fight"
           onCreate={() => setShowCreateModal(true)}
           onJoin={(code) => joinGame(code)}
           onRefresh={fetchGames}
@@ -1800,9 +1803,10 @@ export default function RagTag({ myId, authUser, onExit }) {
               {activeMine.map((g) => (
                 <div className="lby-card" key={g.id}>
                   <div className="lby-card-info">
-                    <div className="lby-card-title">{
-                    (g.you_are_p1 ? g.player2_name : g.player1_name) || "?"
-                  }</div>
+                    <LobbyMatchup placeholder="?" seats={[
+                      { name: g.player1_name, you: g.you_are_p1 },
+                      { name: g.player2_name, you: !g.you_are_p1 },
+                    ]} />
                     <div className="lby-card-meta">
                       {g.round ? `round ${g.round} · ` : ""}{timeAgo(g.updated_at)}
                     </div>

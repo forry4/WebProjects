@@ -1,5 +1,5 @@
 import { Fragment, useState, useEffect, useLayoutEffect, useRef, useCallback, useId } from "react";
-import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
+import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyMatchup, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss,
   useProgressiveList, LobbyTabs, useLastDifficulty, LobbyHero,
@@ -2153,14 +2153,12 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
                   // row above it fitted on one line. Same feature, same column, two
                   // typographic treatments and one bad break.
                   const seats = pl.length
-                    ? pl.map((p) => (p.id === myId ? `${p.name} (you)` : p.name))
-                    : ["waiting…"];
+                    ? pl.map((p) => ({ name: p.name, you: p.id === myId }))
+                    : [{ name: "waiting…" }];
                   return (
                     <div className="lby-card" key={g.id}>
                       <div className="lby-card-info">
-                        <div className="lby-card-title matchup">
-                          {seats.map((nm, i) => <div key={i}>{i > 0 && <span className="lby-vs">vs</span>}{nm}</div>)}
-                        </div>
+                        <LobbyMatchup seats={seats} />
                         <div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
                       </div>
                       <div className="lby-card-actions">

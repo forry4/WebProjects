@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { baseCss } from "../../shared/theme.js";
-import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
+import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyMatchup, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss,
   useProgressiveList, LobbyTabs, notWaiting, LobbyAction, useLastDifficulty,
@@ -1661,13 +1661,17 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
             {activeMine.map((g) => (
               <div className="lby-card" key={g.id}>
                 <div className="lby-card-info">
-                  {/* The opponent, not the pairing: this list is `/games/mine`, so
-                      one of the two seats is always you and naming yourself in your
-                      own list is noise. Spender and CoC keep the full matchup because
-                      their Active column is PUBLIC. */}
-                  <div className="lby-card-title">{
-                    (g.player1_name === (authUser?.name || "") ? g.player2_name : g.player1_name) || "?"
-                  }</div>
+                  {/* `you_are_p1`, not a NAME COMPARISON. The row used to pick the
+                      opponent by testing `player1_name === authUser.name`, which is
+                      the one piece of this that a player can make wrong from inside
+                      the game: two seats with the same display name (a guest playing
+                      a guest, or a rematch against someone who picked your name) put
+                      YOU on both sides of it. The backend already sends the seat fact
+                      — `player1_id === user_id` — and it cannot be spoofed by a name. */}
+                  <LobbyMatchup placeholder="?" seats={[
+                    { name: g.player1_name, you: g.you_are_p1 },
+                    { name: g.player2_name, you: !g.you_are_p1 },
+                  ]} />
                   <div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
                 </div>
                 <div className="lby-card-actions">

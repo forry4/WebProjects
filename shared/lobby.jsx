@@ -234,6 +234,35 @@ export function LobbySectionHd({ title, note }) {
 	);
 }
 
+// THE MATCHUP LINE — who is in this game, one seat per line, with your own seat
+// marked. One renderer for every lobby, because there were two treatments and the
+// split was an accident of which endpoint a game happened to have: Spender and
+// Castles of Crimson list ALL in-progress games (a public `list_active_games`), so a
+// row can be somebody else's and they had to name both seats; the other five list
+// only `/games/mine`, so each concluded that naming yourself in your own list was
+// noise and printed the OPPONENT alone. It is not noise — with a few games on the go,
+// the Active column is the only place the seat you are sitting in is written down,
+// and "Bot 1" on one site and "Aurelia (you) vs Bot 1" on another read as two
+// products. A game hands over seats; the kit decides how a matchup looks.
+//
+// `seats` = [{ name, you }] in SEAT order (not you-first): the order is a fact about
+// the table, and re-sorting it would make the same game read differently to each
+// player. A missing name renders as a placeholder rather than an empty line — an
+// unfilled seat is a real state (a room mid-join), not a bug to hide.
+export function LobbyMatchup({ seats, placeholder = "…" }) {
+	return (
+		<div className="lby-card-title matchup">
+			{(seats || []).map((s, i) => (
+				<div key={i}>
+					{i > 0 && <span className="lby-vs">vs</span>}
+					{s.name || placeholder}
+					{s.you && <span className="lby-you"> (you)</span>}
+				</div>
+			))}
+		</div>
+	);
+}
+
 // A room you have joined but which has NOT started is waiting, not active. It
 // already appears in Open — with a Cancel if you host it — so listing it again
 // as in-progress offers a Resume that just drops you back in the waiting room.

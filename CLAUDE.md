@@ -259,6 +259,28 @@ shipped spin keyframes.
 - Where Wolf? keeps its own 2-column grid (it has no History column) but uses `.lby-list` like
   everyone else.
 
+**A GAME CARD ROW IS THE KIT'S, DOWN TO THE ROW'S ANATOMY — three things a new game gets for free
+and cannot get wrong by writing nothing** (all three enforced by `shared/tests/test_lobby_kit.py`,
+because each was a per-game decision that looked reasonable in its own file):
+- **The create button says `+ Create Game` in every lobby.** `createLabel` is a prop with that
+  default and two games had themed it (`+ Create Fight`, `+ Create Orbit`) to match their own
+  vocabulary. It is the same control in the same corner on eight pages; theme the rows, the empty
+  states and the create modal instead.
+- **The actions rail is a GRID: buttons top-right, the turn pill UNDERNEATH them.** `.lby-card` is
+  `align-items:flex-start` so Resume hangs from the row's top edge (centred, it slid halfway down
+  the moment a row went to two lines). The pill's placement is `order`/`grid-row` in the SHARED
+  sheet, not DOM order — every game emits the pill before its buttons, and `column-reverse` would
+  have flipped the two-button Open rows (Cancel above Return) in passing. Flex was tried first and
+  is wrong for a measurable reason: a wrapping flex container is sized by its UNWRAPPED max-content,
+  so the rail kept reserving 207px for a 90px stack and still dropped below the title in a narrow
+  column. **A game sheet must not set `display`/`flex-direction`/`grid-*` on `.lby-card-actions`** —
+  six of seven sheets are concatenated after the shared one, so it silently wins.
+- **An Active row names YOUR seat, via `LobbyMatchup`** — one seat per line, `(you)` on yours. Five
+  lobbies printed the opponent alone (their Active list is `/games/mine`, so "naming yourself is
+  noise"); Spender and CoC, whose Active columns are PUBLIC, always showed the full matchup. Two
+  treatments of one row, decided by which endpoint a game happened to have. Where Wolf? is the one
+  exemption and it is in the test: its `/games/mine` carries no names at all.
+
 **The lobby History list pages, and the cap is ONE number seen from two ends.**
 `core.rooms.HISTORY_LIMIT` (50) is the SQL row cap in every game's `list_user_history`;
 `HISTORY_MAX` in `shared/lobby.jsx` is where `useProgressiveList` stops revealing. They must be equal

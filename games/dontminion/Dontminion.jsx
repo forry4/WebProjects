@@ -2,7 +2,7 @@ import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } fr
 import { baseCss } from "../../shared/theme.js";
 import { useCardInfoGesture } from "../../shared/gestures.js";
 import {
-  lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, GameMenu, gameMenuCss,
+  lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyMatchup, LobbyLoading, GameMenu, gameMenuCss,
   readLobbyCache, writeLobbyCache, createModalCss, CreateModal, CmRow, CmSeg,
   notWaiting, LobbyAction,
   LobbyCreateRow, lobbyCreateRowCss, useProgressiveList, LobbyTabs, useLastDifficulty,
@@ -2300,7 +2300,10 @@ export default function Dontminion({ myId, authUser, onExit }) {
             {activeMine.map((g) => (
               <div key={g.id} className="lby-card">
                 <div className="lby-card-info">
-                  <div className="lby-card-title">{(g.opponents || []).join(", ") || "…"}</div>
+                  {/* `seats` is the new shape (seat order + which one is you); the
+                      `opponents` fallback is for a bundle that loads against a
+                      backend from before it, and drops out at the contract step. */}
+                  <LobbyMatchup seats={g.seats || (g.opponents || []).map((n) => ({ name: n }))} />
                   <div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
                 </div>
                 {/* THE TURN PILL BELONGS ON THE ACTIONS RAIL, beside Resume, which is
