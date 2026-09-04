@@ -111,30 +111,6 @@ export default function SpenderRules() {
 				</ul>
 			</RulesSection>
 
-			<RulesSection title="How to actually be good at this">
-				<RulesTip>
-					<p>
-						The trap for new players is buying points too early. Prestige on a level-1 card is
-						almost worthless; the <b>bonus</b> is the real payout. A hand of 6–8 cheap cards
-						turns 5-point cards from unaffordable into a two-turn purchase, and that engine is
-						what wins.
-					</p>
-				</RulesTip>
-				<ul>
-					<li><b>Pick a target early.</b> Look at the top row, choose a card you want, and take
-						gems that move you toward it — not whatever is most plentiful.</li>
-					<li><b>Spread your bonuses to match a noble.</b> Nobles are 3 free points and are
-						often the actual margin of victory. Two nobles is usually a win.</li>
-					<li><b>Don't hoard tokens.</b> Ten gems sitting in your hand are ten gems your
-						opponents can't use, but they score nothing. Convert them.</li>
-					<li><b>Watch what your opponent is collecting.</b> If they're one turn from a card you
-						can see they need, reserving it costs you a turn and costs them their plan.</li>
-					<li><b>Count the last lap.</b> Near 15 points, work out whether you can finish before
-						the leader triggers the final round — sometimes a 3-point card now beats a
-						5-pointer two turns away.</li>
-				</ul>
-			</RulesSection>
-
 			<p className="rl-note">
 				Play 2–4 players against friends (share the room code), or head-to-head against the
 				bot. The bot's top tiers run a real search and will punish a slow start.

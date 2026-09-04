@@ -37,12 +37,8 @@ const EXTRA_ICON = {
 	bgg: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M4.4 5.2h15.2l-5.9 7v6.4l-3.4-2.1v-4.3Z" /></svg>),
 };
 
-// A ruled line broken by a lozenge — the page's one piece of ornament, and the
-// reason the hero reads as a title plate rather than as two stacked paragraphs.
-// It carries its own gradients so the rule FADES into the ground at both ends
-// instead of stopping at a hard edge in the middle of empty space. It is drawn at
-// 1.4 units on a 13-unit-tall box and scaled up in CSS, because at the size it was
-// first set it read as a stray pair of hyphens rather than as a mark.
+// Shared by the loading and sign-in screens. The menu deliberately does not use it:
+// its wordmark is now the compact lockup at the upper-left.
 const HERO_RULE = (
 	<svg className="home-rule" viewBox="0 0 240 14" aria-hidden="true" focusable="false" preserveAspectRatio="xMidYMid meet">
 		<defs>
@@ -85,6 +81,7 @@ export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles
 					    items where the MIDDLE one had no frame, which does not read as a
 					    hierarchy, it reads as a style rule that failed to apply. */}
 					<header className="home-header">
+						<h1 className="home-logo home-corner-logo">{SITE_NAME}</h1>
 						<div className="browser-user">
 							<span className="home-ident">
 								{authUser?.guest && <span className="home-ident-kind">Guest</span>}
@@ -95,12 +92,6 @@ export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles
 							</button>
 						</div>
 					</header>
-
-					<div className="home-hero">
-						<h1 className="home-logo">{SITE_NAME}</h1>
-						{HERO_RULE}
-						<p className="home-tagline">Choose a game</p>
-					</div>
 
 					<nav className="home-games" aria-label="Games">
 						{GAMES.map(gm => (

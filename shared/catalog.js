@@ -24,8 +24,8 @@ export const GAME_CATALOG = [
 	{ id: "wherewolf", name: "Where Wolf", status: "ready", screen: "werewolf", players: "3–10 players" },
 	{ id: "duel", name: "Spender Duel", status: "ready", screen: "duel", players: "1–2 players" },
 	{ id: "dontminion", name: "Dontminion", status: "ready", screen: "dontminion", players: "1–4 players" },
-	{ id: "dissonance", name: "Dissonance", status: "ready", screen: "dissonance", players: "2 players" },
-	{ id: "ragtag", name: "Rag Tag", status: "ready", screen: "ragtag", players: "2 players" },
+	{ id: "dissonance", name: "Dissonance", status: "ready", screen: "dissonance", players: "1–2 players" },
+	{ id: "ragtag", name: "Rag Tag", status: "ready", screen: "ragtag", players: "1–2 players" },
 ].map((g) => ({ ...g, accent: GAME_ACCENTS[g.id] }));
 
 // Keyed lookup, for the lobbies — a lobby knows its own id and nothing else.

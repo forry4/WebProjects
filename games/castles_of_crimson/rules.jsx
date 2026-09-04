@@ -104,21 +104,6 @@ export default function CocRules() {
 				</ul>
 			</RulesSection>
 
-			<RulesSection title="How to actually be good at this">
-				<ul>
-					<li><b>Small regions early, big regions late.</b> A 1- or 2-space region completed in
-						phase 1 is 11–13 VP for almost no work; the phase bonus never comes back.</li>
-					<li><b>Mines and castles are investments.</b> They score nothing themselves but pay
-						across every remaining phase — which is why they're bad buys in phase 5.</li>
-					<li><b>Workers are dice.</b> Two workers turn any roll into the roll you needed. Being
-						worker-poor is what makes turns feel wasted.</li>
-					<li><b>Don't clog storage.</b> Three tiles you can't place is three dead actions; take
-						a tile only when you can see the space it's going into.</li>
-					<li><b>Ships pull double duty</b> — goods to sell, plus turn order, which decides who
-						gets first pick of the depot next round.</li>
-				</ul>
-			</RulesSection>
-
 			<p className="rl-note">
 				Play a friend (2–4 seats, share the room code) or the bot at Easy / Hard / Expert.
 				Expert runs a learned evaluation in your browser and plays a genuinely strong tempo

@@ -105,28 +105,6 @@ export default function DuelRules() {
 				</ul>
 			</RulesSection>
 
-			<RulesSection title="How to actually be good at this">
-				<RulesTip>
-					<p>
-						The grid is the whole game. Before you take, look at what your line <i>leaves</i>:
-						an untouched row of three matching gems is a gift, and refilling the board for a
-						token you wanted hands the opponent a privilege that costs you the next one.
-					</p>
-				</RulesTip>
-				<ul>
-					<li><b>Pearls are the bottleneck.</b> There are only 2 in the bag and the expensive
-						cards want them. Taking them early is rarely wrong.</li>
-					<li><b>Track your opponent's three win tracks separately</b> — especially color
-						points, which sneak up while you're watching prestige.</li>
-					<li><b>Crowns compound.</b> Two crown cards early can mean a royal, which can mean an
-						extra turn, which can mean the next crown.</li>
-					<li><b>"Take again" cards chain.</b> A turn that buys a repeat-turn card and then
-						buys again is often worth more than the points on either card.</li>
-					<li><b>Don't over-reserve.</b> A reserved card you never buy is a turn you spent on
-						one gold token.</li>
-				</ul>
-			</RulesSection>
-
 			<p className="rl-note">
 				Head-to-head against a friend (share the room code) or against the bot. Expert runs a
 				learned neural-network evaluation in your browser and does not make loose trades.

@@ -180,7 +180,8 @@
   radial-gradient(140% 108% at 50% 34%,rgba(0,0,0,0) 26%,rgba(0,0,0,.62) 100%)}
 .home::after,.auth-screen::after,.loading-screen::after{opacity:.05;background-size:180px 180px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23g)'/%3E%3C/svg%3E")}
 
-.home-header{display:flex;justify-content:flex-end;align-items:center;gap:12px;height:var(--shell-rail)}
+.home-header{display:flex;justify-content:space-between;align-items:center;gap:12px;height:var(--shell-rail)}
+.home .home-corner-logo{font-size:clamp(1rem,.88rem + .45vw,1.28rem);line-height:1;letter-spacing:.06em;margin:0;color:var(--gold);text-wrap:nowrap}
 .home .browser-user{gap:12px}
 /* One unboxed identity string, one chip. */
 .home-ident{display:inline-flex;align-items:baseline;gap:7px;min-width:0}
@@ -193,9 +194,6 @@
   border-color:#332e26;color:var(--text-dim)}
 .home .home-header .btn-sm:hover{border-color:var(--text-dim);color:var(--text)}
 
-/* The lockup is ONE object: the ornament binds UP to the wordmark (small gap) and the
-   line below stands off it (larger gap). Equal gaps made three centred items. */
-.home-hero{text-align:center;margin:var(--shell-hero-gap) 0 clamp(22px,3.2vh,32px)}
 /* The wordmark is foiled rather than flat gold: a light-to-dark vertical ramp reads
    as a struck metal plate under the top light above. `color` stays a real gold so a
    browser without background-clip:text shows the title instead of nothing — the
@@ -214,16 +212,8 @@
        "lit panel behind the title" reading came from. The ground does the lighting. */
     filter:drop-shadow(0 1px 0 rgba(0,0,0,.5))}
 }
-/* A VIEWPORT-relative width, not a percentage of the parent. The three shell screens
-   pad their content columns differently (32/20/16px), so `74%` drew the same
-   ornament at 253px, 241px and 265px on the three screens a visitor sees in
-   sequence — the one element whose whole job is to be identical. */
 .home-rule{display:block;width:clamp(190px,66vw,340px);height:19px;margin:clamp(8px,1.1vh,11px) auto 0;
   color:var(--gold);opacity:.9}
-/* Not italic. Italic is the flavour voice on this page (the taglines under each
-   title); when the instruction line wore it too, it stopped signalling anything. */
-.home-tagline{color:var(--text-soft);font-size:clamp(1rem,.94rem + .35vw,1.14rem);
-  letter-spacing:.02em;margin-top:clamp(13px,1.9vh,18px)}
 
 /* THE GRID IS FLEX, NOT GRID, FOR ONE REASON: a partial last row. It is capped at
    THREE columns at every width above 1000px, and that cap is deliberate. Seven cards
@@ -549,8 +539,7 @@
      between the loading screen and the menu, at the most common laptop size. The
      lockup gate did not see it because it ran at height 900, above this tier. */
   .home-logo,.auth-logo,.loading-logo{font-size:3rem}
-  .home-rule{height:16px;margin-top:7px}
-  .home-tagline,.auth-tagline,.loading-sub{font-size:1rem;margin-top:12px}
+  .auth-tagline,.loading-sub{font-size:1rem;margin-top:12px}
   /* 16, not 12: the card's side padding does not compress much at this tier, and a
      12px gutter was the one spacing value outside the system -- every other width holds
      gutter/padding at 0.83-0.86 and this sat at 0.57, the only breakpoint where the

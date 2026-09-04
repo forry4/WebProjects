@@ -98,25 +98,6 @@ export default function DontminionRules() {
 				</ul>
 			</RulesSection>
 
-			<RulesSection title="How to actually be good at this">
-				<ul>
-					<li><b>Buy money early.</b> A Silver on turn 1 or 2 does more than almost any cheap
-						action. You cannot buy Provinces at $8 with a deck averaging $1 a card.</li>
-					<li><b>One card per turn — respect it.</b> Actions that don't say "+1 Action" end
-						your action phase. Two of them in a hand means one sits there uselessly. Cards
-						that draw <i>and</i> give an action are the ones worth stacking.</li>
-					<li><b>Trashing is a superpower.</b> Anything that removes Coppers and Estates from
-						your deck makes every later draw better. This is the most under-rated effect for
-						new players.</li>
-					<li><b>Don't buy a card just because it's clever.</b> Ask whether it's better than
-						the Silver or Gold you could buy instead.</li>
-					<li><b>Green at the right moment.</b> A rough rule: start buying Provinces once you
-						can reliably hit $8, and grab Duchies when the Province pile is nearly gone.</li>
-					<li><b>Watch the piles.</b> Three empty piles ends the game — sometimes you can end
-						it deliberately while you're ahead, and sometimes your opponent will.</li>
-				</ul>
-			</RulesSection>
-
 			<p className="rl-note">
 				2–4 seats, any mix of friends and bots. The host picks which expansions the ten kingdom
 				piles are dealt from — 11 sets are available, and the box you choose changes the game
