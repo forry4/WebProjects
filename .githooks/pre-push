@@ -76,7 +76,17 @@ fi
 root=$(git rev-parse --show-toplevel) || exit 1
 cd "$root" || exit 1
 
-PY=$(command -v python || command -v python3)
+# Prefer the repository's isolated environment when it exists. On Windows, an
+# unactivated `.venv` is otherwise invisible to `command -v`, so the hook picked
+# the global Python and failed on pytest.ini's required `-n auto` option even though
+# the project environment was complete.
+if [ -x "$root/.venv/Scripts/python.exe" ]; then
+    PY="$root/.venv/Scripts/python.exe"
+elif [ -x "$root/.venv/bin/python" ]; then
+    PY="$root/.venv/bin/python"
+else
+    PY=$(command -v python || command -v python3)
+fi
 if [ -z "$PY" ]; then
     say "python not found on PATH — cannot run the gates (git push --no-verify to override)"
     exit 1
