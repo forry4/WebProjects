@@ -90,14 +90,14 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
   optional props). Verify a splice against the pristine pre-refactor commit `dc1b005`, not a `.bak`.
 - **`AuthScreen.jsx` / `HomeScreen.jsx`** — site-SHELL screens, here for the DEPENDENCY DIRECTION, not
   for semantics. See `games/spender/CLAUDE.md` → Frontend for why, and what finishing the split needs.
-  **THE THREE SHELL SCREENS ARE ONE DESIGN, HELD TOGETHER BY PAIRED SELECTORS**
-  (`.home,.auth-screen,.loading-screen` in `games/spender/Spender.css` — the loading
-  screen still lives in `Spender.jsx`). The ground (fixed warm top light + vignette +
-  a tiled feTurbulence grain), the foiled wordmark and the `HERO_RULE` ornament are
-  written ONCE and listed on all three, and `HERO_RULE`/`SITE_FOOT` are exported from
-  `HomeScreen.jsx` and passed into `AuthScreen`. Do not copy a declaration to a second
-  screen — a user sees two of these ten seconds apart, and a copied rule always drifts.
-  **The wordmark lockup is GATED, not just documented**: `screens.mjs` renders all three
+  **THE SHELL HAS TWO DELIBERATE WORDMARK TREATMENTS.** The menu keeps a compact mark in
+  its upper-left identity rail; loading and auth are one entrance sequence and share the
+  foiled hero wordmark and `HERO_RULE` ornament. All three share the fixed warm ground,
+  vignette and tiled feTurbulence grain through paired selectors in
+  `games/spender/Spender.css` (the loading screen still lives in `Spender.jsx`).
+  `HERO_RULE` is exported from `HomeScreen.jsx` and passed into `AuthScreen`; do not copy
+  its declaration.
+  **Historical note — before the menu refinement, the gate rendered all three screens**
   (the loading screen by stalling `**/games**` past the shell's 250ms fast path) and
   fails if the type size, tracking, ornament width or the gap under the title differ.
   It was written because they DID: clamp(...,3.1rem)/(...,3.4rem)/(...,4rem) meant the

@@ -774,37 +774,42 @@ try {
 		check(`the home grid survives all ${boundaries.length} breakpoint boundaries`, bad.length === 0,
 			bad.slice(0, 3).join(" | "));
 
-		// ── ONE WORDMARK LOCKUP ACROSS THE THREE SHELL SCREENS ──────────────────
-		// A visitor sees loading, then auth, then home, inside about a minute on a
-		// spun-down dyno. The wordmark used to be clamp(...,3.1rem) / clamp(...,3.4rem)
-		// / clamp(...,4rem) on the three, so at 1920 it grew 50 -> 54 -> 67px while they
-		// watched, and the ornament under it was a PERCENTAGE of three differently
-		// padded columns, so it drew at 253 / 241 / 265px. Nothing else about the block
-		// changes between the screens, so the growth read as the page being rebuilt.
-		// The h1's own box width is its container's and is deliberately NOT compared.
+		// ── SHELL WORDMARKS ─────────────────────────────────────────────────────
+		// Loading and auth are one entrance sequence, so their hero lockup must not
+		// shift while the backend wakes. The menu intentionally differs: it puts a
+		// compact wordmark in its identity rail, leaving the catalogue as the page's
+		// title. Test both contracts rather than letting an old "all three match" rule
+		// undo the menu composition.
 		const lockup = async (page) => page.evaluate(() => {
-			const el = document.querySelector(".home-logo,.auth-logo,.loading-logo");
+			const el = document.querySelector(".auth-logo,.loading-logo");
 			const cs = getComputedStyle(el), r = el.getBoundingClientRect();
 			const rule = document.querySelector(".home-rule");
-			// WHERE the wordmark sits, not only how it is set. The three screens placed it at
-			// 269 / 98.5 / 68.5 at 1280x800, because loading and auth centred their block
-			// while home top-anchored — so both boot paths moved the brand mark ~200px
-			// while the user watched. Size was identical the whole time, which is why the
-			// gate passed.
 			return { top: Math.round(r.top + window.scrollY),
 				px: cs.fontSize, track: cs.letterSpacing,
 				ruleW: rule ? Math.round(rule.getBoundingClientRect().width) : null,
 				gap: rule ? Math.round(rule.getBoundingClientRect().top - r.bottom) : null };
 		});
-		// AT TWO VIEWPORTS, AND THE SECOND ONE IS THE POINT. This ran only at 1440x900
-		// and passed while the wordmark was 48px on the menu and 64px on the two screens
-		// in front of it at 1280x800 — because the short-viewport tier (height <= 880)
-		// compressed only `.home-logo`, and 900 sits just above it. A gate that tests one
-		// viewport tests one branch of a responsive ramp.
+		// Two viewports are deliberate: a responsive contract tested at only one branch is
+		// no contract at all.
 		for (const vp of [{ width: 1440, height: 900 }, { width: 1280, height: 800 }]) {
 		await page.setViewportSize(vp);
 		await page.waitForTimeout(250);
-		const marks = { home: await lockup(page) };
+		const menu = await page.evaluate(() => {
+			const header = document.querySelector(".home-header");
+			const logo = document.querySelector(".home-corner-logo");
+			const user = document.querySelector(".browser-user");
+			const rule = document.querySelector(".home-rule");
+			if (!header || !logo || !user) return null;
+			const h = header.getBoundingClientRect(), l = logo.getBoundingClientRect(), u = user.getBoundingClientRect();
+			return { left: Math.round(l.left - h.left), top: Math.round(l.top - h.top),
+				bottom: Math.round(h.bottom - l.bottom), beforeUser: l.right < u.left, rule: !!rule,
+				fontSize: parseFloat(getComputedStyle(logo).fontSize) };
+		});
+		check(`the menu keeps a compact wordmark in its identity rail at ${vp.width}x${vp.height}`,
+			menu && Math.abs(menu.left) <= 1 && menu.top >= -1 && menu.bottom >= -1
+				&& menu.beforeUser && !menu.rule && menu.fontSize < 28,
+			JSON.stringify(menu));
+		const marks = {};
 		for (const [name, seedUser, stall] of [["auth", false, false], ["loading", false, true]]) {
 			const c = await browser.newContext({ viewport: vp });
 			// The loading screen is only reachable when the backend MISSES the shell's
@@ -821,7 +826,7 @@ try {
 		}
 		const off = ["top", "px", "track", "ruleW", "gap"].filter((k) =>
 			new Set(Object.values(marks).map((m) => m?.[k])).size !== 1);
-		check(`the wordmark lockup is identical on loading, auth and home at ${vp.width}x${vp.height}`,
+		check(`the wordmark lockup is identical on loading and auth at ${vp.width}x${vp.height}`,
 			marks.auth && marks.loading && off.length === 0,
 			off.length ? `${off.join(",")} differ: ${JSON.stringify(marks)}` : "a screen did not render");
 		}
