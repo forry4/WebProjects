@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbySectionHd, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
   createModalCss, CreateModal, LobbyCreateRow, lobbyCreateRowCss,
-  RulesModal, rulesModalCss } from "../../shared/lobby.jsx";
+  RulesModal, rulesModalCss, LobbyHero, LobbyAction, LobbyTabs, timeAgo,
+  notWaiting, LobbyUser, useListFade } from "../../shared/lobby.jsx";
 import WhereWolfRules from "./rules.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 
@@ -222,6 +223,10 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   const [openGames, setOpenGames] = useState(() => readLobbyCache("ww", myId, "open", []));
   const [myGames, setMyGames] = useState(() => readLobbyCache("ww", myId, "mine", []));
   const [showRules, setShowRules] = useState(false);  // lobby "How to Play" modal
+  // phone-only: which of the two lobby sections the tab bar is showing
+  const [lobbyTab, setLobbyTab] = useState("open");
+  // A column that scrolls inside itself must say so — see `useListFade`.
+  useListFade();
   const [showCreateModal, setShowCreateModal] = useState(false);  // New Game confirm modal
   const [toast, setToast] = useState("");
   // room connect in flight (create / join / deep-link resume) — show the spinner
@@ -575,20 +580,23 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   if (screen === "lobby") {
     const savedId = (() => { try { return localStorage.getItem("werewolf_roomId"); } catch { return null; } })();
     const savedTok = savedId ? (() => { try { return localStorage.getItem(`werewolf_token_${savedId}_${myId}`); } catch { return null; } })() : null;
+    const activeMine = notWaiting(myGames);
     return (
       <div className="ww" style={{ "--lby-accent": GAME_ACCENTS.wherewolf }}><style>{css}</style>
         <LobbyHeader
           onBack={onExit}
-          title="Where Wolf"
-          user={<span className="lby-head-name">{playerName}</span>}
+          user={<LobbyUser user={authUser || { name: playerName, guest: true }} />}
         />
-        <div className="ww-wrap">
+        <div className="ww-wrap lby-page">
+          <div className="lby-page-in">
+          <LobbyHero game="wherewolf">
           <LobbyCreateRow
             onCreate={() => setShowCreateModal(true)}
             onJoin={(code) => startJoin(code)}
             onRefresh={fetchGames}
             onRules={() => setShowRules(true)}
             codeMaxLength={4} />
+          </LobbyHero>
 
           {showCreateModal && (
             <CreateModal title="New Game" onClose={() => setShowCreateModal(false)}>
@@ -609,42 +617,79 @@ export default function WhereWolf({ myId, authUser, onExit }) {
           {savedId && savedTok && !myGames.some((g) => g.id === savedId) && (
             <div className="lby-card">
               <div className="lby-card-info"><div className="lby-card-title">Game in progress</div><div className="lby-card-meta">{savedId} · resume to rejoin</div></div>
-              <div className="lby-card-actions"><button className="ww-btn gold sm" onClick={() => resume(savedId)}>Resume</button></div>
+              <div className="lby-card-actions"><LobbyAction onClick={() => resume(savedId)}>Resume</LobbyAction></div>
             </div>
           )}
 
-          <div className="ww-lobby-grid">
-            <div className="ww-lobby-col">
-              <LobbySectionHd title="Open Games" note={openGames.length ? `${openGames.length} waiting` : "3–10 players"} />
+          {/* THE SHARED GRID, TWO-COLUMN VARIANT, and a tab bar like everyone else's.
+              Where Wolf kept a private `.ww-lobby-grid` with its own breakpoint,
+              which meant it was the one lobby that stacked BOTH sections raw on a
+              phone while the other six collapsed to Open/Active tabs — a different
+              product at 390px — and the one whose second heading landed 18px under
+              the card above it with 50px below, so the heading read as belonging to
+              the list it had just left. `lby-col-open`/`lby-col-active` are what the
+              tab bar switches on; History it has never had. */}
+          {/* A room you are in but which has NOT started is waiting, not active: it
+              is already in Open, with Return and Cancel if you host it. Listing it
+              here too offered a "Rejoin" that just dropped you back into the same
+              waiting room from a column headed "in progress". */}
+          <LobbyTabs value={lobbyTab} onChange={setLobbyTab} tabs={[
+            { key: "open", label: "Open", count: openGames.length || null },
+            { key: "active", label: "Active", count: activeMine.length || null },
+          ]} />
+          <div className={`lby-cols lby-cols-2 tab-${lobbyTab}`}>
+            <div className="lby-col-open">
+              <LobbySectionHd title="Open Games" note={`${openGames.length} waiting`} />
               {openGames.length === 0 ? (
-                <div className="lby-empty">No open games. Start one!</div>
+                <div className="lby-empty">No open games — create one.</div>
               ) : <div className="lby-list">{openGames.map((g) => (
                 <div className="lby-card" key={g.id}>
-                  <div className="lby-card-info"><div className="lby-card-title">{g.host_name || "Game"}</div>
-                    <div className="lby-card-meta">{g.id} · {g.players} player{g.players === 1 ? "" : "s"}</div></div>
+                  <div className="lby-card-info"><div className="lby-card-title">
+                      {g.host_id === myId ? "Your game" : `${g.host_name || "Player"}'s game`}
+                      <span className="lby-seats">{g.players ?? 1}/10</span></div>
+                    <div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}</div></div>
                   <div className="lby-card-actions">
+                    {/* RETURN, then Cancel — the shape every other lobby uses for a
+                        room you host. Where Wolf offered only Cancel here, so a host
+                        who navigated away could get back into their own waiting room
+                        only via the Active column, which is why that column listed
+                        rooms that had not started. Giving the row its Return is what
+                        lets Active mean "in progress" here as it does everywhere
+                        else. */}
                     {g.host_id === myId
-                      ? <button className="ww-btn ghost sm" onClick={() => handleCancel(g.id)}>Cancel</button>
-                      : <button className="ww-btn sm" onClick={() => startJoin(g.id)}>Join</button>}
+                      ? <>
+                          <LobbyAction kind="secondary" onClick={() => resume(g.id)}>Return</LobbyAction>
+                          <LobbyAction kind="danger" onClick={() => handleCancel(g.id)}>Cancel</LobbyAction>
+                        </>
+                      : <LobbyAction onClick={() => startJoin(g.id)}>Join</LobbyAction>}
                   </div>
                 </div>
               ))}</div>}
             </div>
-            <div className="ww-lobby-col">
-              <LobbySectionHd title="Your Games" note={myGames.length ? `${myGames.length} active` : null} />
-              {myGames.length === 0 ? (
-                <div className="lby-empty">No games yet — create or join one.</div>
-              ) : <div className="lby-list">{myGames.map((g) => (
+            <div className="lby-col-active">
+              <LobbySectionHd title="Active Games" note={`${activeMine.length} in progress`} />
+              {activeMine.length === 0 ? (
+                <div className="lby-empty">No games in progress.</div>
+              ) : <div className="lby-list">{activeMine.map((g) => (
                 <div className="lby-card" key={g.id}>
-                  <div className="lby-card-info"><div className="lby-card-title">{g.status === "open" ? "Waiting room" : "In progress"}</div>
-                    <div className="lby-card-meta">{g.id} · {g.players} player{g.players === 1 ? "" : "s"}{g.you_are_host ? " · host" : ""}</div></div>
+                  {/* THE ROOM CODE IS THE TITLE. It read "In progress", under a header
+                      that already says ACTIVE GAMES and a count that already says "2 in
+                      progress" — the most prominent line in the card spent restating the
+                      section label three times in one 400px band, leaving the code, the
+                      only identifying thing in the row, on the quiet second line. Where
+                      Wolf is a hidden-role party game and its `/games/mine` carries no
+                      opponent names, so the room itself is what there is to name. */}
+                  <div className="lby-card-info"><div className="lby-card-title">
+                      Room {g.id}
+                      <span className="lby-seats">{g.players ?? 1}/10</span></div>
+                    <div className="lby-card-meta">{timeAgo(g.updated_at)}{g.you_are_host ? " · you host" : ""}</div></div>
                   <div className="lby-card-actions">
-                    <button className="ww-btn gold sm" onClick={() => resume(g.id)}>Rejoin</button>
-                    {g.you_are_host && g.status === "open" && <button className="ww-btn ghost sm" onClick={() => handleCancel(g.id)}>Cancel</button>}
+                    <LobbyAction onClick={() => resume(g.id)}>Rejoin</LobbyAction>
                   </div>
                 </div>
               ))}</div>}
             </div>
+          </div>
           </div>
         </div>
         {wwRulesModal}

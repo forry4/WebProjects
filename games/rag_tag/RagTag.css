@@ -36,10 +36,15 @@
   -webkit-user-select: none;
   -webkit-touch-callout: none;
   min-height: 100dvh;
-  background:
-    radial-gradient(120% 62% at 50% 0%, rgba(232, 102, 60, 0.15), transparent 62%),
-    radial-gradient(90% 45% at 50% 100%, rgba(120, 70, 160, 0.09), transparent 60%),
-    linear-gradient(180deg, #1e1512 0%, #17100c 55%, #140e0a 100%);
+  /* THE ARENA FLOOR MOVED TO `.rt-wrap` — it was on the game ROOT, so it painted the
+     LOBBY too, and the lobby is not the arena. Measured against its six siblings the
+     lobby ground came out RGB(57,37,27) at the identity band against ~(32,28,22), and
+     (25,19,15) mid-page against (18,18,16): roughly double the luminance with a heavy
+     red shift, so Rag Tag read as a different product skin rather than as the same
+     shell with an orange accent. The shell's own ground — one warm near-black, one
+     top light, one vignette — is `.lby-page`'s, and every game hue is supposed to sit
+     on it. The ring keeps its lamp; the lobby joins the rest of the site. */
+  background: var(--bg, #0f0e0c);
   --lby-accent: #e8663c;
 
   --rt-ink: #f6efe6;
@@ -69,7 +74,12 @@
   --rt-tap: 2.75rem;          /* the minimum comfortable touch target */
   --rt-shadow: 0 1px 0 rgba(255, 236, 214, 0.05) inset, 0 6px 18px -8px rgba(0, 0, 0, 0.75);
 
-  --lby-list-max: 30rem;
+  /* NO `--lby-list-max` OVERRIDE. 30rem (480px) was set when this lobby was built
+     and stayed after the shared cap became a function of the viewport, so at 1920 Rag
+     Tag's History stopped 344px above every other game's and left a bare 2px card
+     edge floating over 357px of empty page. The shared default is
+     `calc(100vh - 268px)`; a game only needs its own when its header is taller, and
+     this one's is not. */
   color: var(--rt-ink);
   font-size: var(--rt-fs);
   font-variant-numeric: tabular-nums;
@@ -83,7 +93,12 @@
    hit the same thing and fixed it the same way; Spender Duel still has it.
    Width and padding are fair game here — only display, grid-template-columns
    and gap must be left to the shared media rules. */
-.ragtag .rt-lobby-cols { width: 100%; padding: 0 16px 40px; }
+/* THE LOBBY'S SIDE PADDING AND MEASURE ARE `.lby-page-in` NOW (shared). Every
+   lobby had its own — 12/16/18/24px on five different elements — so the create
+   row, the tab bar and the columns lined up only within a game, never across
+   them, and the row centred itself in the VIEWPORT while the grid ran to the
+   monitor. One wrapper owns both edges; a game's grid class sets width only. */
+.ragtag .rt-lobby-cols { width: 100%; }
 
 /* The arena floor: a warm lamp above the ring, falling off to the dark. */
 .ragtag .rt-wrap {
@@ -92,6 +107,14 @@
   margin: 0 auto;
   padding: 0 clamp(0.5rem, 0.25rem + 1vw, 1rem) 3rem;
   position: relative;
+  /* The warm lamp above the ring, moved off `.ragtag` so it lights the fight and not
+     the lobby. `background-attachment: fixed` keeps it a room rather than a texture
+     that scrolls with a long log. */
+  background:
+    radial-gradient(120% 62% at 50% 0%, rgba(232, 102, 60, 0.15), transparent 62%),
+    radial-gradient(90% 45% at 50% 100%, rgba(120, 70, 160, 0.09), transparent 60%),
+    linear-gradient(180deg, #1e1512 0%, #17100c 55%, #140e0a 100%);
+  background-attachment: fixed;
 }
 
 /* ── Layout ─────────────────────────────────────────────────────────────

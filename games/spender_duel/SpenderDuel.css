@@ -3,7 +3,12 @@
 /* No font-family here: baseCss's body already sets the site stack (and this override
    was silently dropping Georgia from the fallback, so the log rendered differently
    from Spender's). */
-.duel{margin:0 auto;padding:0 14px 24px}
+/* NO SIDE PADDING IN THE LOBBY. `.lby-page-in` is the measure for every game's lobby,
+   and `.duel`'s own 14px sat on top of it, so Duel's wordmark started 14px right of its
+   own Back button while five other lobbies started flush. The GAME screens still want
+   the gutter, so it moves onto them rather than onto the root. */
+.duel{margin:0 auto;padding:0}
+.duel-gamescreen,.duel-waiting{padding-left:14px;padding-right:14px}
 .duel h1,.duel h2,.duel h3{font-family:'Cinzel','Cinzel Fallback',serif}
 .duel-topbar{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line,#3a332a);margin-bottom:14px}
 .duel-topbar .spacer{flex:1}
@@ -13,8 +18,7 @@
 .duel-reconnbar{position:fixed;top:0;left:0;right:0;background:#6b3320;color:#ffe;text-align:center;padding:5px;z-index:210;font-size:.9rem}
 
 /* lobby — cards/sections/badges are the shared lobby kit (.lby-*, shared/lobby.jsx). */
-/* Full-bleed the shared lobby header past .duel's 14px side padding (matches Spender/CoC). */
-.duel > .lby-header{margin:0 -14px 18px}
+
 /* The column grid, its breakpoints and the tab bar are the shared `.lby-cols` /
    `.lby-tabs`. Nothing here may set display/grid-template-columns/gap on
    .duel-lobby-cols: this sheet is concatenated AFTER the shared one, so a base
@@ -344,8 +348,11 @@
   /* Trim the side buffer on phones so the board + cards get more width (matched header
      margin keeps the full-bleed header exactly at the screen edge — a wider -14px here
      would push it past an 8px padding and cause a horizontal scrollbar). */
-  .duel{padding-left:8px;padding-right:8px}
-  .duel > .lby-header{margin-left:-8px;margin-right:-8px}
+  /* The GAME screens, not the root: `.duel`'s side padding used to sit on the root
+     and stacked on top of `.lby-page-in`'s, so the lobby's Back button and its cards
+     were 8px right of every other game's on the same phone. */
+  .duel-gamescreen,.duel-waiting{padding-left:8px;padding-right:8px}
+
   /* Board meta on phones: keep privilege + bag + win-conditions on ONE row (the victory
      chip was wrapping to a second line). Tighten the gap and shrink the chip so all three
      fit across a narrow screen; nowrap guarantees they never split. */

@@ -18,7 +18,7 @@
 // It lives entirely in `localStorage`: a real-life match runs an hour, the tab
 // gets closed, and nothing here is worth an account or a room.
 import { useEffect, useMemo, useState } from "react";
-import { RulesModal } from "../../shared/lobby.jsx";
+import { RulesModal, SCORECARD_GLYPH } from "../../shared/lobby.jsx";
 import { contractPrices, payoffFor } from "./pricing.js";
 // THE CARD CARRIES ITS OWN CHROME, because it mounts where the board does not:
 // the offline hub opens it with no room, no board and no Dissonance.css. The
@@ -175,7 +175,7 @@ export default function DissonanceScorecard({ catalog, onClose }) {
 	return (
 		<>
 		<style>{_bidpadCss + _scorecardCss}</style>
-		<RulesModal title="Scorecard — Dissonance classic" icon="🧮"
+		<RulesModal title="Scorecard — Dissonance classic" icon={SCORECARD_GLYPH}
 			closeLabel="Done" onClose={onClose}>
 			<p className="rl-lead">
 				For a game played with real cards. Enter each round and it keeps the

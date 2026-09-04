@@ -32,12 +32,19 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
   `onX`/`xLabel` pair, so the kit never learns what any one game puts in it; style its button
   `.lby-extra`, which the sheet gives the Rules look. **Deliberately NOT `.lby-rules`**: the
   render gate counts Rules buttons by that class, so a second button wearing it reads there as a
-  duplicate. `RulesModal` also takes an `icon` (default 📖) — the panel is reused for things that
-  are not a rulebook.
-  **On phones (≤600px) `.lby-create-row` SCROLLS SIDEWAYS instead of wrapping** — five controls stop
-  fitting at ~430px, and a wrap pushed the lists a whole row down. It uses `justify-content:safe
-  center`: plain `center` pushes the overflow off the LEFT edge, where no scroll can reach it. Token-driven via a per-game `--lby-accent` with **hard fallbacks so
-  it renders in CoC's bare mount** — append its CSS AFTER the `.coc *` reset.
+  duplicate. `RulesModal` also takes an `icon` (default `RULES_GLYPH`, a line-art book on the
+  site's 24x24 drawing grid — **not an emoji**, for the reason the home menu's side-feature row
+  was rebuilt: an emoji arrives as a different typeface, weight and often COLOUR SCHEME on every
+  OS) — the panel is reused for things that are not a rulebook.
+  **On phones (≤600px) `.lby-create-row` IS A TWO-ROW GRID that FITS** — Create + ↻ + Rules on
+  row 1, the code field + Join on row 2, with the tertiary pair collapsed to their glyphs (their
+  `aria-label` keeps them named). It used to scroll sideways instead, which fitted nothing: at
+  390px the row is ~650px of controls in a 370px box, so Rules ended 280px past the right edge
+  and Dissonance's Scorecard was entirely off-screen behind it, with nothing on a
+  vertically-scrolling page to say either was there. **Its column gaps are MARGINS, not `gap`** —
+  the grid keeps a fourth track for the optional sixth control, and a `column-gap` allocates the
+  gutter before that track even when it is empty. Token-driven via a per-game `--lby-accent` with
+  **hard fallbacks so it renders in CoC's bare mount** — append its CSS AFTER the `.coc *` reset.
   **THE WHOLE LOBBY LAYOUT IS HERE as of 2026-08-05** — `.lby-cols` (the column grid + the single
   responsive ladder: 3 columns ≥1041px, 2 columns 761–1040 with History spanning below, 1 column +
   tabs ≤760), `.lby-list` (the card list, and the only thing the desktop internal scroll can hang
@@ -49,7 +56,14 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
   **A game's own sheet must not set `display`/`grid-template-columns`/`gap` on its lobby-grid class**:
   four of the five are concatenated AFTER this one, so a base rule out-orders these MEDIA rules and
   pins the lobby to three columns on a phone (CoC is the exception — its sheet comes first).
-  Where Wolf? keeps its own 2-column grid (no History column) but uses `.lby-list`.
+  Where Wolf? has no History (a one-night party game — nothing to review) and uses the
+  **`.lby-cols-2` modifier** on the shared grid rather than a private grid of its own, so it
+  inherits the ladder, the internal scroll and the phone tab bar. Its lists and section headers
+  are capped to 470px: uncapped, two tracks of a 1500px page draw 714px rows with a name at one
+  end and a button at the other, and pairing the cards two-up instead put FOUR cards in one strip
+  whose section gutter equalled its card gutter, so two different lists read as one.
+  `shared/tests/test_lobby_kit.py` carries the no-History exemption as a self-policing LIST — a
+  game on it that starts rendering a History column fails as STALE.
   Also **`useProgressiveList` + `HISTORY_PAGE`/`HISTORY_MAX`** — the lobby History list's 10-at-a-time
   reveal, wired identically into all four games. **`HISTORY_MAX` must equal `core.rooms.HISTORY_LIMIT`**
   (the SQL row cap); `core/tests/test_history_limit.py` reads this file as TEXT to hold the two
@@ -218,6 +232,77 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
 - **`update-nudge.js`** — the stale-tab refresh prompt. It compares frontend-to-frontend via
   `version.json` / `__BUILD_ID__`, **never** against the backend's commit (frontend-only pushes leave the
   two SHAs legitimately different — a cross-comparison would cry wolf on every deploy).
+
+---
+
+## THE LOBBY IS THE SHELL'S ROOM NOW (2026-09-03)
+
+The seven lobbies were rebuilt to the site menu's design. What changed is worth knowing
+because most of it is now SHARED, so a new game inherits it and a new game can break it.
+
+* **`shared/catalog.js` is the game catalogue** — id, name, player range, screen, accent.
+  It was a private `GAMES` const inside `HomeScreen.jsx`; a lobby's identity band draws
+  the same three facts, and two lists that agree by habit is the drift this repo keeps
+  paying for. `shared/emblems.jsx` is the same move for the glyphs (a lobby importing the
+  home SCREEN for one `<svg>` would have dragged the whole catalogue into every game's
+  lazy chunk). `accents.js` remains the single source for the colour and is merged in.
+* **`.lby-page` / `.lby-page-in` / `<LobbyHero>`** are the page. The ground is the shell's
+  own recipe (`.home::before/::after`), with the accent added as a **7% tint on the
+  vignette, never a wash on the paper** — at 13% Rag Tag's section labels fell to ~2.5:1
+  and its emblem plate read as a hole. Two games painted their own ground on the game
+  ROOT and so painted the lobby too (Rag Tag's arena floor, Dissonance's green): per-game
+  ACCENT is the system, per-game PAPER is not.
+* **`--lby-page-w` is the page's measure and the top bar reads it too** — the bar is
+  full-bleed but its rails sit on the same arithmetic as `.lby-page-in`. Where Wolf tried
+  narrowing this for its two-column lobby and it was wrong: the bar, the wordmark and the
+  username narrowed with it, so walking in from another lobby slid the whole frame 160px.
+  **Persistent chrome must not move between siblings.** The narrowing belongs to the GRID
+  (`.lby-cols-2`, capped and left-aligned).
+* **A lobby's `LobbyHeader` passes no `title`** — the identity band below carries the
+  emblem, the accent wordmark and the player pill. In-GAME the header keeps its title.
+* **`LobbyAction` is `.lby-act`, not `.btn`**, and the three kinds are a HIERARCHY:
+  `primary` (Resume/Join) is a lit plate in the accent, `secondary` (Review/Return) an
+  accent outline, `danger` (Cancel) the QUIETEST, red only on hover. Three games had
+  drifted to styling Cancel exactly like Return.
+* **Everything in the create row reads `--lby-accent`.** The old rule ("Create is always
+  gold") predates accents meaning anything; a purple game's loudest object being Spender's
+  gold is the same defect as seven identical Resume buttons.
+* **`useListFade()` — one line per lobby, and it is not optional.** A column scrolls
+  inside itself at the widest tier, so its last card is cut wherever the cap lands. Both
+  CSS-only signals fail: an unconditional `mask-image` erases the last card of a column
+  that does NOT overflow (a card with no bottom edge and clear page under it, on every
+  lobby at 1920), and a visible scrollbar is invisible on every overlay-scrollbar platform
+  and in every headless capture. The hook measures overflow, sets `data-more`, and also
+  writes `--lby-list-fit` — **the column's height is measured, not `calc(100vh - <a
+  number>)`**: the band's height is not a constant (it steps at 1500, its create row is
+  one line or two, a sixth control makes it taller), so every number tried was wrong at
+  some tier, either hiding a row or making the PAGE taller than the viewport.
+* **One information architecture for a row.** Open: `<Host>'s game` + a `.lby-seats`
+  chip + `CODE · time`. Active: the opponent + `CODE · time`, with the turn pill on the
+  ACTIONS rail beside Resume. Packing the seat count into the meta is what made that line
+  long enough to truncate to `· 2/4 players · 11…` on a phone.
+* **Two lobbies stack a matchup** (`.lby-card-title.matchup`) because their Active list is
+  PUBLIC. A lone dimmed `vs` leading an opponent-only title reads as a truncation and was
+  removed; it stays where it joins two names that are both on screen.
+* **A missing token renders BRIGHT, not dim.** CoC mounts bare and carries its own copy of
+  the palette, and the copy predated `--text-soft`/`--text-muted` — an undefined custom
+  property invalidates the declaration, so `.lby-card-meta` INHERITED `--text` and every
+  room code on a Castles card rendered at nearly the weight of its title. Nothing looked
+  broken; it looked emphasised.
+* **A shared kit is only shared where nothing overrides it.** Every per-game defect this
+  pass found was a local rule that had outlived its reason: Spender's phone card padding
+  (12px shorter than the other six), Rag Tag's `--lby-list-max: 30rem` (its History
+  stopped 344px above everyone's at 1920), Duel's and Spender's own bottom margins (the
+  only two pages that out-scrolled their content), Dissonance's private 44px touch
+  minimum (which made its band 8px taller than five siblings'), four different page
+  gutters. **When you fix a shared rule, delete the local override that was working
+  around it** — otherwise the two drift in the opposite direction.
+* **The harness:** `webapp/test/lobby-shots.mjs` captures all seven lobbies empty and
+  populated at four viewports; `webapp/test/lobby-probe.mjs` measures what a shot can only
+  suggest (gutters, card widths, truncation, page overflow). Neither is a gate — `npm run
+  screens` decides shipping. Both stub the list endpoints, and **a stub with a missing
+  field looks exactly like a product bug**: "· players" with no number, a scoreless
+  History and an actionless Rag Tag row were all the harness, and each cost a round.
 
 ---
 

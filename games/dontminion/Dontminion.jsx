@@ -6,6 +6,7 @@ import {
   readLobbyCache, writeLobbyCache, createModalCss, CreateModal, CmRow, CmSeg,
   notWaiting, LobbyAction,
   LobbyCreateRow, lobbyCreateRowCss, useProgressiveList, LobbyTabs, useLastDifficulty,
+  LobbyHero, LobbyUser, useListFade,
   RulesModal, rulesModalCss,
 } from "../../shared/lobby.jsx";
 // Only the shared CARD FRAME (sizing vars + .card chrome). Dontminion's card face
@@ -956,6 +957,8 @@ export default function Dontminion({ myId, authUser, onExit }) {
   // ...revealed 10 at a time as the reader reaches the end, up to the 50 the
   // backend sends — see useProgressiveList.
   const [historyShown, historyMore] = useProgressiveList(history);
+  // A column that scrolls inside itself must say so — see `useListFade`.
+  useListFade();
   const [loadingGames, setLoadingGames] = useState(false);
   const [toast, setToast] = useState("");
   const [reconnecting, setReconnecting] = useState(false);
@@ -2125,13 +2128,21 @@ export default function Dontminion({ myId, authUser, onExit }) {
     );
   }
   if (screen === "lobby") {
+    // A room you are in but which has not STARTED is waiting, not active — it is
+    // already listed under Open with a Cancel. Named once here rather than filtered
+    // inline at the map, so the section's count and its list cannot disagree (they
+    // did: the count read `myGames`, the list read `notWaiting(myGames)`).
+    const activeMine = notWaiting(myGames);
     return (
       <div className="app dm" style={{ "--lby-accent": GAME_ACCENTS.dontminion }}>
         <style>{dmStyles}</style>
-        <LobbyHeader onBack={onExit} title="Dontminion" user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : "Guest"} />
+        <LobbyHeader onBack={onExit} user={<LobbyUser user={authUser || { name: "Guest", guest: true }} />} />
+        <div className="lby-page"><div className="lby-page-in">
+        <LobbyHero game="dontminion">
         <LobbyCreateRow onCreate={() => setShowCreateModal(true)} onJoin={joinGame}
           onRefresh={fetchGames} refreshing={loadingGames}
           onRules={() => setShowRules(true)} />
+        </LobbyHero>
         {showCreateModal && (
           <CreateModal title="New Game" onClose={() => setShowCreateModal(false)}>
             <CmRow label="Opponent">
@@ -2242,51 +2253,73 @@ export default function Dontminion({ myId, authUser, onExit }) {
         ]} />
         <div className={"dm-lobby-cols lby-cols tab-" + lobbyTab}>
           <div className="dm-section lby-col-open">
-            <LobbySectionHd title="Open Games" note="join a table" />
-            {openGames.length === 0 && <div className="lby-empty">No open games — create one!</div>}
+            <LobbySectionHd title="Open Games" note={`${openGames.length} waiting`} />
+            {openGames.length === 0 && <div className="lby-empty">No open games — create one.</div>}
             <div className="lby-list">
             {openGames.map((g) => (
               <div key={g.id} className="lby-card">
                 <div className="lby-card-info">
-                  <div className="lby-card-title">{g.host_name || "?"}'s table</div>
+                  <div className="lby-card-title">{g.host_id === myId ? "Your game" : `${g.host_name || "Player"}'s game`}
+                    <span className="lby-seats">{g.player_count}/{g.max_players}</span></div>
+                  {/* The expansion list goes LAST. The meta truncates from the right,
+                      so whatever sits at the end is what a narrow column gives up —
+                      and the room code and the age are how you identify and rank a
+                      row, while the sets are how you choose between two you already
+                      understand. */}
+                  {/* The set names are TITLE CASE and live in their own span. Raw,
+                      they were the only lowercase running text in the system ("base +
+                      intrigue") and read as database values that escaped the
+                      formatter; and on a phone this line truncated mid-word to
+                      "seasi…" on the one row whose two buttons squeeze it, so the span
+                      is what lets the least load-bearing token step aside there
+                      instead (see `.lby-meta-extra`). */}
                   <div className="lby-card-meta">
-                    {g.player_count}/{g.max_players} players · {(g.expansions || []).join(" + ")} · {timeAgo(g.created_at)}
+                    {g.id} · {timeAgo(g.created_at)}
+                    {(g.expansions || []).length ? (
+                      <span className="lby-meta-extra"> · {(g.expansions || [])
+                        .map((x) => String(x).replace(/(^|[\s-])(\w)/g, (m) => m.toUpperCase()))
+                        .join(" + ")}</span>
+                    ) : null}
                   </div>
                 </div>
                 <div className="lby-card-actions">
                   {g.host_id === myId
                     ? <>
-                        <button className="btn btn-gold" onClick={() => resumeGame(g.id)}>Return</button>
-                        <LobbyAction kind="secondary" onClick={() => cancelGame(g.id)}>Cancel</LobbyAction>
+                        <LobbyAction kind="secondary" onClick={() => resumeGame(g.id)}>Return</LobbyAction>
+                        <LobbyAction kind="danger" onClick={() => cancelGame(g.id)}>Cancel</LobbyAction>
                       </>
-                    : <button className="btn btn-gold" onClick={() => joinGame(g.id)}>Join</button>}
+                    : <LobbyAction onClick={() => joinGame(g.id)}>Join</LobbyAction>}
                 </div>
               </div>
             ))}
             </div>
           </div>
           <div className="dm-section lby-col-active">
-            <LobbySectionHd title="My Games" note={authUser?.session_token ? "in progress" : "sign in to track games"} />
+            <LobbySectionHd title="Active Games" note={`${activeMine.length} in progress`} />
             <div className="lby-list">
-            {notWaiting(myGames).map((g) => (
+            {activeMine.map((g) => (
               <div key={g.id} className="lby-card">
                 <div className="lby-card-info">
-                  <div className="lby-card-title">vs {(g.opponents || []).join(", ") || "…"}</div>
-                  <div className="lby-card-meta">
-                    {g.your_turn ? <TurnBadge mine>your turn</TurnBadge> : g.status}
-                    {" · "}{timeAgo(g.updated_at)}
-                  </div>
+                  <div className="lby-card-title">{(g.opponents || []).join(", ") || "…"}</div>
+                  <div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
                 </div>
+                {/* THE TURN PILL BELONGS ON THE ACTIONS RAIL, beside Resume, which is
+                    where the other five games put it. It sat inline in the META line
+                    here — mid-sentence, between the status word and the timestamp —
+                    so a glance down the column could not answer "which of these is
+                    waiting on me" without reading, and the row it appeared in came
+                    out ~22px taller than its neighbours. */}
                 <div className="lby-card-actions">
+                  {g.your_turn ? <TurnBadge mine>Your turn</TurnBadge> : <TurnBadge>Their turn</TurnBadge>}
                   <LobbyAction onClick={() => resumeGame(g.id)}>Resume</LobbyAction>
                 </div>
               </div>
             ))}
             </div>
-            {myGames.length === 0 && <div className="lby-empty">Nothing in progress.</div>}
+            {activeMine.length === 0 && <div className="lby-empty">No games in progress.</div>}
           </div>
           <div className="dm-section lby-col-history">
-            <LobbySectionHd title="History" note="finished games" />
+            <LobbySectionHd title="History" note={`${history.length} finished`} />
             <div className="lby-list">
             {historyShown.map((g) => {
               const line = historyScores(g);
@@ -2319,6 +2352,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
             {history.length === 0 && <div className="lby-empty">No finished games yet.</div>}
           </div>
         </div>
+        </div></div>
         {showRules && renderRules()}
         {toast && <div className="dm-toast">{toast}</div>}
       </div>

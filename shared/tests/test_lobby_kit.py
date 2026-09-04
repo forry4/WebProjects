@@ -61,14 +61,35 @@ def test_every_lby_class_a_game_uses_is_one_the_shared_sheet_defines():
         f"render unstyled: {problems}")
 
 
-def test_a_lobby_pins_all_three_columns():
+def test_a_lobby_pins_every_column_it_has():
     """Grid auto-flow follows DOM order, so an unpinned column lands wherever the
     JSX happens to emit it — and the phone tab bar hides columns by these exact
-    class names, so an unpinned one cannot be shown or hidden at all."""
+    class names, so an unpinned one cannot be shown or hidden at all.
+
+    Open and Active are universal. HISTORY IS NOT: Where Wolf has never had one
+    (it is a one-night party game — there is nothing to review), and it opted in
+    to the shared grid via the `.lby-cols-2` modifier, which is a real two-column
+    lobby rather than a three-column one missing a piece. The exemption is a
+    LIST, not a `if len(cols) == 2` shrug, and it is self-policing: a game on it
+    that *starts* rendering a History column fails as STALE, so the row gets
+    deleted rather than sitting here forever excusing something that no longer
+    needs excusing. Same discipline as `ACCENT_AA_EXEMPT` and
+    `core/tests/test_no_conditional_skips.py`.
+    """
+    no_history = {"WhereWolf.jsx": "a one-night party game: nothing to review afterwards"}
     for jsx in _lobby_games():
         text = jsx.read_text(encoding="utf-8")
-        for cls in ("lby-col-open", "lby-col-active", "lby-col-history"):
+        for cls in ("lby-col-open", "lby-col-active"):
             assert cls in text, f"{jsx.name} renders .lby-cols without .{cls}"
+        if jsx.name in no_history:
+            assert "lby-col-history" not in text, (
+                f"{jsx.name} is listed as having no History ({no_history[jsx.name]}) "
+                "but now renders one — delete its row from `no_history`")
+            assert "lby-cols-2" in text, (
+                f"{jsx.name} has no History column, so its grid must say so with the "
+                "`lby-cols-2` modifier — a bare .lby-cols reserves a third track")
+            continue
+        assert "lby-col-history" in text, f"{jsx.name} renders .lby-cols without .lby-col-history"
 
 
 def test_the_phone_tab_bar_is_wired_to_the_grid():

@@ -2,7 +2,8 @@ import { Fragment, useState, useEffect, useLayoutEffect, useRef, useCallback, us
 import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss,
-  useProgressiveList, LobbyTabs, useLastDifficulty } from "../../shared/lobby.jsx";
+  useProgressiveList, LobbyTabs, useLastDifficulty, LobbyHero,
+  LobbyAction, LobbyUser, useListFade } from "../../shared/lobby.jsx";
 import CocRules from "./rules.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 // Offline vs-AI: the local game driver (wasm engine + IndexedDB saves) — see offline.js.
@@ -830,6 +831,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
   // ...revealed 10 at a time as the reader reaches the end, up to the 50 the
   // backend sends — see useProgressiveList.
   const [historyShown, historyMore] = useProgressiveList(history);
+  // A column that scrolls inside itself must say so — see `useListFade`.
+  useListFade();
   // CoC was the only three-column lobby with no phone tab bar — the sections
   // just stacked. Now the shared one, same as the other three.
   const [lobbyTab, setLobbyTab] = useState("open");
@@ -2005,15 +2008,17 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
       <div className="coc coc-neutral" style={{ "--lby-accent": GAME_ACCENTS.coc }}><style>{css}</style>
         <LobbyHeader
           onBack={onExit}
-          title="Castles of Crimson"
-          user={<span className="lby-head-name">{playerName}</span>}
+          user={<LobbyUser user={authUser || { name: playerName, guest: true }} />}
         />
-        <div className="coc-wrap">
+        <div className="coc-wrap lby-page">
+          <div className="lby-page-in">
+          <LobbyHero game="coc">
           <LobbyCreateRow
             onCreate={() => setShowCreateModal(true)}
             onJoin={(code) => setJoinBoardFor(code)}
             onRefresh={fetchGames}
             onRules={() => setShowRules(true)} />
+          </LobbyHero>
 
           {showCreateModal && (
             <CreateModal title="New Game" onClose={() => setShowCreateModal(false)}>
@@ -2091,28 +2096,29 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
           ]} />
           <div className={`coc-lobby-grid lby-cols tab-${lobbyTab}`}>
             <div className="coc-lobby-col lby-col-open">
-              <LobbySectionHd title="Open Games" note="waiting for a second player" />
+              <LobbySectionHd title="Open Games" note={`${openGames.length} waiting`} />
               {loadingGames && openGames.length === 0 ? (
                 <div className="lby-empty"><span className="lby-spinner lby-spinner-sm" />Loading…</div>
               ) : openGames.length === 0 ? (
-                <div className="lby-empty">No open games. Create one!</div>
+                <div className="lby-empty">No open games — create one.</div>
               ) : (
                 <div className="lby-list">
                 {openGames.map((g) => (
                   <div className="lby-card" key={g.id}>
                     <div className="lby-card-info">
-                      <div className="lby-card-title">{g.host_id === myId ? "Your game" : `${g.host_name}'s game`}</div>
-                      <div className="lby-card-meta">{g.id} · {g.player_count || 1}/{g.max_players || 4} players · {timeAgo(g.created_at)}</div>
+                      <div className="lby-card-title">{g.host_id === myId ? "Your game" : `${g.host_name}'s game`}
+                        <span className="lby-seats">{g.player_count || 1}/{g.max_players || 4}</span></div>
+                      <div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
                     </div>
                     <div className="lby-card-actions">
                       {g.host_id === myId
                         ? <>
-                            <button className="coc-btn outline sm" onClick={() => resume(g.id)}>Return</button>
-                            <button className="coc-btn ghost sm" onClick={() => handleCancel(g.id)}>Cancel</button>
+                            <LobbyAction kind="secondary" onClick={() => resume(g.id)}>Return</LobbyAction>
+                            <LobbyAction kind="danger" onClick={() => handleCancel(g.id)}>Cancel</LobbyAction>
                           </>
                         : ((g.player_count || 1) >= (g.max_players || 4)
                             ? <TurnBadge>Full</TurnBadge>
-                            : <button className="coc-btn gold sm" onClick={() => setJoinBoardFor({ id: g.id, sameBoard: !!g.same_board, hostBoard: g.host_board })}>Join</button>)}
+                            : <LobbyAction onClick={() => setJoinBoardFor({ id: g.id, sameBoard: !!g.same_board, hostBoard: g.host_board })}>Join</LobbyAction>)}
                     </div>
                   </div>
                 ))}
@@ -2140,22 +2146,30 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
                   const pl = plOf(g);
                   const isMine = pl.some((p) => p.id === myId);
                   const turnName = (pl.find((p) => p.id === g.turn) || {}).name;
-                  const matchup = pl.length
-                    ? pl.map((p) => (p.id === myId ? `${p.name} (you)` : p.name)).join(" vs ")
-                    : "waiting…";
+                  // ONE SEAT PER LINE, not a "A vs B vs C" run. Spender's public
+                  // Active column already stacks; CoC flowed the same string into the
+                  // same width and it wrapped wherever it landed — "Marguerite vs /
+                  // Aurelia (you)", a dangling preposition at the line end, while the
+                  // row above it fitted on one line. Same feature, same column, two
+                  // typographic treatments and one bad break.
+                  const seats = pl.length
+                    ? pl.map((p) => (p.id === myId ? `${p.name} (you)` : p.name))
+                    : ["waiting…"];
                   return (
                     <div className="lby-card" key={g.id}>
                       <div className="lby-card-info">
-                        <div className="lby-card-title">{matchup}</div>
+                        <div className="lby-card-title matchup">
+                          {seats.map((nm, i) => <div key={i}>{i > 0 && <span className="lby-vs">vs</span>}{nm}</div>)}
+                        </div>
                         <div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
                       </div>
                       <div className="lby-card-actions">
                         {isMine ? (
                           <>
                             {g.turn === myId
-                              ? <TurnBadge mine>Your Turn</TurnBadge>
-                              : <TurnBadge>Their Turn</TurnBadge>}
-                            <button className="coc-btn outline sm" onClick={() => resume(g.id)}>Resume</button>
+                              ? <TurnBadge mine>Your turn</TurnBadge>
+                              : <TurnBadge>Their turn</TurnBadge>}
+                            <LobbyAction onClick={() => resume(g.id)}>Resume</LobbyAction>
                           </>
                         ) : (
                           <TurnBadge>{turnName ? `${turnName}'s turn` : "In progress"}</TurnBadge>
@@ -2168,9 +2182,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
             </div>
 
             <div className="coc-lobby-col lby-col-history">
-              <LobbySectionHd title="History" note={history.length ? `${history.length} finished` : null} />
+              <LobbySectionHd title="History" note={`${history.length} finished`} />
               {!authUser ? (
-                <div className="lby-empty">Log in to see your finished games.</div>
+                <div className="lby-empty">Log in to keep your game history.</div>
               ) : history.length === 0 ? (
                 <div className="lby-empty">No finished games yet.</div>
               ) : (
@@ -2180,12 +2194,12 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
                     <div className="lby-card-info">
                       <div className="lby-card-title">
                         <span className={`hist-result ${g.tie ? "tie" : (g.you_won ? "won" : "lost")}`}>{g.tie ? "Tie" : (g.you_won ? "Won" : "Lost")}</span>
-                        <span className="hist-scores"> vs {g.opp_name}{g.your_score != null && g.opp_score != null ? <> <span className="hist-score-num">{g.your_score}-{g.opp_score}</span></> : null}</span>
+                        <span className="hist-scores"> vs {g.opp_name}{g.your_score != null && g.opp_score != null ? <> <span className="hist-score-num">{g.your_score}–{g.opp_score}</span></> : null}</span>
                       </div>
                       <div className="lby-card-meta">{timeAgo(g.updated_at)}</div>
                     </div>
                     <div className="lby-card-actions">
-                      <button className="coc-btn outline sm" onClick={() => enterCocReview(g.id)}>Review</button>
+                      <LobbyAction kind="secondary" onClick={() => enterCocReview(g.id)}>Review</LobbyAction>
                     </div>
                   </div>
                 ))}
@@ -2193,6 +2207,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
                 </div>
               )}
             </div>
+          </div>
           </div>
         </div>
         {cocRulesModal}

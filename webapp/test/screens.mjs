@@ -1080,26 +1080,39 @@ try {
 			check(`${route} rules close on Escape`, stillOpen === 0, `count ${stillOpen}`);
 		}
 
-		// Phones: five controls no longer fit, so the row must scroll rather than wrap.
+		// PHONES: EVERY CONTROL IS REACHABLE. This replaces a pair of checks that
+		// asserted the row OVERFLOWS and stayed on one line — the sideways-scroller
+		// behaviour, which fitted nothing and merely moved Rules 280px past the right
+		// edge of a 390px screen where nothing on the page said it was there. The row
+		// is an explicit two-row grid at this width now (see the stylesheet), so what
+		// is worth asserting is the property the old pair was a proxy for: nothing is
+		// clipped, nothing is stranded, and the page still does not scroll sideways.
+		// Verified non-vacuous by restoring `flex-wrap:nowrap;overflow-x:auto` — the
+		// outside check fails and names Rules.
 		await page.setViewportSize({ width: 380, height: 760 });
-		await page.goto(`http://localhost:${PORT}/dontminion`, { waitUntil: "networkidle" });
+		await page.goto(`http://localhost:${PORT}/dissonance`, { waitUntil: "networkidle" });
 		await page.waitForSelector(".lby-create-row", { timeout: 25_000 }).catch(() => {});
 		const row = await page.evaluate(() => {
 			const el = document.querySelector(".lby-create-row");
 			if (!el) return null;
-			// "One row" can't be equal TOPS — the controls have different heights and
-			// the row centers them. It is that every control overlaps every other
-			// vertically, which a wrap breaks and a centered nowrap row never does.
-			const boxes = [...el.children].map((c) => c.getBoundingClientRect());
+			const rb = el.getBoundingClientRect();
+			const outside = [...el.children]
+				.map((c) => [c.className, c.getBoundingClientRect()])
+				.filter(([, b]) => b.right > rb.right + 1 || b.left < rb.left - 1
+					|| b.right > window.innerWidth + 1 || b.left < -1)
+				.map(([cls, b]) => `${cls} ${Math.round(b.left)}..${Math.round(b.right)}`);
 			return {
-				overflows: el.scrollWidth > el.clientWidth + 1,
-				oneRow: Math.max(...boxes.map((b) => b.top)) < Math.min(...boxes.map((b) => b.bottom)),
+				n: el.children.length, outside,
+				clipped: el.scrollWidth > el.clientWidth + 1,
 				pageWide: document.documentElement.scrollWidth > window.innerWidth + 1,
 			};
 		});
-		check("the phone create row scrolls sideways", !!row && row.overflows, JSON.stringify(row));
-		check("...on ONE row (no wrap)", !!row && row.oneRow, JSON.stringify(row));
-		check("...without making the PAGE scroll sideways", !!row && !row.pageWide,
+		// Dissonance on purpose: it is the game with the SIXTH control (Scorecard), so
+		// it is the widest the row ever gets and the one that failed hardest before.
+		check("every phone create-row control is inside the viewport",
+			!!row && row.outside.length === 0 && row.n >= 5, JSON.stringify(row));
+		check("...with nothing clipped off the row", !!row && !row.clipped, JSON.stringify(row));
+		check("...and without making the PAGE scroll sideways", !!row && !row.pageWide,
 			JSON.stringify(row));
 		check("no page errors in the rules pass", errors.length === 0,
 			errors[0]?.slice(0, 160) || "");

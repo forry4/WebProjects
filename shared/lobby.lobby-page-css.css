@@ -1,0 +1,200 @@
+/* ─── The lobby PAGE: its ground, its identity band, its row actions ──────────
+ *
+ * Concatenated onto `lobbyCss` (see shared/lobby.jsx), so every game gets it without
+ * adding an import. It is a separate FILE because it answers a different question from
+ * the sheet before it: that one styles the lobby's parts, this one is the room they
+ * stand in.
+ *
+ * WHY IT EXISTS. The site's three shell screens — loading, auth, the game menu — share
+ * one ground: a warm light from above the fold, a vignette so the corners are not a flat
+ * void, and a fine grain so the large dark areas have a surface instead of 8-bit
+ * gradient banding. Clicking a game card walked out of that room into a plain #0f0e0c
+ * rectangle with three columns of rows on it, and the lamp the whole site is lit by
+ * simply went out. Nothing here is new invention: it is the shell's own recipe
+ * (`.home::before/::after` in games/spender/Spender.css), tinted by the game's accent so
+ * seven lobbies are seven rooms rather than one template painted seven times.
+ */
+
+/* THE GROUND. Two fixed layers, painted once and never scrolled, at z-index -1 inside
+   the stacking context `.lby-page` opens — so a long History cannot scroll them away and
+   nothing here can intercept a click.
+
+   THREE gradients, and the first is the only difference from the shell: an accent lamp
+   over the shell's warm-gold one. Mixed to `transparent` rather than stated as an rgba,
+   because the accent arrives as a custom property and cannot be decomposed into
+   channels — `color-mix(… 13%, transparent)` is how a token gets an alpha.
+
+   The top light is a WIDE ellipse in px rather than a percentage radial: the percentage
+   version resolves to a short, wide gradient whose falloff finishes inside the viewport
+   and leaves a visible rectangular edge behind the title, which reads as a stray panel
+   background. (Learned on the shell; do not re-derive it here.) */
+.lby-page{position:relative;z-index:0;flex:1 1 auto;width:100%}
+.lby-page::before,.lby-page::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none}
+.lby-page::before{background:
+	/* 7%, DOWN FROM 13. The accent lamp is a TINT ON THE VIGNETTE, never a wash on the
+	   paper: at 13 the top 40% of Rag Tag's lobby was a strong orange-brown field, the
+	   accent-coloured section labels sitting on it fell to roughly 2.5:1, and the
+	   emblem plate — itself a 36% mix of the same accent — read as a hole rather than
+	   as a raised chip because the ground behind it had caught up with it. The shell
+	   ground is ONE warm near-black and every game hue sits on it; the identity lives
+	   on the plate, the wordmark and the edge-lights, not on the paper. */
+	radial-gradient(1500px 620px at 50% -14%,color-mix(in srgb,var(--lby-accent,#c9a84c) 7%,transparent),transparent 62%),
+	radial-gradient(1500px 780px at 50% -8%,rgba(214,178,88,.085),rgba(214,178,88,.03) 45%,rgba(214,178,88,0) 72%),
+	radial-gradient(140% 108% at 50% 34%,rgba(0,0,0,0) 26%,rgba(0,0,0,.6) 100%)}
+/* The same tiled feTurbulence data URI the shell uses — no request, rasterised once. */
+.lby-page::after{opacity:.05;background-size:180px 180px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23g)'/%3E%3C/svg%3E")}
+
+/* THE CONTENT COLUMN, and it is the same one for the band and the grid. They used to
+   be two: the create row centred itself in the viewport while the column grid ran to
+   whatever the monitor was, so at 1280 nothing on the page shared a left or a right
+   edge with anything else. `.lby-cols` already caps at 1500 and centres; this puts the
+   band on exactly that measure, so the page has two verticals instead of none. */
+/* `--lby-page-w` is the ONE place a lobby's measure is set, and both the band and the
+   grid read it. A two-column lobby (Where Wolf) wants a narrower page than a
+   three-column one — the same slack over two tracks makes each half again as wide —
+   and it must narrow the PAGE rather than the grid: capping `.lby-cols-2` alone left
+   it centred inside a full-width band, so the emblem, the wordmark and the divider
+   started at the gutter while the columns and every card below them started 26px in
+   at a laptop and 136px in at 1920, and the page read as having two left margins
+   stacked on each other. */
+.lby-page-in{width:100%;max-width:var(--lby-page-w,1500px);margin-inline:auto;padding:0 24px 44px}
+@media(max-width:600px){.lby-page-in{padding-left:14px;padding-right:14px}}
+
+/* ── The identity band ──────────────────────────────────────────────────────
+   Emblem, name and player range on the left; the create row on the right. One row,
+   costing the height the create row already spent — see `LobbyHero` in lobby.jsx for
+   why this is a band and not a hero block.
+   The rule under it FADES OUT at the right instead of stopping at a hard edge in empty
+   space, and starts in the accent, so it belongs to this game rather than being a
+   divider borrowed from a form. */
+.lby-hero{display:flex;align-items:center;justify-content:space-between;gap:16px 28px;flex-wrap:wrap;
+	padding:22px 0 20px;margin-bottom:22px;
+	background-repeat:no-repeat;background-position:0 100%;background-size:100% 1px;
+	background-image:linear-gradient(90deg,color-mix(in srgb,var(--lby-accent,#c9a84c) 52%,transparent) 0,rgba(255,240,215,.075) 42%,transparent 100%)}
+.lby-hero-id{display:flex;align-items:center;gap:15px;min-width:0}
+
+/* The SAME recessed plate as the home card's, at the same 48px and mixed by the same
+   rule: `in oklab` at 36%. Mixing `in srgb` lets the warm ground win, which is what
+   once rendered Where Wolf's plate chromatically neutral and Dontminion's cyan green;
+   36 is the measured floor, since 30 still drifted two accents past 22 degrees of hue.
+   Getting this wrong is invisible until the two are seen side by side, which — a card
+   click apart — is exactly how they are seen. */
+.lby-hero-emblem{flex:0 0 auto;display:grid;place-items:center;width:48px;height:48px;border-radius:12px;
+	color:var(--lby-accent,#c9a84c);background:color-mix(in oklab,var(--lby-accent,#c9a84c) 36%,#232019);
+	border:1px solid color-mix(in oklab,var(--lby-accent,#c9a84c) 44%,transparent);
+	box-shadow:inset 0 1px 0 rgba(255,240,215,.08)}
+.lby-hero-emblem svg{width:27px;height:27px;display:block}
+.lby-hero-text{display:flex;flex-direction:column;align-items:flex-start;gap:7px;min-width:0}
+
+/* FOILED, like the site wordmark, but in the game's own colour: a light-to-dark
+   vertical ramp reads as struck metal under the lamp above. `color` stays the flat
+   accent so a browser without background-clip:text shows the title rather than nothing
+   — the @supports block is the only place transparency is introduced.
+   Cinzel is an inscriptional capital and wants air; the negative right margin undoes
+   the trailing letter-space so a left-aligned line still starts and ends on its box. */
+.lby-hero-name{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;
+	font-size:clamp(1.42rem,1.12rem + 1.25vw,2.05rem);line-height:1.08;letter-spacing:.05em;margin-right:-.05em;
+	color:var(--lby-accent,#c9a84c)}
+@supports ((-webkit-background-clip:text) or (background-clip:text)){
+	.lby-hero-name{background-image:linear-gradient(177deg,
+		color-mix(in oklab,var(--lby-accent,#c9a84c) 48%,#fff4d8) 2%,
+		var(--lby-accent,#c9a84c) 54%,
+		color-mix(in oklab,var(--lby-accent,#c9a84c) 62%,#000) 100%);
+		-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;
+		filter:drop-shadow(0 1px 0 rgba(0,0,0,.5))}
+}
+/* The home card's player pill, verbatim in grammar — accent dot, hairline, uppercase.
+   CRIMSON PRO AND NOT CINZEL, and that is not a taste call: Cinzel's lining "1" is a
+   seriffed vertical with full-height serifs, so at 11px in caps at this tracking
+   "1-4 PLAYERS" reads as "I-4 PLAYERS". */
+.lby-hero-seats{display:inline-flex;align-items:center;gap:6px;
+	font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-weight:600;
+	font-size:.76rem;letter-spacing:.055em;text-transform:uppercase;
+	color:var(--text-soft,#b3a58b);border:1px solid var(--border,#3a342a);padding:2px 10px;border-radius:999px;
+	background:rgba(0,0,0,.26)}
+.lby-hero-seats::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--lby-accent,#c9a84c);flex:0 0 auto}
+.lby-hero-actions{display:flex;align-items:center;min-width:0}
+
+/* AT 1920 THE LOBBY MUST NOT BE THE 1280 LAYOUT IN A BIGGER FRAME. The name was set at
+   the clamp's 2.05rem ceiling from 1130px upward, so on a 1080-tall canvas the game's
+   own wordmark measured about half the cap height of the site wordmark on the menu that
+   led to it, and the band read as a browser toolbar rather than as a title. Stepping it
+   at the same width the shell steps its own ramp keeps the two in proportion. */
+@media(min-width:1500px){
+	.lby-hero{padding:28px 0 24px;margin-bottom:26px}
+	.lby-hero-name{font-size:2.5rem}
+	.lby-hero-id{gap:18px}
+	.lby-hero-emblem{width:58px;height:58px;border-radius:14px}
+	.lby-hero-emblem svg{width:33px;height:33px}
+	.lby-hero-seats{font-size:.8rem}
+}
+
+/* THE BAND STACKS FROM THE TWO-COLUMN TIER DOWN, not from 820px. At 834 (the common
+   tablet) the row still fitted beside the wordmark on Spender and Where Wolf and did
+   not on Duel and Dissonance, whose Rules/Scorecard controls are wider — so the same
+   component had two layouts at one width depending on which game you were in, and the
+   inline one put the primary CTA about 55px from the end of "WHERE WOLF". It stacks
+   wherever the columns do, so the breakpoint is shared with `.lby-cols` rather than
+   guessed from the widest label. The identity itself stays a ROW (emblem beside the
+   name) at every size — it is the one thing on the page that has to look like the card
+   that was tapped. */
+@media(max-width:1040px){
+	.lby-hero{padding:16px 0 15px;margin-bottom:16px;gap:14px}
+	/* The band stacks here, and the controls keep the RIGHT edge they hold beside the
+	   wordmark at the wider tiers. Left-packed they ended at x=884 on an 834pt tablet
+	   whose content runs to 1336, so the header occupied the left two thirds and the
+	   right third was dead — the desktop composition abandoned without another one
+	   put in its place. */
+	.lby-hero-actions{width:100%;justify-content:flex-end}
+	.lby-hero-actions>.lby-create-row{justify-content:flex-end}
+	.lby-hero-emblem{width:42px;height:42px;border-radius:11px}
+	.lby-hero-emblem svg{width:24px;height:24px}
+}
+@media(max-width:600px){
+	/* The create row is a two-row GRID at this width and sizes itself to the page's
+	   own measure, so the band no longer needs to bleed it past the gutter — it did
+	   while the row was a sideways scroller with its own inset padding. */
+	.lby-hero-actions{display:block;width:100%}
+}
+
+/* ── A lobby row's action button ────────────────────────────────────────────
+   `.btn btn-gold` was doing this job, and `.btn-gold` is the SITE's gold: fourteen of
+   them down a crimson game's History column said "Spender" fourteen times on a page
+   whose whole purpose is to be one game's. These read `--lby-accent` like everything
+   else in the kit, and they are sized for a list row — `.btn`'s 11px/20px padding put a
+   40px slab next to a 17px title.
+
+   THE THREE KINDS ARE A HIERARCHY, not three colours. Primary is the reason you opened
+   the lobby (Resume, Join) and is the only filled thing in a column. Secondary is
+   available but not the point (Review, Return) — an outline in the accent. Danger gives
+   the seat back (Cancel) and is deliberately the QUIETEST: it is the destructive one, so
+   it must not be the one the eye lands on, and it lights red only under the cursor. */
+.lby-act{display:inline-flex;align-items:center;justify-content:center;gap:6px;
+	padding:8px 15px;border-radius:var(--radius,8px);cursor:pointer;border:1px solid transparent;
+	font-family:'Cinzel','Cinzel Fallback',serif;font-size:.76rem;letter-spacing:.05em;font-weight:600;
+	white-space:nowrap;transition:background .15s,color .15s,border-color .15s,box-shadow .15s}
+.lby-act:focus-visible{outline:2px solid var(--lby-accent,#c9a84c);outline-offset:2px}
+/* PRIMARY IS A LIT PLATE, NOT A SATURATED SLAB, and the difference is the whole
+   lighting model. The shell has ZERO filled buttons: every object on it is a dark
+   gradient with a coloured edge-light, and colour is emitted rather than painted. A
+   full-chroma fill repeated down a column — fourteen of them in History — made the
+   lobby the loudest page in the product, and put four maximum-saturation rectangles on
+   a Dissonance phone screen. So the row actions are the accent MIXED INTO the card
+   ground (an object of the same material, tinted), with the accent kept at full
+   strength on the 1px edge and on the label, where it reads as identity instead of as
+   area. The one saturated fill left on the page is `.lby-cta` — one per lobby, and it
+   is the thing the page is for. */
+.lby-act-primary{color:color-mix(in oklab,var(--lby-accent,#c9a84c) 88%,#fff8e8);
+	border-color:color-mix(in srgb,var(--lby-accent,#c9a84c) 58%,transparent);
+	background:linear-gradient(180deg,color-mix(in oklab,var(--lby-accent,#c9a84c) 26%,#272319),color-mix(in oklab,var(--lby-accent,#c9a84c) 17%,#1d1a15));
+	box-shadow:inset 0 1px 0 rgba(255,240,215,.09)}
+.lby-act-primary:hover{border-color:var(--lby-accent,#c9a84c);
+	background:linear-gradient(180deg,color-mix(in oklab,var(--lby-accent,#c9a84c) 36%,#272319),color-mix(in oklab,var(--lby-accent,#c9a84c) 25%,#1d1a15));
+	box-shadow:inset 0 1px 0 rgba(255,240,215,.12),0 6px 16px -9px var(--lby-accent,#c9a84c)}
+.lby-act-secondary{background:transparent;color:var(--lby-accent,#c9a84c);
+	border-color:color-mix(in srgb,var(--lby-accent,#c9a84c) 46%,transparent)}
+.lby-act-secondary:hover{border-color:var(--lby-accent,#c9a84c);background:color-mix(in srgb,var(--lby-accent,#c9a84c) 13%,transparent)}
+.lby-act-danger{background:transparent;color:var(--text-soft,#b3a58b);border-color:var(--border,#3a342a)}
+.lby-act-danger:hover{color:var(--red-gem,#dc4040);border-color:color-mix(in srgb,var(--red-gem,#dc4040) 62%,transparent);
+	background:color-mix(in srgb,var(--red-gem,#dc4040) 10%,transparent)}
+.lby-act:disabled{opacity:.35;cursor:not-allowed;filter:none;box-shadow:none}

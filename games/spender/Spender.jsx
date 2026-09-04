@@ -57,9 +57,9 @@ const GameChunkLoading = () => (
 import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
 	useLastDifficulty,
-	createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
+	createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss, LobbyHero, LobbyUser,
 	RulesModal, rulesModalCss,
-	useProgressiveList, LobbySectionHd, LobbyTabs, TurnBadge, LobbyAction } from "../../shared/lobby.jsx";
+	useProgressiveList, LobbySectionHd, LobbyTabs, TurnBadge, LobbyAction, useListFade } from "../../shared/lobby.jsx";
 import SpenderRules from "./rules.jsx";
 import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
 	splendorPanelCss, splendorCardCss, splendorCardExtraCss, splendorPillCss,
@@ -516,10 +516,23 @@ const css = baseCss + lobbyCss + _cssText
 }
 
 @media(max-width:600px){
-  .browser{padding:20px 14px 40px}
-  .lby-header{padding-left:14px;padding-right:14px}
+  /* .browser PADS NOTHING. The lobby's gutter is .lby-page-in's, shared by all seven
+     games, and this 14px stacked on top of it -- so Spender's phone cards sat 14px
+     right of every other game's on the same screen, and 14px right of its own Back
+     button. .lby-header's phone padding is in the shared sheet now and the copy here
+     said the same thing twice.
+     NO BACKTICKS IN THIS BLOCK. It is still CSS inside a JS TEMPLATE LITERAL -- the
+     one region of this file the .css extraction did not reach -- so a single stray
+     backtick reparses the rest of the file as a tagged template. Written with them,
+     this comment failed the build outright (esbuild: Unexpected "in"), which is the
+     lucky version of that footgun; the shipped version blanks the page. */
+  .browser{padding:0}
   .game{padding:6px}
-  .lby-card{padding:10px 12px}
+  /* NO CARD PADDING OVERRIDE. This tightened the row 3px on every side, which made
+     Spender's phone cards 12px shorter than the identical card in the other six games
+     -- and Spender is the lobby the shared kit was EXTRACTED from, so it was the one
+     screen quietly disagreeing with the rule it had set. The shared padding is right
+     at this width too. */
 
   /* ── Board-first compact mobile game layout ──────────────────────────────
      The board leads (bank -> cards -> nobles+actions); players, then the move
@@ -889,6 +902,8 @@ export default function SpenderApp() {
 	// History reveals 10 at a time as the reader reaches the end of the list, up
 	// to the 50 the backend sends — see useProgressiveList.
 	const [historyShown, historyMore] = useProgressiveList(historyGames);
+	// A column that scrolls inside itself must say so — see `useListFade`.
+	useListFade();
 	const [browserLoading, setBrowserLoading] = useState(false);
 	const [showCreateModal, setShowCreateModal] = useState(false);  // the New Game options modal
 	const [createOpp, setCreateOpp] = useState("ai");        // "friend" | "ai"
@@ -2954,10 +2969,7 @@ export default function SpenderApp() {
 				<LobbyHeader
 					onBack={() => nav("home")}
 					title="Local vs AI"
-					user={<>
-						{authUser?.guest && <span className="lby-head-tag">Guest</span>}
-						<span className="lby-head-name">{authUser?.name}</span>
-					</>}
+					user={<LobbyUser user={authUser} />}
 				/>
 				<div className="browser offline-hub">
 					<div className="offline-panel">
@@ -3127,21 +3139,25 @@ export default function SpenderApp() {
 		<>
 			<style>{css}</style>
 			<div className="app" style={{ "--lby-accent": GAME_ACCENTS.spender }}>
+				{/* NO `title` IN A LOBBY. The identity lives in the band below (LobbyHero):
+				    the emblem, the accent wordmark and the player pill are what the home
+				    card was, and repeating the name in a 1.2rem centred slug 60px above
+				    them is two titles, not a hierarchy. The bar keeps Back and the user,
+				    which is all it is for here; in-GAME it still carries its title. */}
 				<LobbyHeader
 					onBack={() => nav("home")}
-					title="Spender"
-					user={<>
-						{authUser?.guest && <span className="lby-head-tag">Guest</span>}
-						<span className="lby-head-name">{authUser?.name}</span>
-					</>}
+					user={<LobbyUser user={authUser} />}
 				/>
-				<div className="browser">
+				<div className="browser lby-page">
+					<div className="lby-page-in">
+						<LobbyHero game="spender">
 						<LobbyCreateRow
 							onCreate={() => setShowCreateModal(true)}
 							onJoin={(code) => handleJoinGame(code)}
 							onRefresh={() => fetchGames(authUser)}
 							onRules={() => setShowRules(true)}
 							refreshing={browserLoading} />
+						</LobbyHero>
 
 					{showCreateModal && (
 						<CreateModal title="New Game" onClose={() => setShowCreateModal(false)}>
@@ -3198,11 +3214,11 @@ export default function SpenderApp() {
 
 					<div className={`lobby-grid lby-cols tab-${lobbyTab}`}>
 					<div className="browser-section lby-col-open">
-						<LobbySectionHd title="Open Games" note="waiting for players (2-4)" />
+						<LobbySectionHd title="Open Games" note={`${openGames.length} waiting`} />
 						{browserLoading && openGames.length === 0 ? (
 							<div className="lby-empty"><span className="lby-spinner lby-spinner-sm" />Loading…</div>
 						) : openGames.length === 0 ? (
-							<div className="lby-empty">No open games right now. Create one!</div>
+							<div className="lby-empty">No open games — create one.</div>
 						) : (
 							<div className="lby-list">
 								{openGames.map(g => (
@@ -3210,23 +3226,17 @@ export default function SpenderApp() {
 										<div className="lby-card-info">
 											<div className="lby-card-title">
 												{g.host_id === myId ? "Your game" : `${g.host_name}'s game`}
-												<span className="lobby-size">{g.player_count || 1}/{g.max_players || 4}</span>
+												<span className="lby-seats">{g.player_count || 1}/{g.max_players || 4}</span>
 											</div>
 											<div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
 										</div>
 										<div className="lby-card-actions">
 											{g.host_id === myId
 												? <>
-													<button className="btn btn-outline btn-sm" onClick={() => handleContinue(g.id)}>
-														Return
-													</button>
-													<button className="btn btn-ghost btn-sm" onClick={() => handleCancel(g.id)}>
-														Cancel
-													</button>
+													<LobbyAction kind="secondary" onClick={() => handleContinue(g.id)}>Return</LobbyAction>
+													<LobbyAction kind="danger" onClick={() => handleCancel(g.id)}>Cancel</LobbyAction>
 												</>
-												: <button className="btn btn-gold btn-sm" onClick={() => handleJoinGame(g.id)}>
-													Join
-												</button>}
+												: <LobbyAction onClick={() => handleJoinGame(g.id)}>Join</LobbyAction>}
 										</div>
 									</div>
 								))}
@@ -3234,9 +3244,9 @@ export default function SpenderApp() {
 						)}
 					</div>
 					<div className="browser-section lby-col-history">
-						<LobbySectionHd title="History" note="your recent games" />
+						<LobbySectionHd title="History" note={`${historyGames.length} finished`} />
 						{(!authUser || authUser.guest) ? (
-							<div className="lby-empty">Log in to see your game history.</div>
+							<div className="lby-empty">Log in to keep your game history.</div>
 						) : historyGames.length === 0 ? (
 							<div className="lby-empty">No finished games yet.</div>
 						) : (
@@ -3254,7 +3264,7 @@ export default function SpenderApp() {
 										<div className="lby-card-info">
 											<div className="lby-card-title">
 												<span className={`hist-result ${g.you_won ? "won" : "lost"}`}>{g.you_won ? "Won" : "Lost"}</span>
-												<span className="hist-scores">vs {oppNames} <span className="hist-score-num">{myScore}-{oppScore}</span></span>
+												<span className="hist-scores">vs {oppNames} <span className="hist-score-num">{myScore}–{oppScore}</span></span>
 											</div>
 											<div className="lby-card-meta">{timeAgo(g.finished_at)}{g.win_points === 21 ? " · Long (21)" : ""}</div>
 										</div>
@@ -3297,7 +3307,7 @@ export default function SpenderApp() {
 												<div className="lby-card-info">
 													<div className="lby-card-title matchup">
 														{seats.map(([id, nm], i) => (
-															<div key={id || i}>{i > 0 ? "vs " : ""}{displayName(nm)}{id === myId ? " (you)" : ""}</div>
+															<div key={id || i}>{i > 0 && <span className="lby-vs">vs</span>}{displayName(nm)}{id === myId ? " (you)" : ""}</div>
 														))}
 													</div>
 													<div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
@@ -3306,8 +3316,8 @@ export default function SpenderApp() {
 													{isMine ? (
 														<>
 															{g.turn === myId
-																? <TurnBadge mine>Your Turn</TurnBadge>
-																: <TurnBadge>Their Turn</TurnBadge>}
+																? <TurnBadge mine>Your turn</TurnBadge>
+																: <TurnBadge>Their turn</TurnBadge>}
 															<LobbyAction onClick={() => handleContinue(g.id)}>Resume</LobbyAction>
 														</>
 													) : (
@@ -3322,6 +3332,7 @@ export default function SpenderApp() {
 							</div>
 						);
 					})()}
+					</div>
 					</div>
 				</div>
 				{rulesModalEl}

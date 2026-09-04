@@ -1,6 +1,21 @@
+/* NO `--lby-page-w` HERE. Narrowing the PAGE for this one game did fix its row widths
+   and cost more than it bought: the top bar, the wordmark and the username all live
+   inside that measure, so walking from any other lobby into this one slid the whole
+   frame 160px inward at 1920 for no reason a player could see. Persistent chrome must
+   not move between siblings. The narrowing belongs to the GRID instead — see
+   `.lby-cols-2` in the shared sheet, which caps and LEFT-aligns. */
 .ww{min-height:100vh;background:var(--bg);color:var(--text)}
 .ww *,.ww *::before,.ww *::after{box-sizing:border-box}
-.ww-wrap{max-width:1200px;margin:0 auto;padding:20px 16px 48px;display:flex;flex-direction:column;gap:16px}
+/* THE LOBBY'S SIDE PADDING AND MEASURE ARE `.lby-page-in` NOW (shared). Every
+   lobby had its own — 12/16/18/24px on five different elements — so the create
+   row, the tab bar and the columns lined up only within a game, never across
+   them, and the row centred itself in the VIEWPORT while the grid ran to the
+   monitor. One wrapper owns both edges; a game's grid class sets width only. */
+/* 1180, not the shared 1500: this lobby has TWO columns, so the same slack makes
+   each track half again as wide as a three-column game's, and at 1500 the rows came
+   out ~714px holding a name at one end and a Join at the other. It is set on the
+   PAGE, so the identity band narrows with the grid and the two keep one left edge. */
+.ww-wrap{width:100%;margin:0;padding:0;display:flex;flex-direction:column;gap:16px}
 .ww-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .ww-top-left{display:flex;align-items:center;gap:10px;min-width:0}
 .ww-title{font-family:Cinzel,serif;font-weight:700;color:var(--gold-light);letter-spacing:.5px}
@@ -20,9 +35,10 @@
 /* Where Wolf? has only TWO columns (no History), so it keeps its own grid rather
    than the shared 3-column `.lby-cols` — but its card LISTS are the shared
    `.lby-list`, so the rows space and cap identically to the other four. */
-.ww-lobby-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px 24px;align-items:start;margin-top:2px}
-.ww-lobby-col{min-width:0}
-@media(max-width:700px){.ww-lobby-grid{grid-template-columns:1fr;gap:0}}
+/* `.ww-lobby-grid` / `.ww-lobby-col` are GONE. Where Wolf now uses the shared
+   `.lby-cols.lby-cols-2` and the shared phone tab bar, like the other six — this
+   private grid was the reason it was the only lobby with no tab bar at 390px, and
+   its 700px breakpoint did not agree with the shared ladder's 760. */
 .ww-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:center}
 .ww-section{font-family:Cinzel,serif;color:var(--gold);font-size:14px;margin-top:10px;border-bottom:1px solid var(--border);padding-bottom:4px}
 .ww-card{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--surface);border:1px solid var(--border);
@@ -115,7 +131,12 @@
 /* ── Phone: use the whole screen — the table becomes a TALL ellipse so YOU sit at
    the very bottom and everyone else rings the edges; cards shrink (see cardVars). ── */
 @media(max-width:600px){
-  .ww-wrap{min-height:100dvh;padding:8px 6px 6px;gap:8px}
+  /* No padding, and NO `min-height`: `.lby-page-in` owns the gutter and the top of
+     the identity band (the 8px top here pushed the whole band 8px below every other
+     game's on the same phone), and `.app` already carries `min-height:100vh`, so a
+     second 100dvh on a descendant made this the one lobby whose phone page scrolled
+     53px past its own content in BOTH data states. */
+  .ww-wrap{padding:0;gap:8px}
   .ww-banner{font-size:14px;min-height:24px}
   .ww-sub{font-size:12px;min-height:16px}
   /* the game's table area fills the space between the sub-prompt and the action bar */

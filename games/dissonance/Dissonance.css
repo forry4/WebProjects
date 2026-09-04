@@ -60,7 +60,16 @@
 .dis input, .dis textarea, .dis [contenteditable] {
   user-select: text; -webkit-user-select: text;
 }
-.dis::before {
+/* THE GREEN GROUND IS SCOPED OUT OF THE LOBBY. It was on `.dis` itself, so it also
+   painted the lobby — and measured against its six siblings that page came out
+   green-dominant, (31,35,25) at the identity band and (16,19,16) at the foot, where
+   the other six read warm and identical, R>=G>B and (15,15,13). Per-game ACCENT is the
+   system; per-game PAPER is not: six lobbies on one ground and a seventh on another
+   reads as a different site rather than a different game. The lobby gets the shared
+   `.lby-page` ground (which already tints its vignette with this game's accent); the
+   TABLE keeps its own room. `:has()` rather than a class, so no game screen had to
+   learn about it. */
+.dis:not(:has(.lby-page))::before {
   content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
   background:
     radial-gradient(120% 60% at 50% -8%, rgba(60, 160, 110, 0.16), rgba(60, 160, 110, 0) 62%),
@@ -89,18 +98,15 @@
 }
 .dis .btn-gold { background: linear-gradient(180deg, var(--accent-hi), var(--accent) 55%); color: var(--ink); }
 .dis .btn-gold:hover:not(:disabled) { filter: brightness(1.09); }
-/* The CREATE ROW hardcodes `var(--gold)` rather than reading `--lby-accent`
-   like the rest of the kit, so Create / Join-by-code / the code field's focus
-   ring stayed gold on a green screen. Overridden here rather than in the
-   shared sheet: the token fix belongs there, but it would repaint five other
-   lobbies that nobody has looked at in this pass. */
-.dis .lby-cta {
-  background: linear-gradient(180deg, var(--accent-hi), var(--accent) 55%); color: var(--ink);
-}
-.dis .lby-cta:hover:not(:disabled) { filter: brightness(1.09); }
-.dis .lby-join-btn { color: var(--accent); border-color: var(--accent); }
-.dis .lby-join-btn:hover { background: var(--accent); color: var(--ink); }
-.dis .lby-code:focus { border-color: var(--accent); }
+/* THE CREATE-ROW OVERRIDE IS GONE, and its removal is the point. It read: "the
+   create row hardcodes var(--gold) rather than --lby-accent, so Create / Join /
+   the code field's focus ring stay gold on a green screen — overridden here
+   because the token fix belongs in the shared sheet but would repaint five other
+   lobbies nobody has looked at". That pass has now happened: the shared row reads
+   `--lby-accent` for every game, so this said the same thing twice. A local
+   override of a shared rule is a note that the shared rule is wrong; when the
+   shared one is fixed, the note has to go with it or the two drift apart in the
+   opposite direction. */
 
 /* THE PRIMARY ACTION, and the reason it needs a class at all.
    `.btn` in the shared kit is GEOMETRY ONLY — padding, radius, font, and
@@ -337,7 +343,8 @@
   /* Thumb-sized actions — the end-of-round buttons and the lobby's Join /
      Resume all measured ~36–42px, under the 44px touch guideline. */
   .dis .dis-result .btn,
-  .dis .lby-card .btn, .dis .lby-cta, .dis .lby-join-btn { min-height: 44px; }
+  /* The 44px touch minimum is the shared kit's now (lobby.lobby-create-row-css.css)
+     -- set here alone it made this one lobby's band taller than the other six's. */
   /* While BIDDING the board is exactly the viewport and the ladder takes
      whatever is left, scrolling inside itself. A viewport-relative cap cannot
      do this: the rest of the panel (the standing bid, the collision list, the
@@ -994,7 +1001,7 @@
      and border-bottom span the window), so padding on the root would inset the
      header too. The columns ran flush to both screen edges — "OPEN GAMES"
      touching the left, History the right — where Duel insets 14px and CoC 22. */
-  .dis .lby-cols { padding-inline: 16px; }
+
 }
 
 /* ── WIDE DESKTOP: a column each side of the felt ───────────────────────────
@@ -1885,8 +1892,14 @@
   margin-left: 0.4rem; padding: 0.05rem 0.4rem; border-radius: 999px;
   font-size: 0.62rem; font-weight: 700; letter-spacing: 0.05em;
   text-transform: uppercase; vertical-align: middle;
-  background: rgba(138, 111, 216, 0.18); color: #b9a5f2;
-  border: 1px solid rgba(138, 111, 216, 0.45);
+  /* NEUTRAL, NOT VIOLET. It was `rgba(138,111,216,…)` — Spender Duel's hue — and on
+     a green lobby the two mode chips were the highest-chroma objects on the page and
+     the only ones wearing another game's colour. A mode is a QUALIFIER on a room, not
+     an identity: it reads as a quiet stamp on the card's own material, the way the
+     Their-turn pill does, and the accent stays reserved for the things that are this
+     game's. */
+  background: rgba(0, 0, 0, 0.3); color: var(--text-soft, #b3a58b);
+  border: 1px solid var(--border, #3a342a);
 }
 
 /* The value ladder is longer than the 1..12 level row, so it scrolls in place

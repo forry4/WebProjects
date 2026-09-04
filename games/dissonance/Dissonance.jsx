@@ -5,7 +5,8 @@ import {
   LobbyTabs, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss,
-  useProgressiveList, notWaiting, LobbyAction, useLastDifficulty,
+  useProgressiveList, notWaiting, LobbyAction, useLastDifficulty, LobbyHero,
+  SCORECARD_GLYPH, LobbyUser, useListFade,
 } from "../../shared/lobby.jsx";
 import DissonanceRules from "./rules.jsx";
 import DissonanceScorecard from "./scorecard.jsx";
@@ -1419,9 +1420,20 @@ function NeedsRow({ value, prefix, bases, maxLevel }) {
 
 /** Which mode a room runs. Classic is the default, so only the others are
  *  marked -- skat's second auction, and minor's +1 evens. */
+// THE MODE IS A META TOKEN, NOT A PILL IN THE TITLE, and it moved for three
+// separate reasons that all had the same root. As a pill inside `.lby-card-title` it
+// (a) was CLIPPED MID-WORD at the tablet tier — the title is a two-line clamped box
+// with `overflow:hidden`, so the pill's right border was amputated and "MINOR" came
+// out as "MIN" plus half a glyph, hard against the turn pill beside it; (b) forced
+// "Your game" to wrap after "Your" on a phone, orphaning one word beside 215px of
+// empty space; and (c) was drawn identically to the TURN pill 180px away on the same
+// line, so a permanent property of the room and a transient state read as the same
+// class of object. The meta line is where a room's facts already live — its code, its
+// age, Dontminion's expansion sets — and it is set as text there rather than as a
+// second kind of chip. Classic carries no token at all; it is the default.
 function ModeBadge({ mode }) {
   if (mode !== "skat" && mode !== "minor") return null;
-  return <span className="dis-modebadge">{MODE_LABEL[mode]}</span>;
+  return <span className="lby-meta-extra"> · {MODE_LABEL[mode]}</span>;
 }
 
 // `who` prefixes the holder's name, so the standing bid is ONE line -- "Ada 5♦"
@@ -1505,6 +1517,8 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
   const [myGames, setMyGames] = useState(() => readLobbyCache("dissonance", myId, "mine", []));
   const [history, setHistory] = useState(() => readLobbyCache("dissonance", myId, "history", []));
   const [historyShown, historyMore] = useProgressiveList(history);
+  // A column that scrolls inside itself must say so — see `useListFade`.
+  useListFade();
   // A room still waiting for an opponent belongs in Open, not in progress.
   const activeMine = notWaiting(myGames);
   const [lobbyTab, setLobbyTab] = useState("open");
@@ -2150,20 +2164,28 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
     }
     const openCol = (
       <div className="lby-col-open">
-        <LobbySectionHd title="Open games" note={openGames.length ? `${openGames.length} waiting` : null} />
+        <LobbySectionHd title="Open Games" note={`${openGames.length} waiting`} />
         <div className="lby-list">
-          {openGames.length === 0 && <LobbyEmpty>No open games. Create one!</LobbyEmpty>}
+          {openGames.length === 0 && <LobbyEmpty>No open games — create one.</LobbyEmpty>}
           {openGames.map((g) => (
             <div key={g.id} className="lby-card">
               <div className="lby-card-info">
                 <div className="lby-card-title">
-                  {g.host_name || "Player"}<ModeBadge mode={g.mode} />
+                  {g.host_id === myId ? "Your game" : `${g.host_name || "Player"}'s game`}
+                  <span className="lby-seats">1/2</span>
                 </div>
-                <div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
+                <div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}<ModeBadge mode={g.mode} /></div>
               </div>
               <div className="lby-card-actions">
+                {/* Return, then Cancel — the shape the other six use for a room you
+                    host. Cancel alone left a host who navigated away with no way back
+                    into their own waiting room, and against six siblings that all show
+                    the pair it read as a button that failed to render. */}
                 {g.host_id === myId
-                  ? <LobbyAction kind="danger" onClick={() => cancelGame(g.id)}>Cancel</LobbyAction>
+                  ? <>
+                      <LobbyAction kind="secondary" onClick={() => resumeGame(g.id)}>Return</LobbyAction>
+                      <LobbyAction kind="danger" onClick={() => cancelGame(g.id)}>Cancel</LobbyAction>
+                    </>
                   : <LobbyAction onClick={() => joinGame(g.id)}>Join</LobbyAction>}
               </div>
             </div>
@@ -2173,20 +2195,24 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
     );
     const activeCol = (
       <div className="lby-col-active">
-        <LobbySectionHd title="Your games" />
+        <LobbySectionHd title="Active Games" note={`${activeMine.length} in progress`} />
         <div className="lby-list">
-          {activeMine.length === 0 && <LobbyEmpty>Nothing in progress.</LobbyEmpty>}
+          {activeMine.length === 0 && <LobbyEmpty>No games in progress.</LobbyEmpty>}
           {activeMine.map((g) => (
             <div key={g.id} className="lby-card">
               <div className="lby-card-info">
                 <div className="lby-card-title">
                   {(g.you_are_p1 ? g.player2_name : g.player1_name) || "Waiting…"}
-                  <ModeBadge mode={g.mode} />
-                  {g.your_turn && <TurnBadge mine>Your turn</TurnBadge>}
                 </div>
-                <div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
+                <div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}<ModeBadge mode={g.mode} /></div>
               </div>
+              {/* THE TURN PILL LIVES ON THE ACTIONS RAIL, beside Resume, which is
+                  where the other six put it. Inline after the title it floated in
+                  the middle of the row and left the right cluster under-weighted,
+                  so a glance down the column could not answer "which of these is
+                  waiting on me" without reading each one. */}
               <div className="lby-card-actions">
+                {g.your_turn ? <TurnBadge mine>Your turn</TurnBadge> : <TurnBadge>Their turn</TurnBadge>}
                 <LobbyAction onClick={() => resumeGame(g.id)}>Resume</LobbyAction>
               </div>
             </div>
@@ -2196,7 +2222,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
     );
     const histCol = (
       <div className="lby-col-history">
-        <LobbySectionHd title="History" />
+        <LobbySectionHd title="History" note={`${history.length} finished`} />
         <div className="lby-list" ref={historyMore}>
           {history.length === 0 && <LobbyEmpty>No finished games yet.</LobbyEmpty>}
           {historyShown.map((g) => {
@@ -2245,7 +2271,9 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
     return (
       <div className="dis">
         <style>{styles}</style>
-        <LobbyHeader onBack={onExit} title="Dissonance" user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : null} />
+        <LobbyHeader onBack={onExit} user={<LobbyUser user={authUser} />} />
+        <div className="lby-page"><div className="lby-page-in">
+        <LobbyHero game="dissonance">
         <LobbyCreateRow
           onCreate={() => setShowCreate(true)}
           onJoin={(code) => joinGame(code.toUpperCase())}
@@ -2253,12 +2281,14 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
           onRules={() => setShowRules(true)}
           refreshing={loadingGames}
           extra={(
-            <button type="button" className="lby-extra"
+            <button type="button" className="lby-extra" aria-label="Scorecard"
               onClick={() => setShowCard(true)}>
-              <span className="lby-rules-ic" aria-hidden="true">🧮</span>Scorecard
+              <span className="lby-rules-ic" aria-hidden="true">{SCORECARD_GLYPH}</span>
+              <span className="lby-btn-label">Scorecard</span>
             </button>
           )}
         />
+        </LobbyHero>
         {/* `key`, not `id` — LobbyTabs reads `t.key`, and the grid's `tab-<key>`
             class is what the CSS hides the other columns off. With `id` the bar
             rendered but every click set the tab to undefined, and `data-tab`
@@ -2272,6 +2302,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
         <div className={`lby-cols tab-${lobbyTab}`}>
           {openCol}{activeCol}{histCol}
         </div>
+        </div></div>
         {showCreate && (
           <CreateModal title="New Game" onClose={() => setShowCreate(false)}>
             <CmRow label="Opponent">

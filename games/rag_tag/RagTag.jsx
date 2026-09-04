@@ -6,7 +6,7 @@ import {
   lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, LobbyEmpty,
   LobbyAction, LobbyTabs, notWaiting, GameMenu, gameMenuCss,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
-  RulesModal, rulesModalCss, useProgressiveList,
+  RulesModal, rulesModalCss, useProgressiveList, LobbyHero, LobbyUser, useListFade,
   readLobbyCache, writeLobbyCache,
 } from "../../shared/lobby.jsx";
 import { buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
@@ -1307,6 +1307,8 @@ export default function RagTag({ myId, authUser, onExit }) {
   const [info, setInfo] = useState(null);
 
   const [historyShown, historyMore] = useProgressiveList(history);
+  // A column that scrolls inside itself must say so — see `useListFade`.
+  useListFade();
   const urlAttemptRef = useRef(null);
 
   const game = roomData?.game;
@@ -1721,15 +1723,21 @@ export default function RagTag({ myId, authUser, onExit }) {
         <style>{ragtagStyles}</style>
         <LobbyHeader
           onBack={onExit}
-          title="Rag Tag"
-          user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : null}
+          user={<LobbyUser user={authUser} />}
         />
+        <div className="lby-page"><div className="lby-page-in">
+        <LobbyHero game="ragtag">
+        {/* "+ Create Fight". Every string in this lobby says fight — the rows, the
+            three empty states, the create modal's own title — and the one control the
+            player actually presses said "Game". */}
         <LobbyCreateRow
+          createLabel="+ Create Fight"
           onCreate={() => setShowCreateModal(true)}
           onJoin={(code) => joinGame(code)}
           onRefresh={fetchGames}
           onRules={() => setShowRules(true)}
           refreshing={loadingGames} />
+        </LobbyHero>
 
         {showCreateModal && (
           <CreateModal title="New Fight" onClose={() => setShowCreateModal(false)}>
@@ -1762,20 +1770,21 @@ export default function RagTag({ myId, authUser, onExit }) {
 
         <div className={`rt-lobby-cols lby-cols tab-${lobbyTab}`}>
           <div className="lby-col-open">
-            <LobbySectionHd title="Open Games" />
-            {openGames.length === 0 && <LobbyEmpty>No open games. Create one!</LobbyEmpty>}
+            <LobbySectionHd title="Open Fights" note={`${openGames.length} waiting`} />
+            {openGames.length === 0 && <LobbyEmpty>No open fights — create one.</LobbyEmpty>}
             <div className="lby-list">
               {openGames.map((g) => (
                 <div className="lby-card" key={g.id}>
                   <div className="lby-card-info">
-                    <div className="lby-card-title">{g.host_name || "Player"}'s fight</div>
+                    <div className="lby-card-title">{g.host_id === myId ? "Your fight" : `${g.host_name || "Player"}'s fight`}
+                      <span className="lby-seats">1/2</span></div>
                     <div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
                   </div>
                   <div className="lby-card-actions">
                     {g.host_id === myId ? (
                       <>
-                        <LobbyAction onClick={() => resumeGame(g.id)}>Return</LobbyAction>
-                        <LobbyAction kind="secondary" onClick={() => cancelGame(g.id)}>Cancel</LobbyAction>
+                        <LobbyAction kind="secondary" onClick={() => resumeGame(g.id)}>Return</LobbyAction>
+                        <LobbyAction kind="danger" onClick={() => cancelGame(g.id)}>Cancel</LobbyAction>
                       </>
                     ) : <LobbyAction onClick={() => joinGame(g.id)}>Join</LobbyAction>}
                   </div>
@@ -1785,19 +1794,21 @@ export default function RagTag({ myId, authUser, onExit }) {
           </div>
 
           <div className="lby-col-active">
-            <LobbySectionHd title="Active Games" />
+            <LobbySectionHd title="Active Fights" note={`${activeMine.length} in progress`} />
             {activeMine.length === 0 && <LobbyEmpty>No fights in progress.</LobbyEmpty>}
             <div className="lby-list">
               {activeMine.map((g) => (
                 <div className="lby-card" key={g.id}>
                   <div className="lby-card-info">
-                    <div className="lby-card-title">{g.player1_name || "?"} vs {g.player2_name || "?"}</div>
+                    <div className="lby-card-title">{
+                    (g.you_are_p1 ? g.player2_name : g.player1_name) || "?"
+                  }</div>
                     <div className="lby-card-meta">
                       {g.round ? `round ${g.round} · ` : ""}{timeAgo(g.updated_at)}
                     </div>
                   </div>
                   <div className="lby-card-actions">
-                    {g.your_turn ? <TurnBadge mine>You're up</TurnBadge> : <TurnBadge>Waiting</TurnBadge>}
+                    {g.your_turn ? <TurnBadge mine>Your turn</TurnBadge> : <TurnBadge>Their turn</TurnBadge>}
                     <LobbyAction onClick={() => resumeGame(g.id)}>Resume</LobbyAction>
                   </div>
                 </div>
@@ -1806,9 +1817,9 @@ export default function RagTag({ myId, authUser, onExit }) {
           </div>
 
           <div className="lby-col-history">
-            <LobbySectionHd title="History" />
+            <LobbySectionHd title="History" note={`${history.length} finished`} />
             {history.length === 0 && (
-              <LobbyEmpty>{authUser ? "No finished fights yet." : "Log in to keep game history."}</LobbyEmpty>
+              <LobbyEmpty>{authUser ? "No finished fights yet." : "Log in to keep your game history."}</LobbyEmpty>
             )}
             <div className="lby-list">
               {historyShown.map((g) => (
@@ -1820,8 +1831,17 @@ export default function RagTag({ myId, authUser, onExit }) {
                       </span>
                       <span className="hist-scores"> vs {g.you_are_p1 ? g.player2_name : g.player1_name}</span>
                     </div>
+                  {/* HOW LONG THE FIGHT RAN sits IN the meta line, not in the slot
+                      where the other six put a Review button. Rag Tag has no post-game
+                      review; parking a non-interactive figure in the button's exact
+                      geometry gave every row a target that does nothing, and moving it
+                      to the right edge alone left ~250px of empty card between the
+                      timestamp and it, repeated down eleven rows. On the meta line it
+                      is what it is — a fact about the fight, beside the other two —
+                      and the row simply has no right-hand slot to look empty. */}
                     <div className="lby-card-meta">
                       {(g.your_team || []).map((f) => catalog?.fighters?.[f]?.name || f).join(" + ")}
+                      {g.rounds != null ? ` · ${g.rounds} round${g.rounds === 1 ? "" : "s"}` : ""}
                       {" · "}{timeAgo(g.updated_at)}
                     </div>
                   </div>
@@ -1831,6 +1851,7 @@ export default function RagTag({ myId, authUser, onExit }) {
             </div>
           </div>
         </div>
+        </div></div>
         {toast && <div className="rt-toast">{toast}</div>}
         {showRules && (
           <RulesModal title="How to play — Rag Tag" onClose={() => setShowRules(false)}>

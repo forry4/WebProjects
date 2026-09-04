@@ -1,39 +1,103 @@
-.lby-create-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:6px 0 26px}
-.lby-cta,.lby-join-btn,.lby-refresh,.lby-rules,.lby-extra{display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:var(--radius,8px);cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;letter-spacing:.05em;font-weight:600;white-space:nowrap;transition:background .15s,color .15s,border-color .15s}
-.lby-cta{padding:9px 16px;border:none;background:var(--gold,#c9a84c);color:#120c0d}
-.lby-cta:hover{background:var(--gold-light,#e8c96a)}
+/* THE ROW IS THE GAME'S, NOT THE SITE'S — every control here reads `--lby-accent`.
+   It used to be hardcoded gold on the grounds that one create button across six lobbies
+   was consistency, and that was written when the accents were an arbitrary hue wheel.
+   They are not: an accent IS its game now (shared/accents.js), it is what the home card
+   the player just clicked was painted in, and the single loudest object on a purple
+   game's lobby being Spender's gold is the same defect as the seven identical Resume
+   buttons this pass replaced. Dissonance had already broken ranks and overridden the
+   whole row locally, which is the usual sign that the shared rule is the wrong one.
+
+   `#12100c` rather than `var(--bg)` for the label on a filled control: every accent is
+   a light chroma, so near-black is right on all seven, and it must not follow a game
+   that re-tints `--bg`. */
+.lby-create-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:0}
+.lby-cta,.lby-join-btn,.lby-refresh,.lby-rules,.lby-extra{display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:var(--radius,8px);cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;letter-spacing:.05em;font-weight:600;white-space:nowrap;transition:background .15s,color .15s,border-color .15s,box-shadow .15s,transform .15s}
+/* Lit along its own face, like the loading bar and the home card: a filled slab on a
+   near-black page is the one place a flat colour reads as a sticker. */
+.lby-cta{padding:10px 17px;border:1px solid color-mix(in srgb,var(--lby-accent,var(--gold,#c9a84c)) 72%,#000);color:#12100c;
+	background:linear-gradient(180deg,color-mix(in srgb,var(--lby-accent,var(--gold,#c9a84c)) 84%,#fff5dc),var(--lby-accent,var(--gold,#c9a84c)));
+	box-shadow:inset 0 1px 0 rgba(255,255,255,.26),0 3px 9px -7px color-mix(in srgb,var(--lby-accent,var(--gold,#c9a84c)) 55%,transparent)}
+.lby-cta:hover{filter:brightness(1.08);transform:translateY(-1px);
+	box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 6px 14px -8px color-mix(in srgb,var(--lby-accent,var(--gold,#c9a84c)) 68%,transparent)}
 .lby-join{display:flex;gap:8px}
-.lby-code{padding:9px 12px;width:130px;background:var(--surface2,#241d16);border:1px solid var(--border,#3a3226);border-radius:var(--radius,8px);color:var(--text,#e8dfce);font-family:'Cinzel','Cinzel Fallback',serif;letter-spacing:.12em;text-transform:uppercase;outline:none}
-.lby-code:focus{border-color:var(--gold,#c9a84c)}
-.lby-join-btn{padding:9px 16px;background:transparent;color:var(--gold,#c9a84c);border:1px solid var(--gold,#c9a84c)}
-.lby-join-btn:hover{background:var(--gold,#c9a84c);color:#120c0d}
-.lby-refresh{width:38px;height:38px;padding:0;font-size:1rem;background:transparent;color:var(--text-dim,#b8ab90);border:1px solid var(--border,#3a3226)}
-.lby-refresh:hover{color:var(--text,#e8dfce);border-color:var(--text-dim,#b8ab90)}
+.lby-code{padding:10px 12px;width:130px;background:rgba(0,0,0,.28);border:1px solid var(--border,#3a3226);border-radius:var(--radius,8px);color:var(--text,#e8dfce);font-family:'Cinzel','Cinzel Fallback',serif;letter-spacing:.12em;text-transform:uppercase;outline:none;transition:border-color .15s,background .15s,box-shadow .15s}
+.lby-code::placeholder{color:#8d8271}
+.lby-code:focus{border-color:var(--lby-accent,var(--gold,#c9a84c));background:rgba(0,0,0,.42);
+	box-shadow:0 0 0 3px color-mix(in srgb,var(--lby-accent,var(--gold,#c9a84c)) 16%,transparent)}
+.lby-join-btn{padding:10px 16px;background:transparent;color:var(--lby-accent,var(--gold,#c9a84c));border:1px solid color-mix(in srgb,var(--lby-accent,var(--gold,#c9a84c)) 62%,transparent)}
+.lby-join-btn:hover{background:var(--lby-accent,var(--gold,#c9a84c));border-color:var(--lby-accent,var(--gold,#c9a84c));color:#12100c}
+.lby-refresh{width:40px;height:40px;padding:0;font-size:1rem;background:transparent;color:var(--text-soft,#b3a58b);border:1px solid var(--border,#3a3226)}
+.lby-refresh:hover{color:var(--text,#e8dfce);border-color:var(--lby-accent,var(--gold,#c9a84c))}
 .lby-refresh .lby-spinner{width:15px;height:15px;border-width:2px}
 /* Rules sits to the RIGHT of refresh and carries the game's accent, because it is
    the only entry point to the how-to-play for someone who has never seen the game
    (in-game it lives behind the ☰ menu, which you only reach by sitting down first). */
 .lby-rules,.lby-extra{padding:9px 14px;background:transparent;color:var(--lby-accent,var(--gold,#c9a84c));border:1px solid var(--border,#3a3226)}
 .lby-rules:hover,.lby-extra:hover{border-color:var(--lby-accent,var(--gold,#c9a84c));background:color-mix(in srgb,var(--lby-accent,#c9a84c) 14%,transparent)}
-.lby-rules-ic{font-size:.95em;line-height:1}
+/* The glyph is line art on the site's 24x24 grid (shared/lobby.jsx), so it needs a
+   real box rather than an emoji's text metrics. */
+.lby-rules-ic{display:inline-flex;width:16px;height:16px;flex:0 0 auto}
+.lby-rules-ic svg{width:100%;height:100%;display:block}
 /* `.lby-extra` is the create row's one optional slot (see `LobbyCreateRow`),
    styled AS Rules rather than like it: one game keeps a second entry point
    there and it has to read as the same kind of control. It is a separate class
    because `.lby-rules` is how the harness counts Rules buttons -- reusing it
    would make the game with the slot report two. */
 
-/* ── Phones: ONE row that scrolls sideways, never a wrapped stack ───────────
-   With Rules added, the five controls stop fitting at ~430px even after the
-   ≤600px tightening in lobby.lobby-css.css, and a wrap pushed the lists a whole
-   row further down. `safe center` keeps the row centered while it fits and
-   degrades to flex-start when it does not — plain `center` would push the
-   overflow off the LEFT edge, where no scroll can reach it. This block sits
-   after the base rules in the same file, so it wins without a specificity hack. */
+/* ── Phones: TWO ROWS THAT FIT, not one row that scrolls ────────────────────
+   THIS REPLACES A SIDEWAYS SCROLLER, and the scroller was the wrong answer to the
+   right observation. The observation: five controls stop fitting at ~430px, and
+   letting them WRAP arbitrarily pushed the lists a whole row down. The answer taken
+   at the time was `flex-wrap:nowrap` + `overflow-x:auto` + `justify-content:safe
+   center`, which fits nothing — it merely relocates the problem to a place the
+   player cannot see. Measured at 390px: the row is ~650px of controls in a 370px
+   box, so Rules ended 280px past the right edge, Dontminion and Rag Tag rendered a
+   literal "Ru" against the bezel, and Dissonance's Scorecard was entirely off-screen
+   behind it. A control past the fold of a horizontal scroller on a page that scrolls
+   VERTICALLY is not merely inconvenient; nothing on screen says it is there, and a
+   fade at the edge only makes the cut legible, not the control reachable.
+
+   Two explicit rows, both full width, nothing clipped:
+       [ + Create Game ......... ] [ ↻ ] [ Rules ] [ (extra) ]
+       [ CODE ................................. ] [ Join ]
+   Create takes the slack on row 1; the code field takes it on row 2. Explicit grid
+   placement rather than a wrap, so the pairing is a decision and not a consequence of
+   how wide the labels happen to be — and so the optional sixth control (Dissonance's
+   Scorecard) lands beside Rules instead of starting a third row. The lists move down
+   by ~48px, which is what the original wrap was avoiding, and that is a straight
+   trade against a control nobody could reach.
+
+   `screens.mjs` used to assert this row OVERFLOWS. That assertion is retired with the
+   behaviour it described; what it was really protecting — no wrap into a ragged
+   stack, no horizontal page scroll — is now asserted as "every control is inside the
+   viewport", which is strictly stronger. */
 @media(max-width:600px){
-	.lby-create-row{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;justify-content:flex-start;justify-content:safe center;padding:0 10px 4px;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;scrollbar-width:thin;scrollbar-color:var(--border,#3a3226) transparent}
-	.lby-create-row>*{flex:0 0 auto}
-	.lby-create-row::-webkit-scrollbar{height:4px}
-	.lby-create-row::-webkit-scrollbar-thumb{background:var(--border,#3a3226);border-radius:3px}
-	.lby-create-row::-webkit-scrollbar-track{background:transparent}
-	.lby-rules,.lby-extra{padding-left:11px;padding-right:11px}
+	/* THE COLUMN GAPS ARE MARGINS, NOT `gap`. With four tracks and only three controls
+	   (six of the seven games have no `extra`), `column-gap` still allocates the gutter
+	   before the EMPTY fourth track — so the row ended 12px short of the right margin
+	   that the code field, the tab bar and every card below it reach, and Dissonance,
+	   which has the fourth control, was the only one flush. A ragged step under the
+	   page's most prominent control, present in six of seven games and absent in the
+	   seventh. A margin on the item collapses to nothing when the item is not there. */
+	.lby-create-row{display:grid;grid-template-columns:1fr auto auto auto;
+		column-gap:0;row-gap:8px;align-items:center;justify-content:stretch;padding:0}
+	.lby-refresh,.lby-rules,.lby-extra{margin-left:8px}
+	.lby-cta{grid-column:1;grid-row:1;padding-left:12px;padding-right:12px}
+	.lby-refresh{grid-column:2;grid-row:1}
+	.lby-rules{grid-column:3;grid-row:1}
+	.lby-extra{grid-column:4;grid-row:1}
+	.lby-join{grid-column:1 / -1;grid-row:2}
+	.lby-code{flex:1 1 auto;width:auto;min-width:0}
+	/* The tertiary pair becomes its glyph: the two labels are worth ~120px, which is
+	   the difference between Create having room for its own label and not. The button
+	   keeps its name via `aria-label` (see LobbyCreateRow) — a control whose text is
+	   display:none has no accessible name. */
+	.lby-btn-label{display:none}
+	.lby-rules,.lby-extra{width:44px;height:44px;padding:0}
+	.lby-rules-ic{width:18px;height:18px}
+	/* 44px IS THE TOUCH MINIMUM AND IT BELONGS TO EVERY GAME. Dissonance had set it on
+	   its own create row — which is right, and made its identity band 8px taller than
+	   five of its siblings' at the same viewport, because only one of the seven had
+	   it. A control sized for a finger is not a per-game preference. */
+	.lby-cta,.lby-join-btn,.lby-refresh,.lby-code{min-height:44px}
 }

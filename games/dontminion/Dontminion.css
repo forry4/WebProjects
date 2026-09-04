@@ -15,14 +15,19 @@
    three-column lobby that stopped short of the screen edge — the columns got
    narrower on a wide monitor while the space beside them went unused. The cap is
    lobby-only, so the game board's own width rules are untouched. */
-.dm-lobby-cols { padding: 12px 18px 40px; width: 100%; }
+/* THE LOBBY'S SIDE PADDING AND MEASURE ARE `.lby-page-in` NOW (shared). Every
+   lobby had its own — 12/16/18/24px on five different elements — so the create
+   row, the tab bar and the columns lined up only within a game, never across
+   them, and the row centred itself in the VIEWPORT while the grid ran to the
+   monitor. One wrapper owns both edges; a game's grid class sets width only. */
+.dm-lobby-cols { width: 100%; }
 /* ...and the tab bar has to match that inset. Every other game gets its side
    padding from a PAGE wrapper (.browser / .coc-wrap / .duel), so their tab bar
    and columns line up for free; Dontminion's lobby root has none and the padding
    lives on the grid itself, which is why the bar it used to own carried an
    explicit `margin: 0 18px`. Keep them equal or the bar runs to the screen edge
    while the cards below it sit inset. */
-.dm .lby-tabs { margin-left: 18px; margin-right: 18px; }
+
 .dm-toast {
   position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
   background: var(--surface2, #242018); border: 1px solid var(--border, #3a342a);

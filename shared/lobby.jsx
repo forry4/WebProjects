@@ -21,12 +21,59 @@ import React, { useState, useRef, useEffect } from "react";
 // template literal silently reparsed the rest of the file as a tagged template and
 // blanked the whole page. A .css file cannot do that, and editors lint it properly.
 import _lobbyCssText from "./lobby.lobby-css.css?inline";
+import _lobbyPageCssText from "./lobby.lobby-page-css.css?inline";
 import _createModalCssText from "./lobby.create-modal-css.css?inline";
 import _lobbyCreateRowCssText from "./lobby.lobby-create-row-css.css?inline";
 import _gameMenuCssText from "./lobby.game-menu-css.css?inline";
 import _rulesModalCssText from "./lobby.rules-modal-css.css?inline";
+import { GAME_EMBLEM } from "./emblems.jsx";
+import { GAME_INFO } from "./catalog.js";
 
-export const lobbyCss = _lobbyCssText;
+// TWO FILES, ONE STRING. `lobby.lobby-css.css` is the lobby's chrome and layout — the
+// bar, the rows, the column grid, the tab bar — and it is what every game already
+// appends. `lobby.lobby-page-css.css` is the PAGE the lobby sits on: the ambient
+// ground and the identity band, which arrived later and would otherwise have needed
+// an import added to seven game screens to say the same thing seven times.
+export const lobbyCss = _lobbyCssText + _lobbyPageCssText;
+
+// ─── The kit's own glyphs ────────────────────────────────────────────────────
+// Line art on the site's one drawing grid (24x24, 1.5 stroke, round joins — see
+// shared/emblems.jsx), NOT emoji. The Rules button wore 📖 and the Dissonance
+// scorecard 🧮, which is the exact thing the home menu's side-feature row was
+// rebuilt to remove: an emoji arrives as a different typeface, a different weight
+// and often a different COLOUR SCHEME on every OS, so a hand-set page gets three
+// stickers pasted onto it. These inherit currentColor, so they take the accent the
+// button is already painted in.
+export const RULES_GLYPH = (
+	<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" aria-hidden="true" focusable="false">
+		<path d="M12 7.3C10.6 6 8.7 5.3 6.6 5.3H4.4v12.3h2.2c2.1 0 4 .7 5.4 2" />
+		<path d="M12 7.3c1.4-1.3 3.3-2 5.4-2h2.2v12.3h-2.2c-2.1 0-4 .7-5.4 2" />
+		<path d="M12 7.3v12.3" />
+	</svg>
+);
+export const SCORECARD_GLYPH = (
+	<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" aria-hidden="true" focusable="false">
+		<rect x="4.6" y="3.8" width="14.8" height="16.4" rx="2" />
+		<path d="M4.6 9h14.8M12 9v11.2" />
+	</svg>
+);
+
+// THE IDENTITY IN THE TOP-RIGHT, and it is the shell's lockup, not a seventh
+// invention. The home menu reads "GUEST · Harness" — a role label in dim
+// letterspaced small caps, then the name in the brighter serif — beside an EXIT chip.
+// The seven lobbies each hand-built their own version of the right rail: five passed a
+// bare `<span className="lby-head-name">`, one passed the string "Guest", and the
+// result was one dim letterspaced word floating in the corner in the LABEL style, with
+// its label missing. A registered player has no role word, so they get the name alone.
+export function LobbyUser({ user }) {
+	if (!user?.name) return null;
+	return (
+		<span className="lby-ident">
+			{user.guest && <span className="lby-ident-kind">Guest</span>}
+			<span className="lby-head-name">{user.name}</span>
+		</span>
+	);
+}
 
 // Full-width flush top bar. Renders its own back + rules buttons (uniform across games);
 // `user` is the right-side slot (name / guest badge). rulesLabel lets Duel say "How to Play".
@@ -34,7 +81,7 @@ export const lobbyCss = _lobbyCssText;
 // shows a single ☰ dropdown once you are at a board, never a row of Back/Rules
 // buttons. Pass `menu={<GameMenu items={…} />}` there and `onBack`/`onRules` in
 // the lobby, where a plain Back is right.
-export function LobbyHeader({ onBack, backLabel = "← Back", title, onRules, rulesLabel = "📖 Rules", user, menu }) {
+export function LobbyHeader({ onBack, backLabel = "← Back", title, onRules, rulesLabel = "Rules", user, menu }) {
 	return (
 		<div className="lby-header">
 			<div className="lby-head-left">
@@ -49,7 +96,135 @@ export function LobbyHeader({ onBack, backLabel = "← Back", title, onRules, ru
 	);
 }
 
+// ─── The lobby's identity band ───────────────────────────────────────────────
+// THE PAGE THE PLAYER LANDED ON HAS TO NAME ITSELF THE WAY THE CARD THEY CLICKED
+// DID. Every lobby used to open with the create row floating alone in the middle of
+// an otherwise empty page, under a top bar carrying a small centred title — so the
+// emblem, the accent wordmark and the player-count pill that had just been used to
+// choose the game all vanished at the moment of arrival, and the first thing on the
+// page was a button.
+//
+// ONE ROW, not a hero block: identity on the left, the create row on the right. It
+// occupies the height the create row already spent, so the lists do not move down —
+// which matters, because a lobby's job is the lists and this page has to hold three
+// columns above the fold on an 800px laptop.
+//
+// `game` is the catalogue id (shared/catalog.js), and it is the ONLY prop that
+// matters: the emblem, the name and the player range all come from that one entry,
+// so a lobby cannot drift from its home card the way a hand-passed title would.
+// `title`/`players` exist for a screen that is a lobby but not a catalogue game.
+export function LobbyHero({ game, title, players, children }) {
+	const info = GAME_INFO[game] || {};
+	const name = title || info.name || "";
+	const seats = players || info.players || null;
+	return (
+		<div className="lby-hero">
+			<div className="lby-hero-id">
+				{GAME_EMBLEM[game] && (
+					<span className="lby-hero-emblem" aria-hidden="true">{GAME_EMBLEM[game]}</span>
+				)}
+				<span className="lby-hero-text">
+					<h1 className="lby-hero-name">{name}</h1>
+					{seats && <span className="lby-hero-seats">{seats}</span>}
+				</span>
+			</div>
+			{children && <div className="lby-hero-actions">{children}</div>}
+		</div>
+	);
+}
+
+// ─── "There is more below this column" ───────────────────────────────────────
+// A lobby column scrolls INSIDE ITSELF at the widest tier, so its last card is cut
+// wherever the cap lands — through a Won badge, through the x-height of "21h ago".
+// Something has to say that is a scroll and not a clipping bug, and the two CSS-only
+// answers were both tried and both failed:
+//
+//   * a `mask-image` fade on `.lby-list` applies to the ELEMENT, and a list that does
+//     not overflow is simply SHORT — so a two-card Open column had its second card
+//     faded out of existence, bottom border and all, on every lobby at 1920. A card
+//     with no bottom edge and clear page under it is worse than a cut one.
+//   * a visible scrollbar. It is invisible in exactly the cases that matter: overlay
+//     scrollbars (macOS, and every headless capture) paint nothing until a scroll is
+//     in progress, so the cut card still stands alone with bare page beside it.
+//
+// CSS cannot ask whether a box overflows, so this measures it. `data-more` goes on any
+// `.lby-list` that has content below the fold and comes off the moment it is scrolled
+// to the end, so the fade is only ever over something.
+//
+// A lobby opts in with one line, the same discipline as `useLastDifficulty`, and
+// `shared/tests/test_lobby_kit.py` fails the next lobby that lands without it — a game
+// that forgets renders a perfectly normal-looking column that simply lies about its
+// own edge.
+export function useListFade() {
+	useEffect(() => {
+		// THE COLUMN'S HEIGHT IS MEASURED, NOT GUESSED. It used to be
+		// `calc(100vh - <a number>)`, and the number is the list's distance from the top
+		// of the page — which is not a constant: the identity band steps up at 1500px,
+		// its create row is one line or two depending on the width, and a game with a
+		// sixth control is taller again. Every value tried was wrong at some tier: 300
+		// stopped the column ~78px short and hid a row for nothing; 256 and 268 made
+		// the PAGE 20-52px taller than the viewport, so an outer scrollbar appeared
+		// over a layout whose whole premise is that the columns scroll internally, and
+		// dragging it revealed only black. Reading the list's own `top` is exact at
+		// every tier and needs no ladder of numbers.
+		// It writes a per-element custom property rather than a height, so the
+		// stylesheet keeps the rule (and `--lby-list-max` keeps working as the per-game
+		// override) and this only supplies the default.
+		const PAGE_FOOT = 44;   // `.lby-page-in`'s bottom padding
+		const size = (el) => {
+			const top = el.getBoundingClientRect().top + window.scrollY;
+			const avail = Math.round(window.innerHeight - top + window.scrollY - PAGE_FOOT);
+			el.style.setProperty("--lby-list-fit", `${Math.max(160, avail)}px`);
+		};
+		const mark = (el) => {
+			size(el);
+			const more = el.scrollHeight - el.clientHeight - el.scrollTop > 2;
+			if (more) el.setAttribute("data-more", "1");
+			else el.removeAttribute("data-more");
+		};
+		const lists = [...document.querySelectorAll(".lby-cols .lby-list")];
+		lists.forEach(mark);
+		const onScroll = (e) => mark(e.currentTarget);
+		lists.forEach((el) => el.addEventListener("scroll", onScroll, { passive: true }));
+		// A column's height changes with the VIEWPORT (the cap is a vh) and with its
+		// own content (History reveals another page as you reach the end), so one
+		// mount-time measurement is not enough. ResizeObserver covers both; the window
+		// listener covers a viewport change that does not resize the list itself.
+		const ro = typeof ResizeObserver === "function"
+			? new ResizeObserver(() => lists.forEach(mark)) : null;
+		lists.forEach((el) => ro?.observe(el));
+		const onResize = () => lists.forEach(mark);
+		window.addEventListener("resize", onResize);
+		return () => {
+			lists.forEach((el) => el.removeEventListener("scroll", onScroll));
+			ro?.disconnect();
+			window.removeEventListener("resize", onResize);
+		};
+	});
+}
+
+// The relative time on every lobby row's meta line. Six games each carry a private,
+// byte-identical copy of this; Where Wolf never had one at all, which is why its rows
+// were the only ones that did not say how old a room was. Exported here so the seventh
+// did not become a seventh copy — the other six are the obvious next thing to delete.
+export function timeAgo(ts) {
+	if (!ts) return "";
+	const diff = Math.floor(Date.now() / 1000) - ts;
+	if (diff < 60) return "just now";
+	if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+	if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+	return `${Math.floor(diff / 86400)}d ago`;
+}
+
 // Section header row: a micro uppercase accent label + an optional muted note.
+//
+// THE NOTE IS A COUNT AND IT IS SHOWN AT ZERO TOO. It was suppressed when the list was
+// empty, which meant the header's right-hand anchor vanished in exactly the state a new
+// player sees first: the accent rule ran to a dead end, and the row's composition
+// changed between the two states of the same screen for no reason the reader can see.
+// "0 waiting" is a fact and reads as one. (The phone TAB bar still hides a zero — a
+// numeric badge showing 0 is noise, a sentence saying it is information; they are
+// different objects and the difference is deliberate.)
 export function LobbySectionHd({ title, note }) {
 	return (
 		<div className="lby-section-hd">
@@ -73,12 +248,19 @@ export function notWaiting(games) {
 // drifted to four different styles for the SAME Resume button (btn / btn-gold /
 // btn-outline / btn-outline btn-sm), and a class name copied per game is a
 // difference nobody chose.
+//
+// IT IS THE KIT'S OWN BUTTON NOW, NOT `btn btn-gold`. `.btn-gold` is the SITE's gold,
+// and a row of them down a crimson game's Active column said "Spender" fourteen times
+// on a page whose whole job is to be one game's. `.lby-act` reads `--lby-accent` the
+// way every other thing in this kit does, and is sized for a list row rather than for
+// a form (the `.btn` scale left a 40px slab beside a 17px title).
+//
+// Three kinds, and the distinction is what the row is FOR: `primary` is the one thing
+// you came to do (Resume / Join), `secondary` is available but not the point (Review /
+// Return), `danger` gives back the seat (Cancel / Abandon).
 export function LobbyAction({ kind = "primary", onClick, children, title }) {
-	const cls = kind === "primary" ? "btn btn-gold"
-		: kind === "danger" ? "btn btn-ghost"
-			: "btn btn-outline";
 	return (
-		<button type="button" className={cls} onClick={onClick} title={title}>
+		<button type="button" className={`lby-act lby-act-${kind}`} onClick={onClick} title={title}>
 			{children}
 		</button>
 	);
@@ -274,9 +456,14 @@ export function LobbyCreateRow({ onCreate, onJoin, onRefresh, refreshing = false
 			<button type="button" className="lby-refresh" aria-label="Refresh" onClick={onRefresh}>
 				{refreshing ? <span className="lby-spinner" /> : "↻"}
 			</button>
+			{/* THE LABEL IS AN ELEMENT so a narrow phone can drop it and keep the glyph.
+			    `aria-label` carries the name either way — a control whose text is
+			    display:none is a control with no accessible name. See the <=430px
+			    block in the stylesheet for why this row has to give something back. */}
 			{onRules && (
-				<button type="button" className="lby-rules" onClick={onRules}>
-					<span className="lby-rules-ic" aria-hidden="true">📖</span>{rulesLabel}
+				<button type="button" className="lby-rules" onClick={onRules} aria-label={rulesLabel}>
+					<span className="lby-rules-ic" aria-hidden="true">{RULES_GLYPH}</span>
+					<span className="lby-btn-label">{rulesLabel}</span>
 				</button>
 			)}
 			{/* ONE OPTIONAL SLOT, after Rules, for a control only one game has —
@@ -303,7 +490,7 @@ export function LobbyCreateRow({ onCreate, onJoin, onRefresh, refreshing = false
 export const rulesModalCss = _rulesModalCssText;
 
 export function RulesModal({ title = "How to play", onClose, closeLabel = "Got it",
-	icon = "📖", children }) {
+	icon = RULES_GLYPH, children }) {
 	useEffect(() => {
 		const onKey = (e) => { if (e.key === "Escape") onClose(); };
 		document.addEventListener("keydown", onKey);
@@ -314,7 +501,7 @@ export function RulesModal({ title = "How to play", onClose, closeLabel = "Got i
 			<div className="rl-panel" role="dialog" aria-modal="true" aria-label={title}
 				onClick={(e) => e.stopPropagation()}>
 				<div className="rl-head">
-					<div className="rl-title">{icon} {title}</div>
+					<div className="rl-title"><span className="rl-title-ic" aria-hidden="true">{icon}</span>{title}</div>
 					<button type="button" className="rl-x" aria-label="Close" onClick={onClose}>✕</button>
 				</div>
 				<div className="rl-body">{children}</div>

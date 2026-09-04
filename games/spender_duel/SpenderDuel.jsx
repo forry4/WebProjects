@@ -3,7 +3,8 @@ import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss,
-  useProgressiveList, LobbyTabs, notWaiting, LobbyAction, useLastDifficulty } from "../../shared/lobby.jsx";
+  useProgressiveList, LobbyTabs, notWaiting, LobbyAction, useLastDifficulty,
+  LobbyHero, LobbyUser, useListFade } from "../../shared/lobby.jsx";
 // The gems, jewel cards and move log are SHARED with Spender (same game family, so
 // they must look the same). Duel adds only what Splendor Duel needs on top: pearls,
 // crowns, wild bonuses and ability glyphs — all optional props on the same CardView.
@@ -359,6 +360,8 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
   // ...revealed 10 at a time as the reader reaches the end, up to the 50 the
   // backend sends — see useProgressiveList.
   const [historyShown, historyMore] = useProgressiveList(history);
+  // A column that scrolls inside itself must say so — see `useListFade`.
+  useListFade();
   const [lobbyTab, setLobbyTab] = useState("open");  // mobile-only Open/Active/History selector
   const [loadingGames, setLoadingGames] = useState(false);
   const [toast, setToast] = useState("");
@@ -1572,15 +1575,17 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
         <style>{duelStyles}</style>
         <LobbyHeader
           onBack={onExit}
-          title="Spender Duel"
-          user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : null}
+          user={<LobbyUser user={authUser} />}
         />
+        <div className="lby-page"><div className="lby-page-in">
+        <LobbyHero game="duel">
         <LobbyCreateRow
           onCreate={() => setShowCreateModal(true)}
           onJoin={(code) => joinGame(code)}
           onRefresh={fetchGames}
           onRules={() => setShowRules(true)}
           refreshing={loadingGames} />
+        </LobbyHero>
 
         {showCreateModal && (
           <CreateModal title="New Game" onClose={() => setShowCreateModal(false)}>
@@ -1618,29 +1623,30 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
         ]} />
         <div className={`duel-lobby-cols lby-cols tab-${lobbyTab}`}>
           <div className="duel-section lby-col-open">
-            <LobbySectionHd title="Open Games" />
-            {openGames.length === 0 && <div className="lby-empty">No open games. Create one!</div>}
+            <LobbySectionHd title="Open Games" note={`${openGames.length} waiting`} />
+            {openGames.length === 0 && <div className="lby-empty">No open games — create one.</div>}
             <div className="lby-list">
             {openGames.map((g) => (
               <div className="lby-card" key={g.id}>
                 <div className="lby-card-info">
-                  <div className="lby-card-title">{g.host_name || "Player"}'s game</div>
+                  <div className="lby-card-title">{g.host_id === myId ? "Your game" : `${g.host_name || "Player"}'s game`}
+                    <span className="lby-seats">1/2</span></div>
                   <div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
                 </div>
                 <div className="lby-card-actions">
                   {g.host_id === myId
                     ? (<>
-                        <button className="btn btn-outline" onClick={() => resumeGame(g.id)}>Return</button>
-                        <LobbyAction kind="secondary" onClick={() => cancelGame(g.id)}>Cancel</LobbyAction>
+                        <LobbyAction kind="secondary" onClick={() => resumeGame(g.id)}>Return</LobbyAction>
+                        <LobbyAction kind="danger" onClick={() => cancelGame(g.id)}>Cancel</LobbyAction>
                       </>)
-                    : <button className="btn btn-gold" onClick={() => joinGame(g.id)}>Join</button>}
+                    : <LobbyAction onClick={() => joinGame(g.id)}>Join</LobbyAction>}
                 </div>
               </div>
             ))}
             </div>
           </div>
           <div className="duel-section lby-col-active">
-            <LobbySectionHd title="Active Games" />
+            <LobbySectionHd title="Active Games" note={`${activeMine.length} in progress`} />
             {savedRid && savedTok && !savedListed && activeMine.length === 0 && (
               <div className="lby-card">
                 <div className="lby-card-info">
@@ -1655,8 +1661,14 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
             {activeMine.map((g) => (
               <div className="lby-card" key={g.id}>
                 <div className="lby-card-info">
-                  <div className="lby-card-title">{g.player1_name || "?"} vs {g.player2_name || "?"}</div>
-                  <div className="lby-card-meta">{timeAgo(g.updated_at)}</div>
+                  {/* The opponent, not the pairing: this list is `/games/mine`, so
+                      one of the two seats is always you and naming yourself in your
+                      own list is noise. Spender and CoC keep the full matchup because
+                      their Active column is PUBLIC. */}
+                  <div className="lby-card-title">{
+                    (g.player1_name === (authUser?.name || "") ? g.player2_name : g.player1_name) || "?"
+                  }</div>
+                  <div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
                 </div>
                 <div className="lby-card-actions">
                   {g.your_turn ? <TurnBadge mine>Your turn</TurnBadge> : <TurnBadge>Their turn</TurnBadge>}
@@ -1667,15 +1679,15 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
             </div>
           </div>
           <div className="duel-section lby-col-history">
-            <LobbySectionHd title="History" />
-            {history.length === 0 && <div className="lby-empty">{authUser ? "No finished games yet." : "Log in to keep game history."}</div>}
+            <LobbySectionHd title="History" note={`${history.length} finished`} />
+            {history.length === 0 && <div className="lby-empty">{authUser ? "No finished games yet." : "Log in to keep your game history."}</div>}
             <div className="lby-list">
             {historyShown.map((g) => (
               <div className="lby-card lby-card-hist" key={g.id}>
                 <div className="lby-card-info">
                   <div className="lby-card-title">
                     <span className={`hist-result ${g.you_won ? "won" : "lost"}`}>{g.you_won ? "Won" : "Lost"}</span>
-                    <span className="hist-scores"> vs {g.opp_name} <span className="hist-score-num">{g.your_score ?? "?"}-{g.opp_score ?? "?"}</span></span>
+                    <span className="hist-scores"> vs {g.opp_name} <span className="hist-score-num">{g.your_score ?? "?"}–{g.opp_score ?? "?"}</span></span>
                   </div>
                   <div className="lby-card-meta">{WIN_DESC[g.win_condition] ? WIN_DESC[g.win_condition] + " · " : ""}{timeAgo(g.updated_at)}</div>
                 </div>
@@ -1686,6 +1698,7 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
             </div>
           </div>
         </div>
+        </div></div>
         {toast && <div className="duel-toast">{toast}</div>}
         {renderModals()}
       </div>

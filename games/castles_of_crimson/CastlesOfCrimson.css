@@ -1,9 +1,20 @@
 /* Self-hosted fonts (CoC is mounted bare without baseCss, so it carries its own copy;
    the browser dedupes identical @font-face by src url). Metric-matched fallbacks keep
    the layout stable if the real font isn't loaded yet. */
-@font-face{font-family:'Cinzel';font-style:normal;font-weight:400 700;font-display:optional;src:url(/fonts/cinzel.latin.woff2) format('woff2')}
-@font-face{font-family:'Crimson Pro';font-style:normal;font-weight:300 400;font-display:optional;src:url(/fonts/crimsonpro.latin.woff2) format('woff2')}
-@font-face{font-family:'Crimson Pro';font-style:italic;font-weight:300 400;font-display:optional;src:url(/fonts/crimsonpro-italic.latin.woff2) format('woff2')}
+/* `swap`, NOT `optional`, and this copy is why the rule exists as a rule. CoC mounts
+   BARE (no baseCss), so it carries its own @font-face block — and that copy kept
+   `optional` after the shared one was fixed. `optional` gives a face a ~100ms block
+   period and then, if it has not arrived, uses the fallback FOR THE LIFETIME OF THE
+   PAGE: the font still lands in the cache and `document.fonts.check()` starts
+   answering true, but nothing on screen ever changes. So on a cold cache this whole
+   game rendered in Georgia while every other screen rendered in Cinzel — the game's
+   own name changed typeface between its home card and its lobby — and a probe reading
+   the DECLARED font-family reported "Cinzel" throughout, which is how it survived.
+   Safe here because the size-adjust fallbacks below are metric matched: the worst case
+   is a repaint at the same widths, not a reflow. See shared/theme.base-css.css. */
+@font-face{font-family:'Cinzel';font-style:normal;font-weight:400 700;font-display:swap;src:url(/fonts/cinzel.latin.woff2) format('woff2')}
+@font-face{font-family:'Crimson Pro';font-style:normal;font-weight:300 400;font-display:swap;src:url(/fonts/crimsonpro.latin.woff2) format('woff2')}
+@font-face{font-family:'Crimson Pro';font-style:italic;font-weight:300 400;font-display:swap;src:url(/fonts/crimsonpro-italic.latin.woff2) format('woff2')}
 @font-face{font-family:'Cinzel Fallback';src:local('Georgia');size-adjust:111.8%}
 @font-face{font-family:'Crimson Fallback';src:local('Georgia');size-adjust:87.9%}
 /* CoC is mounted bare (the shell early-returns it without Spender's baseCss), so
@@ -12,22 +23,39 @@
 html,body{margin:0;padding:0;background:#120c0d}
 .coc *,.coc *::before,.coc *::after{box-sizing:border-box;margin:0;padding:0}
 .coc{--bg:#120c0d;--surface:#1d1416;--surface2:#281a1d;--border:#3e2a2e;--crimson:#a3263a;--crimson-l:#c8455a;
-  --gold:#c9a84c;--gold-l:#e8c96a;--text:#ecdfd6;--text-dim:#9c8780;--radius:8px;--radius-lg:14px;
+  /* `--text-soft` AND `--text-muted` ARE PART OF THE PALETTE, and this block did not
+     have them. CoC mounts BARE, so it carries its own copy of the tokens rather than
+     inheriting `baseCss`'s — and the copy predates the soft/muted tiers. An undefined
+     custom property makes the whole declaration invalid at computed-value time, so
+     `.lby-card-meta{color:var(--text-soft)}` fell back to INHERITING `--text`: every
+     room code and timestamp on a Castles card rendered at luminance 221 against 164
+     in the other six, nearly the weight of the title above it, so each card had two
+     competing focal lines and the eye was pulled to a hex string. A missing token does
+     not render dim; it renders bright, which is why nothing looked broken. */
+  --gold:#c9a84c;--gold-l:#e8c96a;--text:#ecdfd6;--text-dim:#9c8780;--text-soft:#bda99f;--text-muted:#6e5f59;--radius:8px;--radius-lg:14px;
   font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;color:var(--text);background:var(--bg);min-height:100vh}
 /* The LOBBY runs the neutral site palette (the game board keeps crimson); crimson is the
    lobby's --lby-accent, matching the home card. .coc already sets background:var(--bg) +
    min-height:100vh, so overriding --bg here neutralizes the lobby backdrop too. */
-.coc.coc-neutral{--bg:#0f0e0c;--surface:#1a1814;--surface2:#242018;--border:#3a342a;--text:#e8dfc8;--text-dim:#8a7d6a;--lby-accent:#d6454b}
-.coc-wrap{max-width:1100px;margin:0 auto;padding:calc(env(safe-area-inset-top,0px) + 18px) 16px 48px}
+.coc.coc-neutral{--bg:#0f0e0c;--surface:#1a1814;--surface2:#242018;--border:#3a342a;--text:#e8dfc8;--text-dim:#8a7d6a;--text-soft:#b3a58b;--text-muted:#5a5248;--lby-accent:#d6454b}
+/* THE LOBBY'S SIDE PADDING AND MEASURE ARE `.lby-page-in` NOW (shared). Every
+   lobby had its own — 12/16/18/24px on five different elements — so the create
+   row, the tab bar and the columns lined up only within a game, never across
+   them, and the row centred itself in the VIEWPORT while the grid ran to the
+   monitor. One wrapper owns both edges; a game's grid class sets width only. */
+.coc-wrap{width:100%;margin:0;padding:0}
 /* The LOBBY is full-bleed (flush to the edges, no wasted side space) like Duel; the in-game
    wrap (.coc-wrap-game) keeps its capped width. */
-.coc-wrap:not(.coc-wrap-game){max-width:none;margin:0;padding-left:22px;padding-right:22px}
+/* The LOBBY wrap adds nothing horizontally — `.lby-page-in` owns the measure and the
+   gutter for every game, and a second 22px here put CoC's wordmark 22px right of its
+   own Back button. Only the GAME wrap (.coc-wrap-game) keeps a width of its own. */
+.coc-wrap:not(.coc-wrap-game){max-width:none;margin:0}
 .coc-top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:18px;padding-bottom:12px;border-bottom:1px solid var(--border)}
 .coc-top-left{display:flex;align-items:center;gap:12px;min-width:0}
 .coc-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.5rem;font-weight:700;color:var(--crimson-l);letter-spacing:.03em;white-space:nowrap}
 .coc-user{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.78rem;color:var(--text-dim);letter-spacing:.05em}
 /* Lobby header bar is the shared LobbyHeader (.lby-header, shared/lobby.jsx). */
-.lby-header + .coc-wrap{padding-top:18px}
+
 /* Game-screen top bar: back button left, title truly centered, empty right spacer. */
 .coc-top-game{display:flex;align-items:center;gap:12px}
 .coc-top-game .coc-top-left{flex:1 1 0;justify-content:flex-start}
@@ -155,7 +183,7 @@ html,body{margin:0;padding:0;background:#120c0d}
   .coc .coc-wrap-game{padding-left:8px;padding-right:8px}
   .coc .coc-board-panel{padding:8px}
   /* lobby content buffer: 22px each side is too much on phones -> 10px */
-  .coc .coc-wrap:not(.coc-wrap-game){padding-left:10px;padding-right:10px}
+
   /* the track is a static block above the board at every width now; just tighten it */
   .coc-track-block{max-width:none;padding:6px 7px}
   /* the 7 turn-order spaces flex-SHARE the track width so they evenly fill it (prefixed to

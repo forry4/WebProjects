@@ -572,7 +572,12 @@
 }
 
 /* ─── Browser ───────────────────────────────────────────────────────────── */
-.browser{max-width:none;margin:0;padding:28px 24px 48px}
+/* The lobby's page padding and content measure are the shared `.lby-page-in` now
+   (shared/lobby.lobby-page-css.css): the create row used to centre itself in the
+   VIEWPORT while the column grid ran to whatever the monitor was, so nothing on the
+   page shared an edge with anything else. `.browser` survives as the ground's
+   stacking context only — see `.lby-page`. */
+.browser{max-width:none;margin:0;padding:0}
 /* The lobby header bar is the shared LobbyHeader (.lby-header, shared/lobby.jsx). The
    .browser-user* rail classes below are still used by the Home menu header. */
 .browser-user{flex:1 1 0;display:flex;align-items:center;justify-content:flex-end;gap:10px;min-width:0}
@@ -591,17 +596,24 @@
    byte-identical and five differed by a pixel; only the card hover, the muted
    note and the section-header baseline actually changed. */
 .browser-section{margin-bottom:32px}
-/* Open Games: current lobby size (e.g. 1/4) next to the host name. */
-.lobby-size{margin-left:8px;font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:.82rem;font-weight:600;letter-spacing:0;color:var(--gold)}
+/* Open Games' seat count is the shared `.lby-seats` chip now. It was `.lobby-size`
+   here and a run of words inside the meta line in CoC and Dontminion — the same fact
+   in three shapes, and this was the only one of the three that read well, so the kit
+   took it rather than the other way round. */
 /* Active Games: one player per line (override the shared title's nowrap/ellipsis). */
-.lby-card-title.matchup{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.35}
+/* The stacked matchup (`.lby-card-title.matchup`) moved to the shared sheet: Castles
+   of Crimson's public Active column uses it too now, and CoC does not load this file
+   at all — so a copy here would have been a copy that only one of the two games got. */
 /* The three-column grid, its breakpoints, the internal column scroll and the phone
    tab bar are the shared `.lby-cols` / `.lby-list` / `.lby-tabs`. That grid pins BOTH
    axes at every tier, which is what this lobby always needed anyway: the DOM order
    here is Open, History, Active, so column-only placement wrapped Active to row 2 and
    it read as "pushed down" below the tall History. `.lobby-grid` survives only to
    carry the bottom margin. */
-.lobby-grid{margin-bottom:32px}
+/* No bottom margin: `.lby-page-in` is the page's foot, and this 32px sat under a
+   column already sized to the space below it — which is exactly the 32px by which
+   this lobby's page out-scrolled its own content. `.lobby-grid` now carries nothing
+   and survives only as the hook the JSX already names. */
 .lobby-grid>.browser-section{margin-bottom:0}
 /* Fixed square size + centered content so swapping the ↻ glyph for the spinner
    (which carries a margin for its 'Loading…' use) doesn't resize the button and
