@@ -72,6 +72,27 @@ the order that took Rag Tag's harness from 13/30 to full 40/40 parity.
 actually charged and produced, with no replay in between. Run it against a corpus of
 game-server logs (`$ZENITH_CORPUS`, filled by `zenith_live.py` on `cob-mining`).
 
+**The corpus grows on a daily cron, and how it grows is the constraint on every audit
+below.** `cob_daily.bat` runs three steps in a deliberate order — an unmetered manifest
+refresh, then the unmetered game-server harvest, then the metered replay downloader.
+The free harvest goes first so the ~10/day replay quota is never spent on a table the
+game server would have handed over for nothing. Two properties are worth knowing before
+planning any work that needs more logs:
+
+- **The free path is opportunistic, not a yield.** A table is fetchable from the game
+  server only while its status is `finished`, and that is *not* a grace period it ages
+  out of: a 25-table sample found the 0–12h olds already `archive` and only the 12–24h
+  band open at all (3 of 5). Most games are never catchable there. Run it daily and take
+  what is open; do not plan around it.
+- **88 of every 100 Zenith tables run Secret Agents** (same sample), which our engine
+  does not implement and every audit discards. So the metered pass pre-checks that option
+  via `scrape_target.table_filter` — one unmetered call — before spending a slot.
+  Unfiltered, a day's ten slots buy roughly **one** readable log; filtered, ten. That
+  makes the metered downloader the workhorse and the ~4600-table archive backlog, not the
+  live window, the thing coverage actually comes from.
+- **The corpus therefore grows ~10 usable logs a day and cannot be hurried.** Verdicts
+  are cached in `skip.json`, so the probe cost falls as the cache warms.
+
 Three findings worth keeping:
 
 - **A full move replay is blocked, and not by us.** The spectator log carries no setup
