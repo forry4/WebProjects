@@ -82,13 +82,9 @@ function PlanetName({ planet, className = "" }) {
 
 
 function captureSummary(captured = []) {
-  const counts = {};
-  for (const planet of captured) counts[planet] = (counts[planet] || 0) + 1;
-  return PLANETS.filter((planet) => counts[planet]).map((planet) => (
-    <span className={`or-capture or-${planet}`} key={planet}>
-      <i className="or-capture-disc" aria-hidden="true" />
-      {planet}{counts[planet] > 1 ? ` ×${counts[planet]}` : ""}
-    </span>
+  return captured.map((planet, index) => (
+    <i className={`or-capture-disc or-${planet}`} key={`${planet}-${index}`}
+      title={`Captured ${planet}`} aria-label={`Captured ${planet}`} />
   ));
 }
 
@@ -109,23 +105,24 @@ function LeaderBadge({ leader, pid }) {
 }
 
 
-function PlayerRail({ player, name, active, me, leader }) {
+function PlayerRail({ player, name, active, me, leader, hint }) {
   if (!player) return null;
   return <section className={`or-player${active ? " active" : ""}${me ? " mine" : " theirs"}`}>
     <div className="or-player-name">
       <i className="or-seat-dot" aria-hidden="true" />
       <span>{name || "Player"}</span>
       {me && <em>you</em>}
+      {hint && <span className="or-player-hint">{hint}</span>}
       <LeaderBadge leader={leader} pid={player.__pid} />
     </div>
     <div className="or-resources">
       <span><b>{player.credits}</b> Credits</span>
       <span><b>{player.zenithium}</b> Zenithium</span>
-      <span><b>{player.hand?.length || 0}</b> cards</span>
-    </div>
-    <div className="or-captures" aria-label="Captured planets">
-      {captureSummary(player.captured)}
-      {!player.captured?.length && <small>no captured discs</small>}
+      <span className="or-resource-cards"><b>{player.hand?.length || 0}</b> cards
+        {!!player.captured?.length && <span className="or-captures" aria-label="Captured planets">
+          {captureSummary(player.captured)}
+        </span>}
+      </span>
     </div>
   </section>;
 }
@@ -684,6 +681,10 @@ export default function Orbit({ myId, authUser, onExit }) {
     ? (me.technology?.[selectedAgent.faction] || 0) + 1
     : null;
   const winnerName = game.winner ? names[game.winner] : null;
+  const myHint = over ? null
+    : game.phase === "mulligan" && isMyTurn ? "Choose replacements"
+      : game.pending_pid === myId ? (game.pending?.task?.label || "Resolve effect")
+        : isMyTurn ? "Choose an Agent" : null;
   return <div className="app orbit or-game" style={{ "--lby-accent": GAME_ACCENTS.orbit }}>
     <style>{styles}</style>
     <LobbyHeader title={`Orbit · ${roomId}`} user={<span className={`or-connection${connected ? "" : " lost"}`}>{connected ? (authUser?.name || "Connected") : "Reconnecting…"}</span>}
@@ -692,7 +693,8 @@ export default function Orbit({ myId, authUser, onExit }) {
     <main className="or-table">
       <div className="or-score-rail">
         <PlayerRail player={{ ...other, __pid: otherId }} name={names[otherId]} active={!over && game.turn_pid === otherId} leader={game.leader} />
-        <PlayerRail player={{ ...me, __pid: myId }} name={names[myId]} active={!over && game.turn_pid === myId} me leader={game.leader} />
+        <PlayerRail player={{ ...me, __pid: myId }} name={names[myId]} active={!over && game.turn_pid === myId}
+          me leader={game.leader} hint={myHint} />
       </div>
 
       {over && <section className="or-result">
@@ -727,7 +729,7 @@ export default function Orbit({ myId, authUser, onExit }) {
         {!over && !game.pending && !isMyTurn && <section className="or-status"><span className="or-spinner" /> {names[game.turn_pid] || "Opponent"} is choosing an action…</section>}
 
         <section className="or-hand-zone">
-          <div className="or-hand-head"><div><span className="or-eyebrow">Your hand</span><h2>{isMyTurn && !game.pending ? "Choose an Agent" : "Agents in reserve"}</h2></div>
+          <div className="or-hand-head"><span className="or-eyebrow">Your hand</span>
             <span>{me.hand.length} / {game.leader?.owner === myId ? (game.leader.level === 2 ? 6 : 5) : 4}</span></div>
           <div className="or-hand">{me.hand.map((card) => <AgentCard card={card} key={card.id} selected={selectedCard === card.id} onInfo={setInfo}
             onClick={isMyTurn && !game.pending ? () => setSelectedCard(card.id) : null} />)}</div>

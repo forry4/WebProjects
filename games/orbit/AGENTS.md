@@ -57,6 +57,12 @@ were each a real misread on the table, so they are worth not undoing:
   identical, and the badge is what sets the hand limit printed over the hand.
   The two sides are **Silver** and **Gold**, as the imported BGA card text names
   them ("place it on the Silver side … flip it to the Gold side").
+- **The player rail is the turn/status rail too.** Context such as "Choose an
+  Agent" or "Resolve effect" sits beside the player's name, never in a second
+  heading over the hand. Captures are literal miniature planet-coloured discs
+  immediately after the cards counter; do not bring back a separate captured-
+  planets row or text pills. This keeps the complete identity/resources state
+  in two compact lines.
 - **Every readable face opens the same modal** — a card, a bonus token, a
   technology space, a whole column. Plain click when the click is free,
   press-and-hold / right-click (`shared/gestures.js`) when it is not. A hand
@@ -79,6 +85,13 @@ were each a real misread on the table, so they are worth not undoing:
   influence panel into a large empty slab below Jupiter. At one column the
   wrapper becomes `display: contents` and order is influence → technology/log →
   placed Agents → decision → hand.
+- **The desktop targets are 2560×1600 and 1920×1080.** Orbit's in-game header
+  is full-bleed with the menu/name 20px from the viewport edges; unlike lobby
+  headers, it must not inherit the centred page measure. The table may grow to
+  2200px, and the full live state (including a decision panel and the hand)
+  must fit either target without page-level horizontal or vertical scrolling.
+  `screens.mjs` measures both targets so future content-height changes cannot
+  quietly spend that fit.
 - **Nothing on the table scrolls sideways except the hand.** The influence rows,
   the technology grid and both placed-Agent grids reflow instead: on a phone a
   planet's name moves above its track, and the placed-Agent columns are chips so

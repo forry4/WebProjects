@@ -121,18 +121,26 @@
   cursor: pointer;
 }
 
-.or-game .lby-header { position: sticky; top: 0; z-index: 80; background: rgba(8, 10, 22, .9); backdrop-filter: blur(14px); }
+.or-game .lby-header {
+  position: sticky;
+  top: 0;
+  z-index: 80;
+  padding: 8px 20px;
+  padding-top: calc(env(safe-area-inset-top, 0px) + 8px);
+  background: rgba(8, 10, 22, .9);
+  backdrop-filter: blur(14px);
+}
 .or-connection { color: #9be2b5; font-size: .78rem; }
 .or-connection.lost { color: #ffc47e; }
 .or-table {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(430px, .95fr);
-  gap: 14px;
-  width: min(1540px, calc(100% - 24px));
+  grid-template-columns: minmax(0, 1.75fr) minmax(560px, .95fr);
+  gap: 10px;
+  width: min(2200px, calc(100% - 32px));
   margin: 0 auto;
-  padding: 16px 0 64px;
+  padding: 10px 0 10px;
 }
 .or-table > * { min-width: 0; }
 
@@ -153,7 +161,7 @@
 .or-board-main {
   grid-column: 1;
   display: grid;
-  gap: 14px;
+  gap: 10px;
   min-width: 0;
   align-content: start;
 }
@@ -180,16 +188,18 @@
   grid-template-columns: 1fr 1fr;
   overflow: hidden;
 }
-.or-player { padding: .8rem 1rem; border-left: 3px solid transparent; }
+.or-player { padding: .52rem .8rem; border-left: 3px solid transparent; }
 .or-player + .or-player { border-left: 1px solid var(--or-line); }
 .or-player.active { background: linear-gradient(90deg, color-mix(in srgb, var(--or-seat) 14%, transparent), transparent); border-left-color: var(--or-seat); }
-.or-player-name { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; font-weight: 850; }
+.or-player-name { display: flex; align-items: center; gap: .42rem; min-width: 0; font-weight: 850; }
 .or-player-name > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .or-player-name em { color: var(--or-dim); font-size: .67rem; font-style: normal; letter-spacing: .1em; text-transform: uppercase; }
+.or-player-name .or-player-hint { flex: 0 1 auto; padding-left: .55rem; border-left: 1px solid var(--or-line); color: var(--lby-accent); font-size: .67rem; font-weight: 850; letter-spacing: .035em; }
 
 /* The badge renders on BOTH seats, so "no badge" is a state you can see rather
    than the absence of a chip you have to remember to look for. */
 .or-leader {
+  flex: none;
   display: inline-flex;
   align-items: center;
   gap: .32rem;
@@ -208,32 +218,19 @@
 .or-leader.lv-1 { border-color: #cdd3e2; background: #cdd3e2; color: #1b1d28; }
 .or-leader.lv-2 { border-color: #f3cc5f; background: #f3cc5f; color: #231c06; }
 
-.or-resources { display: flex; flex-wrap: wrap; gap: .45rem .9rem; margin-top: .45rem; color: var(--or-dim); font-size: .78rem; }
-.or-resources b { color: var(--or-ink); font-size: 1rem; }
-.or-captures { display: flex; flex-wrap: wrap; gap: .3rem; min-height: 1.6rem; align-items: center; margin-top: .45rem; }
-.or-captures small { color: #777f9d; }
-.or-capture {
-  display: inline-flex;
-  align-items: center;
-  gap: .28rem;
-  height: 1.55rem;
-  padding: 0 .5rem 0 .35rem;
-  border: 1px solid currentColor;
-  border-radius: 99px;
-  font-size: .6rem;
-  font-weight: 900;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-}
-.or-capture-disc { width: .62rem; height: .62rem; border-radius: 50%; background: currentColor; }
+.or-resources { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .75rem; margin-top: .18rem; color: var(--or-dim); font-size: .7rem; }
+.or-resources b { color: var(--or-ink); font-size: .88rem; }
+.or-resource-cards { display: inline-flex; align-items: center; gap: .24rem; }
+.or-captures { display: inline-flex; align-items: center; gap: .18rem; margin-left: .22rem; padding-left: .42rem; border-left: 1px solid var(--or-line); }
+.or-capture-disc { width: .7rem; height: .7rem; border: 1px solid rgba(255,255,255,.72); border-radius: 50%; background: currentColor; box-shadow: 0 1px 4px #0008; }
 
 /* ── Influence board ─────────────────────────────────────────────────────── */
-.or-influence { padding: .8rem 1rem .9rem; }
-.or-influence-head { display: grid; grid-template-columns: 7rem minmax(0, 1fr) 2rem; align-items: center; gap: .7rem; min-height: 2.2rem; padding-bottom: .4rem; }
+.or-influence { padding: .62rem .8rem .68rem; }
+.or-influence-head { display: grid; grid-template-columns: 7rem minmax(0, 1fr) 2rem; align-items: center; gap: .7rem; min-height: 1.8rem; padding-bottom: .25rem; }
 .or-influence-head h2 { margin: 0; color: var(--or-ink); font-size: 1rem; }
 .or-influence-head span { grid-column: 2; display: flex; justify-content: space-between; align-items: center; color: #7f88a6; font-size: .6rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
 .or-influence-head span i { color: #626c8d; font-size: .7rem; font-style: normal; }
-.or-track { display: grid; grid-template-columns: 7rem minmax(240px, 1fr) 2rem; gap: .7rem; align-items: center; min-height: 48px; padding: .3rem 0; border-top: 1px solid rgba(255,255,255,.065); }
+.or-track { display: grid; grid-template-columns: 7rem minmax(240px, 1fr) 2rem; gap: .7rem; align-items: center; min-height: 40px; padding: .18rem 0; border-top: 1px solid rgba(255,255,255,.065); }
 .or-track-name { min-width: 0; font-size: .84rem; }
 .or-track-name .or-pl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .or-track-spaces { display: grid; grid-template-columns: repeat(9, 1fr); align-items: center; }
@@ -279,9 +276,9 @@
 .or-bonus.spent { border-color: #4c5472; background: #111429; color: #69728f; font-size: .65rem; box-shadow: inset 0 0 0 2px #0b0d18; cursor: default; }
 
 /* ── Technology board ────────────────────────────────────────────────────── */
-.or-sideboards { grid-column: 2; display: grid; gap: 14px; min-width: 0; align-content: start; }
+.or-sideboards { grid-column: 2; display: grid; gap: 10px; min-width: 0; align-content: start; }
 .or-tech { overflow: hidden; }
-.or-tech > header { display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: .8rem 1rem; border-bottom: 1px solid var(--or-line); }
+.or-tech > header { display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: .56rem .75rem; border-bottom: 1px solid var(--or-line); }
 .or-tech h2, .or-log h2, .or-hand-head h2 { margin: 0; font-size: 1rem; }
 /* The NAMED key. Two dots in one accent colour said "somebody is here"; this
    says who, in the same two colours the rail and the markers use. */
@@ -292,9 +289,9 @@
 .or-tech-key .theirs i { background: var(--or-them); }
 
 .or-tech-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.or-tech-col { min-width: 0; padding: .55rem .45rem .65rem; border-left: 1px solid var(--or-line); color: var(--or-ink); }
+.or-tech-col { min-width: 0; padding: .4rem .35rem .45rem; border-left: 1px solid var(--or-line); color: var(--or-ink); }
 .or-tech-col:first-child { border-left: 0; }
-.or-tech-col h3 { display: flex; align-items: center; gap: .3rem; margin: 0 0 .38rem; color: var(--or-dim); font-size: .72rem; text-transform: uppercase; }
+.or-tech-col h3 { display: flex; align-items: center; gap: .3rem; margin: 0 0 .24rem; color: var(--or-dim); font-size: .68rem; text-transform: uppercase; }
 .or-tech-col h3 i { color: var(--or-fac, var(--lby-accent)); font-style: normal; }
 .or-tech-col h3 em { margin-left: auto; padding: 0 .3rem; border: 1px solid var(--or-line); border-radius: 4px; color: #7f88a6; font-size: .58rem; font-style: normal; }
 
@@ -305,13 +302,13 @@
 .or-tech-space {
   position: relative;
   display: grid;
-  grid-template-columns: 1.35rem minmax(0, 1fr);
+  grid-template-columns: 1.2rem minmax(0, 1fr);
   align-items: center;
-  gap: .34rem;
+  gap: .28rem;
   width: 100%;
-  height: 3.6rem;
-  margin-top: .2rem;
-  padding: .28rem .32rem;
+  height: 2.8rem;
+  margin-top: .15rem;
+  padding: .22rem .28rem;
   border: 1px solid rgba(255,255,255,.07);
   border-radius: 7px;
   background: rgba(255,255,255,.025);
@@ -320,14 +317,14 @@
   text-align: left;
   cursor: pointer;
 }
-.or-tech-rail { align-self: stretch; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .28rem; padding-right: .28rem; border-right: 1px solid rgba(255,255,255,.08); }
-.or-tech-lv { color: var(--lby-accent); font-size: .76rem; font-weight: 950; line-height: 1; letter-spacing: .02em; }
-.or-tech-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; color: #cbd0e1; font-size: .71rem; line-height: 1.24; }
+.or-tech-rail { align-self: stretch; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .16rem; padding-right: .2rem; border-right: 1px solid rgba(255,255,255,.08); }
+.or-tech-lv { color: var(--lby-accent); font-size: .7rem; font-weight: 950; line-height: 1; letter-spacing: .02em; }
+.or-tech-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: #cbd0e1; font-size: .66rem; line-height: 1.18; }
 .or-tech-space.mine { border-color: var(--or-me); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--or-me), transparent 62%); }
 .or-tech-space.theirs { border-color: var(--or-them); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--or-them), transparent 62%); }
 .or-tech-space.mine.theirs { border-color: rgba(255,255,255,.16); box-shadow: inset 3px 0 0 var(--or-me), inset -3px 0 0 var(--or-them); }
 .or-tech-seats { display: flex; gap: .14rem; }
-.or-tech-seats i { width: .58rem; height: .58rem; border-radius: 50%; box-shadow: 0 0 0 1px #0007; }
+.or-tech-seats i { width: .5rem; height: .5rem; border-radius: 50%; box-shadow: 0 0 0 1px #0007; }
 .or-tech-seats i.mine { background: var(--or-me); }
 .or-tech-seats i.theirs { background: var(--or-them); }
 /* THE TOKEN SITS ON LEVEL 2, which is the space that pays it — it used to float
@@ -335,29 +332,29 @@
    that one space's. It is a button, so it cannot nest inside the space's own
    button and has to be positioned into that header row from outside; the seat
    markers step aside for it on the one row that has one. */
-.or-tech-token { position: absolute; z-index: 2; right: .22rem; top: .22rem; width: 1.45rem; height: 1.45rem; font-size: .68rem; }
-.or-tech-row.has-token .or-tech-space { padding-right: 1.9rem; }
+.or-tech-token { position: absolute; z-index: 2; right: .18rem; top: .18rem; width: 1.2rem; height: 1.2rem; font-size: .58rem; }
+.or-tech-row.has-token .or-tech-space { padding-right: 1.55rem; }
 
-.or-row-bonus { margin: 0; padding: .6rem .8rem; border-top: 1px solid var(--or-line); color: var(--or-dim); font-size: .62rem; }
+.or-row-bonus { margin: 0; padding: .42rem .7rem; border-top: 1px solid var(--or-line); color: var(--or-dim); font-size: .6rem; }
 
-.or-log { max-height: 250px; overflow: hidden; }
-.or-log h2 { padding: .8rem 1rem; border-bottom: 1px solid var(--or-line); }
-.or-log > div { max-height: 196px; overflow: auto; padding: .45rem .85rem .8rem; }
-.or-log p { display: grid; grid-template-columns: 2rem 1fr; gap: .4rem; margin: .42rem 0; color: #bbc1d5; font-size: .74rem; line-height: 1.38; }
+.or-log { max-height: 170px; overflow: hidden; }
+.or-log h2 { padding: .55rem .75rem; border-bottom: 1px solid var(--or-line); }
+.or-log > div { max-height: 132px; overflow: auto; padding: .3rem .7rem .55rem; }
+.or-log p { display: grid; grid-template-columns: 1.6rem 1fr; gap: .35rem; margin: .28rem 0; color: #bbc1d5; font-size: .68rem; line-height: 1.28; }
 .or-log p b { color: #747d9c; }
 
 /* ── Placed Agents ───────────────────────────────────────────────────────────
    Five planets, always all five, at every width. The face is a chip; the text
    lives in the modal. */
-.or-columns { padding: .78rem; }
+.or-columns { padding: .52rem; }
 /* `.or-table > section` sets the panel border, so the seat stripe has to be
    written from the same depth to win rather than reaching for !important. */
 .or-table > .or-columns { border-left: 3px solid var(--or-seat); }
-.or-columns h3 { display: flex; align-items: center; gap: .45rem; margin: 0 0 .55rem; color: var(--or-dim); font-size: .73rem; letter-spacing: .08em; text-transform: uppercase; }
+.or-columns h3 { display: flex; align-items: center; gap: .4rem; margin: 0 0 .34rem; color: var(--or-dim); font-size: .68rem; letter-spacing: .08em; text-transform: uppercase; }
 .or-columns.mine h3 { color: var(--or-ink); }
-.or-column-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .55rem; }
-.or-column { min-width: 0; padding: .36rem .4rem .48rem; border-top: 3px solid currentColor; border-radius: 8px; background: linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.018)); }
-.or-column-head { display: flex; justify-content: center; align-items: center; min-height: 1.1rem; margin-bottom: .35rem; font-size: .62rem; }
+.or-column-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .4rem; }
+.or-column { min-width: 0; padding: .22rem .3rem .34rem; border-top: 3px solid currentColor; border-radius: 8px; background: linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.018)); }
+.or-column-head { display: flex; justify-content: center; align-items: center; min-height: .9rem; margin-bottom: .22rem; font-size: .58rem; }
 .or-column-head .or-pl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .or-slot {
   position: relative;
@@ -366,9 +363,9 @@
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: .18rem;
   width: 100%;
-  height: 5.15rem;
-  margin: 0 .28rem .28rem 0;
-  padding: .38rem;
+  height: 3.7rem;
+  margin: 0 .22rem .22rem 0;
+  padding: .28rem .32rem;
   border: 1px solid currentColor;
   border-radius: 7px;
   background: linear-gradient(160deg, rgba(255,255,255,.14), rgba(13,15,31,.97) 62%);
@@ -383,9 +380,9 @@
 .or-slot-top { display: flex; justify-content: space-between; align-items: center; font-size: .67rem; }
 .or-slot-top b { display: grid; place-items: center; width: 1.22rem; height: 1.22rem; border-radius: 50%; background: #f2f0e8; color: #121526; font-size: .66rem; }
 .or-slot-top i { color: var(--or-fac, var(--or-dim)); font-style: normal; }
-.or-slot strong { display: -webkit-box; align-self: center; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--or-ink); font-family: Georgia, serif; font-size: .72rem; line-height: 1.16; }
-.or-slot-count { color: #9098b5; font-size: .55rem; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
-.or-column-empty { display: grid; place-items: center; height: 5.15rem; border: 1px dashed color-mix(in srgb, currentColor, transparent 66%); border-radius: 7px; color: #646d8c; font-size: .6rem; letter-spacing: .05em; text-transform: uppercase; }
+.or-slot strong { display: -webkit-box; align-self: center; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; color: var(--or-ink); font-family: Georgia, serif; font-size: .7rem; line-height: 1.14; }
+.or-slot-count { color: #9098b5; font-size: .5rem; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
+.or-column-empty { display: grid; place-items: center; height: 3.7rem; border: 1px dashed color-mix(in srgb, currentColor, transparent 66%); border-radius: 7px; color: #646d8c; font-size: .56rem; letter-spacing: .05em; text-transform: uppercase; }
 
 /* ── Hand ───────────────────────────────────────────────────────────────── */
 /* THE WHOLE CARD IS OUTLINED IN ITS PLANET'S COLOUR, which is what replaced the
@@ -394,7 +391,7 @@
    block resolves to, so `color: var(--or-ink)` was quietly repainting the border
    over the `or-<planet>` class. The ink now lives on the children that need it.
    (`.or-column-head`'s count badge had the identical bug.) */
-.or-agent { display: flex; flex-direction: column; width: 154px; min-width: 154px; height: 216px; padding: .55rem; overflow: hidden; border: 2px solid currentColor; border-radius: 12px; background: linear-gradient(160deg, rgba(255,255,255,.13), rgba(13,15,31,.98) 36%); text-align: left; box-shadow: 0 7px 17px #0005; cursor: pointer; transition: transform .14s, box-shadow .14s; }
+.or-agent { display: flex; flex-direction: column; width: 145px; min-width: 145px; height: 184px; padding: .48rem; overflow: hidden; border: 2px solid currentColor; border-radius: 11px; background: linear-gradient(160deg, rgba(255,255,255,.13), rgba(13,15,31,.98) 36%); text-align: left; box-shadow: 0 7px 17px #0005; cursor: pointer; transition: transform .14s, box-shadow .14s; }
 .or-agent:hover { box-shadow: 0 9px 22px #0009, 0 0 0 1px var(--or-line); }
 .or-agent.playable:hover, .or-agent.selected { transform: translateY(-5px); box-shadow: 0 10px 24px #0009, 0 0 0 2px var(--lby-accent); }
 .or-agent:disabled { cursor: default; }
@@ -403,17 +400,17 @@
 .or-agent:not(.playable) { cursor: zoom-in; }
 .or-agent-top { display: flex; justify-content: space-between; align-items: center; color: currentColor; }
 .or-agent-top i { color: var(--or-fac, currentColor); font-size: 1.05rem; font-style: normal; }
-.or-agent-top b { display: grid; place-items: center; width: 1.8rem; height: 1.8rem; border-radius: 50%; background: #f2f0e8; color: #121526; font-size: .94rem; }
-.or-agent strong { margin: .7rem 0 .45rem; color: var(--or-ink); font-family: Georgia, serif; font-size: 1rem; }
-.or-agent-text { flex: 1; color: #cbd0e2; font-size: .72rem; line-height: 1.38; }
+.or-agent-top b { display: grid; place-items: center; width: 1.55rem; height: 1.55rem; border-radius: 50%; background: #f2f0e8; color: #121526; font-size: .84rem; }
+.or-agent strong { margin: .48rem 0 .3rem; color: var(--or-ink); font-family: Georgia, serif; font-size: .92rem; }
+.or-agent-text { flex: 1; color: #cbd0e2; font-size: .68rem; line-height: 1.28; }
 .or-agent-foot { display: flex; align-items: center; gap: .3rem; color: var(--or-dim); font-size: .6rem; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; }
 .or-agent-foot .or-pl { letter-spacing: .07em; }
 .or-agent.hidden { align-items: center; justify-content: center; border-color: #697296; background: repeating-linear-gradient(135deg, #161a38 0 8px, #222850 8px 16px); color: #9ba7d7; letter-spacing: .22em; }
 
-.or-hand-zone { grid-column: 1 / -1; padding: 1rem; }
-.or-hand-head { display: flex; justify-content: space-between; align-items: end; margin-bottom: .7rem; }
+.or-hand-zone { grid-column: 1 / -1; padding: .6rem .8rem .7rem; }
+.or-hand-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: .18rem; }
 .or-hand-head > span { color: var(--or-dim); font-size: .76rem; }
-.or-hand { display: flex; gap: .7rem; padding: .4rem .25rem .75rem; overflow-x: auto; }
+.or-hand { display: flex; gap: .58rem; padding: .22rem .18rem .32rem; overflow-x: auto; }
 .or-action-bar { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-top: .8rem; padding-top: .8rem; border-top: 1px solid var(--or-line); }
 .or-action-bar > span { color: var(--or-dim); font-size: .78rem; }
 .or-action-bar > div { display: flex; flex-wrap: wrap; gap: .45rem; }
@@ -430,6 +427,9 @@
 
 .or-decision, .or-mulligan, .or-result { grid-column: 1 / -1; padding: clamp(1rem, 3vw, 1.6rem); border-color: color-mix(in srgb, var(--lby-accent), transparent 45%) !important; background: linear-gradient(110deg, rgba(72, 54, 130, .32), rgba(18,21,42,.96)) !important; }
 .or-decision h2, .or-mulligan h2, .or-result h1 { margin: .25rem 0 .8rem; }
+.or-decision { padding: .62rem .8rem; }
+.or-decision h2 { margin: .12rem 0 .42rem; font-size: 1rem; }
+.or-decision .or-choice-grid button { padding: .48rem .68rem; }
 .or-choice-grid { display: flex; flex-wrap: wrap; gap: .5rem; }
 .or-mulligan p { color: var(--or-dim); }
 .or-result { text-align: center; }
@@ -514,7 +514,7 @@
   /* Keep the same five-rung geometry; only the surrounding chrome tightens. */
   .or-tech-col { padding: .42rem .3rem; }
   .or-tech-col h3 { font-size: .65rem; }
-  .or-tech-space { height: 3.55rem; gap: .26rem; padding-inline: .25rem; }
+  .or-tech-space { height: 3rem; gap: .24rem; padding-inline: .24rem; }
   .or-tech-text { font-size: .65rem; }
   .or-tech-lv { font-size: .72rem; }
 }
@@ -523,7 +523,7 @@
   .or-table { width: calc(100% - 12px); max-width: 1540px; gap: 8px; padding-top: 8px; }
   .or-score-rail { grid-template-columns: 1fr; }
   .or-player + .or-player { border-left: 0; border-top: 1px solid var(--or-line); }
-  .or-player { padding: .7rem .8rem; }
+  .or-player { padding: .55rem .65rem; }
   .or-board-main { gap: 8px; }
   .or-influence { padding: .55rem .6rem .7rem; }
   .or-influence-head { display: flex; justify-content: space-between; gap: .6rem; padding: 0 0 .38rem; }
@@ -541,14 +541,14 @@
   .or-column { padding: .2rem .2rem .35rem; }
   .or-column-head { min-height: .95rem; margin-bottom: .25rem; font-size: .51rem; }
   .or-column-head .or-pl { letter-spacing: .005em; }
-  .or-slot { height: 4.35rem; margin: 0 .18rem .18rem 0; padding: .28rem; }
+  .or-slot { height: 3.7rem; margin: 0 .18rem .18rem 0; padding: .25rem; }
   .or-slot.stacked { box-shadow: 2px 2px 0 -1px #171a31, 2px 2px 0 0 color-mix(in srgb, currentColor 62%, #171a31), 4px 4px 0 -1px #171a31, 4px 4px 0 0 color-mix(in srgb, currentColor 38%, #171a31); }
   .or-slot-top b { width: 1rem; height: 1rem; font-size: .57rem; }
   .or-slot-top { font-size: .58rem; }
   .or-slot strong { font-size: .58rem; }
   .or-slot-count { font-size: .46rem; letter-spacing: .02em; }
-  .or-column-empty { height: 4.35rem; font-size: .5rem; }
-  .or-agent { width: 138px; min-width: 138px; height: 204px; }
+  .or-column-empty { height: 3.7rem; font-size: .5rem; }
+  .or-agent { width: 132px; min-width: 132px; height: 176px; }
   .or-action-bar { align-items: stretch; flex-direction: column; }
   .or-action-bar > div { display: grid; grid-template-columns: 1fr; }
   .or-action-bar button { width: 100%; }

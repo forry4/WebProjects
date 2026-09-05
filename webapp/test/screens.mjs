@@ -5632,6 +5632,48 @@ try {
 			geometry.jupiterGap >= 0 && geometry.jupiterGap <= 24, JSON.stringify(geometry));
 		check("placed Agents use one card-stack face, not a detached stack control",
 			geometry.detachedStackControls === 0, JSON.stringify(geometry));
+		// The two desktop targets are product sizes, not incidental screenshots.
+		// At 2560 the shared page measure used to put the menu/name more than 500px
+		// from their edges; at 1920 the board ran about 160px below the fold. Keep
+		// both contracts measurable while the compact board evolves.
+		for (const viewport of [{ width: 2560, height: 1600 }, { width: 1920, height: 1080 }]) {
+			await page.setViewportSize(viewport);
+			await sleep(200);
+			const desktop = await page.evaluate(() => {
+				const menu = document.querySelector(".lby-head-left .gm-btn").getBoundingClientRect();
+				const user = document.querySelector(".lby-head-right").getBoundingClientRect();
+				const techHeights = [...document.querySelectorAll(".or-tech-space")]
+					.map((el) => Math.round(el.getBoundingClientRect().height));
+				const slotHeights = [...document.querySelectorAll(".or-slot, .or-column-empty")]
+					.map((el) => Math.round(el.getBoundingClientRect().height));
+				return {
+					wide: document.documentElement.scrollWidth > innerWidth + 1,
+					tall: document.documentElement.scrollHeight > innerHeight + 1,
+					scrollHeight: document.documentElement.scrollHeight,
+					menuLeft: Math.round(menu.left),
+					userRight: Math.round(user.right),
+					viewportWidth: innerWidth,
+					techHeights: [...new Set(techHeights)],
+					maxSlotHeight: Math.max(...slotHeights),
+					hint: document.querySelector(".or-player.mine .or-player-hint")?.textContent.trim(),
+					handSubhead: document.querySelectorAll(".or-hand-head h2").length,
+				};
+			});
+			check(`Orbit fills ${viewport.width}x${viewport.height} without page scrolling`,
+				!desktop.wide && !desktop.tall, JSON.stringify(desktop));
+			check(`the ${viewport.width}px game header reaches both screen edges`,
+				desktop.menuLeft <= 22 && desktop.userRight >= desktop.viewportWidth - 22,
+				JSON.stringify(desktop));
+			check(`technology and placed-Agent rows stay compact at ${viewport.width}px`,
+				desktop.techHeights.length === 1 && desktop.techHeights[0] <= 46
+				&& desktop.maxSlotHeight <= 60, JSON.stringify(desktop));
+			check("the turn hint lives beside your player name, not above the hand",
+				!!desktop.hint && desktop.handSubhead === 0,
+				JSON.stringify(desktop));
+			if (process.env.ORBIT_SHOTS) {
+				await page.screenshot({ path: `test-results/orbit-${viewport.width}x${viewport.height}-after.png`, fullPage: true });
+			}
+		}
 		await page.setViewportSize({ width: 390, height: 844 });
 		await sleep(250);
 		const phone = await page.evaluate(() => {
