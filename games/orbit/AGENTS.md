@@ -78,12 +78,16 @@ were each a real misread on the table, so they are worth not undoing:
   pair and the disc track separate grid rows on mobile, so they cannot overlap.
   A technology bonus sits on its LEVEL-2 space, which is the space that pays it,
   not above the whole column.
-- **Placed Agents are one mini-card stack, not two controls.** The top Agent is
-  the face, up to two subdued offset outlines show depth, and the face says the
-  total. Do not bring back a detached `+N below` button: it looked unrelated to
-  the card it counted. The face itself shows only the top Agent's name and a
-  clear count; cost, faction and rules belong in the modal. A press opens the
-  full column when its count is above 1.
+- **Played Agents live in their owner's player rail**, directly below Credits,
+  Zenithium and cards. Five planet-coloured count chips are the whole public
+  summary; do not reintroduce separate board panels, card names, or stacks.
+  Pressing a non-empty chip opens that column's full card list, and pressing a
+  card there opens its details.
+- **Agent faces use the Zenith-style symbol vocabulary, not effect prose or a
+  name.** The planet-coloured outline, price, faction glyph and effect symbols
+  are the table read; `symbols.jsx` is the shared icon/legend source. A card
+  modal retains the exact imported prose and explains only the symbols it shows;
+  the Rules modal carries the full legend.
 - **Desktop board columns size independently.** `.or-board-main` owns influence
   and both Agent panels; `.or-sideboards` owns technology and the log. Do not
   span the sideboard through outer-grid rows — that made its height stretch the

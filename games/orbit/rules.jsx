@@ -1,4 +1,5 @@
 import { RulesDefs, RulesFacts, RulesSection, RulesTip } from "../../shared/lobby.jsx";
+import { SymbolLegend } from "./symbols.jsx";
 
 export default function OrbitRules() {
   return <>
@@ -34,6 +35,17 @@ export default function OrbitRules() {
       ]} />
       <RulesTip>A recruited Agent reduces the future cost of its column, and it is
         already the top card when its own effects resolve.</RulesTip>
+    </RulesSection>
+
+    <RulesSection title="Card symbols">
+      <p>Agent faces use the same compact effect symbols as Zenith. The coloured
+        outline identifies its planet, the top-left number is its Credit cost,
+        and the top-right shape identifies its faction. Open a card to read its
+        complete effect and the legend for the symbols on that card.</p>
+      <SymbolLegend />
+      <RulesTip>Some effects have conditions, choices, targets, or a sequence.
+        The ◆ symbol is the reminder to open the card: its detail panel always
+        gives the complete instruction.</RulesTip>
     </RulesSection>
 
     <RulesSection title="Influence and planets">
