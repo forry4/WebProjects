@@ -67,7 +67,7 @@ import sys
 
 from games.orbit import cards as C
 from games.orbit import effects as E
-from games.orbit.tools.bga_effect_audit import EVENT_KIND, GOODIES, declared_kinds
+from games.orbit.tools.bga_effect_audit import EVENT_KIND, declared_kinds
 
 DEFAULT_CORPUS = os.environ.get("ZENITH_CORPUS", "C:/Users/Forrest/Zenith_corpus")
 
@@ -207,15 +207,12 @@ def main(argv=None):
         rows = advances(path)
         if not rows:
             continue
-        with open(path, encoding="utf-8") as fh:
-            cards = {int((d.get("args") or {}).get("card_num") or 0)
-                     for p in json.load(fh) for d in p.get("data") or []
-                     if d.get("type") == "moveCard"}
-        if cards & GOODIES:
-            continue
+        # A tech resolution is the ladder's doing, not a card's, so a Secret Agents
+        # game's advances are ordinary evidence -- the expansion adds cards to the pool,
+        # not levels to the boards.
         base.append((os.path.basename(path), rows))
 
-    print(f"{len(base)} base-game logs, "
+    print(f"{len(base)} logs, "
           f"{sum(len(rows) for _, rows in base)} tech advances\n")
 
     matches, mismatches, seen = audit_bonus_text(paths)

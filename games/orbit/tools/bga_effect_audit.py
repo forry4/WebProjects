@@ -53,6 +53,18 @@ from games.orbit import cards as C
 from games.orbit import effects as E
 
 DEFAULT_CORPUS = os.environ.get("ZENITH_CORPUS", "C:/Users/Forrest/Zenith_corpus")
+#: The ten Secret Agents cards. None is in `CARDS` -- the mini-expansion is not
+#: implemented -- so a segment in which one is PLAYED cannot be attributed.
+#:
+#: THE REST OF SUCH A GAME IS PERFECTLY GOOD EVIDENCE, and these audits used to throw it
+#: away: any log containing one was skipped whole, which discarded 7 of the first 10 games
+#: harvested and (measured over 25 tables) would discard 88 of every 100. The expansion
+#: adds cards to the pool; it does not change the 90 we implement. So the exclusion is
+#: per SEGMENT, exactly like the tech/bonus fan-out exclusion next to it.
+#:
+#: Their ids follow the deck's own convention -- first digit is the planet, 1xx mercury
+#: through 5xx jupiter -- so one being exiled or transferred by OUR card still produces
+#: effects we can account for. Only its own play is opaque.
 GOODIES = frozenset({119, 120, 219, 220, 319, 320, 419, 420, 519, 520})
 
 #: Events that say nothing about what a card did.
@@ -223,12 +235,11 @@ def main(argv=None):
     plays, clean_plays = collections.Counter(), collections.Counter()
     used = skipped = 0
     for path in paths:
-        segs = segments(path)
-        if any(card in GOODIES for card, _ in segs):
-            skipped += 1
-            continue
         used += 1
-        for card, events in segs:
+        for card, events in segments(path):
+            if card in GOODIES:
+                skipped += 1          # a Secret Agents play: opaque, but only this segment
+                continue
             if card is None or card not in C.CARDS:
                 continue
             plays[card] += 1
@@ -247,7 +258,7 @@ def main(argv=None):
         extra = seen - ours
         (review if extra else agree).append((card, seen, ours, extra))
 
-    print(f"{used} base-game logs ({skipped} skipped: Secret Agents)")
+    print(f"{used} logs ({skipped} Secret Agents segments skipped, rest of each game kept)")
     print(f"cards played: {len(plays)} of {len(C.CARDS)}, {sum(plays.values())} plays")
     print(f"  of which CLEANLY attributable: {len(clean_plays)} cards, "
           f"{sum(clean_plays.values())} plays")

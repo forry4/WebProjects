@@ -72,8 +72,9 @@ def card_of(event):
         return None
 
 
-def uses_expansion(grouped):
-    return any(card_of(e) in GOODIES
+def expansion_plays(grouped):
+    """How many Secret Agents cards were played -- reported, not a reason to skip."""
+    return sum(card_of(e) in GOODIES
                for evs in grouped.values() for e in evs if card_of(e) is not None)
 
 
@@ -119,9 +120,9 @@ def main(argv=None):
     ambiguous = used = skipped = 0
     for path in paths:
         grouped = moves_of(path)
-        if uses_expansion(grouped):
-            skipped += 1
-            continue
+        # No log-level skip: a Secret Agents game's OTHER 90 cards are ordinary evidence.
+        # A goodies play simply never matches `C.CARDS` below, so it scores nothing.
+        skipped += expansion_plays(grouped)
         used += 1
         clean, amb, seen, bons = observations(grouped)
         ambiguous += amb
@@ -130,7 +131,7 @@ def main(argv=None):
         for card, cost in clean:
             costs[card][cost] += 1
 
-    print(f"{used} base-game logs audited ({skipped} skipped: Secret Agents)\n")
+    print(f"{used} logs audited ({skipped} Secret Agents plays ignored)\n")
 
     unknown = sorted(set(plays) - set(C.CARDS) - GOODIES)
     print(f"cards played           : {len(plays)} distinct, {sum(plays.values())} plays")

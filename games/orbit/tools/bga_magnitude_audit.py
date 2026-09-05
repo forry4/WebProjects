@@ -213,12 +213,11 @@ def main(argv=None):
     all_amounts = {card["cost"] for card in C.CARDS.values()}
 
     for path in paths:
-        segs = segments(path)
-        if any(card in GOODIES for card, _ in segs):
-            skipped += 1
-            continue
         used += 1
-        for card, events in segs:
+        for card, events in segments(path):
+            if card in GOODIES:
+                skipped += 1          # see GOODIES in bga_effect_audit: per segment
+                continue
             if card is None or card not in C.CARDS:
                 continue
             if any(e.get("type") in FANOUT for e in events):
@@ -277,7 +276,7 @@ def main(argv=None):
                 else:
                     unconstrained["credits"] += 1
 
-    print(f"{used} base-game logs ({skipped} skipped: Secret Agents), "
+    print(f"{used} logs ({skipped} Secret Agents segments skipped), "
           f"{clean} cleanly attributable segments\n")
 
     total = opening_ok + opening_bad

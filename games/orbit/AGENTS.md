@@ -84,14 +84,13 @@ planning any work that needs more logs:
   out of: a 25-table sample found the 0–12h olds already `archive` and only the 12–24h
   band open at all (3 of 5). Most games are never catchable there. Run it daily and take
   what is open; do not plan around it.
-- **88 of every 100 Zenith tables run Secret Agents** (same sample), which our engine
-  does not implement and every audit discards. So the metered pass pre-checks that option
-  via `scrape_target.table_filter` — one unmetered call — before spending a slot.
-  Unfiltered, a day's ten slots buy roughly **one** readable log; filtered, ten. That
-  makes the metered downloader the workhorse and the ~4600-table archive backlog, not the
-  live window, the thing coverage actually comes from.
-- **The corpus therefore grows ~10 usable logs a day and cannot be hurried.** Verdicts
-  are cached in `skip.json`, so the probe cost falls as the cache warms.
+- **Every table counts, including the 88% running Secret Agents.** A pre-check that
+  skipped them was built and then removed: it optimised for a constraint that was not
+  real, and cost seven-eighths of the available games to avoid ten opaque segments per
+  log. `scrape_target.table_filter` remains as an unused opt-in hook; reach for it only
+  for a table that is genuinely unreadable, never one that is merely partly opaque.
+- **The corpus grows ~10 logs a day from the metered pass and cannot be hurried.** The
+  ~4600-table archive backlog, not the live window, is where coverage actually comes from.
 
 Three findings worth keeping:
 
@@ -101,19 +100,28 @@ Three findings worth keeping:
   reasons that say nothing about the rules. The effects, however, are all there: BGA
   brackets a card play with its consequences under one `move_id`.
 - **Our cost is a CEILING, not an equality.** Zenith discounts, so what BGA charges on
-  the day is at most the printed cost — card 502 was charged 10, 8 and 5 across three
-  games. A first cut of the audit tested equality and reported five "mismatches" and
+  the day is at most the printed cost — card 502 has been charged 5, 6, 8, 9 and 10. A first cut of the audit tested equality and reported five "mismatches" and
   nineteen cards "varying", which reads as a broken transcription of half the deck. It
-  was the instrument. Measured: **0 cards were ever charged more than our value**, and 29
+  was the instrument. Measured: **0 cards were ever charged more than our value**, and 62
   were seen at exactly it.
-- **Most real tables use an expansion we do not implement.** Table option `101` is
-  "Secret Agents" (1 = Ignore, 2 = Play with), and it maps to the ten `goodies=1` rows.
-  Seven of the first ten games harvested had it on. Filter on the option before
-  downloading; the audit also skips any log containing those card ids.
+- **Most real tables use an expansion we do not implement, and that is FINE.** Table
+  option `101` is "Secret Agents" (1 = Ignore, 2 = Play with), mapping to the ten
+  `goodies=1` rows (119/120 … 519/520). 88 of every 100 tables have it on.
+  Both the harvester and the audits used to reject those games whole — which threw away
+  seven of the first ten harvested and would have discarded seven-eighths of everything
+  available. Wrong trade: the expansion adds ten cards to the pool, it does not change
+  the 90 we implement or the boards they are played on. **The exclusion is now per
+  SEGMENT** — only the segment in which a goodies card is *played* is opaque — and the
+  corpus went 3 logs → 11 at zero quota cost, taking cleanly-attributable cards from 56
+  to 78 and segments from 85 to 328.
+  Two checks back the reasoning rather than assuming it: the audits see **98 distinct
+  card ids, 88 ours + exactly the 10 goodies and nothing else**, and splitting the corpus
+  base-only vs expansion-only gives **identical clean results** for the 90 (0 findings on
+  every axis either way; opening influence 243/243 within the expansion games alone).
 
 `tools/bga_effect_audit.py` is the companion that checks what a card DOES, not what it
-costs. Result on the same three logs: of 56 cards whose effects could be cleanly
-attributed, **all 56 produced nothing our data cannot account for**.
+costs. Result on 11 logs: of 78 cards whose effects could be cleanly attributed,
+**all 78 produced nothing our data cannot account for**.
 
 Four things make that number mean something, and each was a wrong answer first:
 
@@ -128,8 +136,11 @@ Four things make that number mean something, and each was a wrong answer first:
   comparison stops discriminating — it would score cards clean by being unable to accuse
   them.
 - **`leader` is deliberately not treated as ambient**, because it discriminates: cards
-  that declare a leader effect show `updateLeader` in 13 of 15 clean segments; cards that
-  do not, in 1 of 74. Calling it ambient would have hidden the audit's one finding.
+  that declare a leader effect show `updateLeader` in 43 of 57 clean segments; cards that
+  do not, in **0 of 271**. Calling it ambient would have hidden the audit's one finding.
+  (That lone counter-example in the first, smaller run WAS the undo artefact below — once
+  the segmenter stopped stitching retracted plays onto later actions, the signal came out
+  perfectly clean.)
 - **`undo` and `playCardDiploTech` are BOUNDARIES, not noise** — and this is the one that
   actually caught something. Both started out in `NOISE`, and the audit's single
   unexplained card was the result: a player played card 301, hit undo three times, then
@@ -147,13 +158,13 @@ audit duly reported as unaccounted effects — the parser accusing the data of i
 
 `tools/bga_magnitude_audit.py` is the third and sharpest: not what kind of effect, but
 **how much, and onto which planet**. It reuses the effect audit's segmenter, so only the
-comparison is new. On the same three logs: **131 grants that could have contradicted our
-data, none did**, and the opening influence held 85/85.
+comparison is new. On 11 logs: **460 grants that could have contradicted our data, none
+did**, and the opening influence held 328/328.
 
 - **It measures what the kinds audit ASSUMED.** That audit treats `influence` as ambient
   because "every card advances its own planet when played" — a load-bearing assumption
   carried on nothing. Here it is checked: the first `movePlanet` of a segment is the
-  played card's own planet at +1, in 85 of 85 segments.
+  played card's own planet at +1, in 328 of 328 segments.
 - **What a card can grant is a SET, not a number**, because half the deck's payouts are
   computed: `exile_tier` pays 2/4/7, `card_cost` pays the cost of some card, `per_nonempty`
   pays per track (and BGA emits one event per track where our engine adds the lump sum —
@@ -177,7 +188,7 @@ by the card audits, so until now neither `TECH_EFFECTS` nor `BONUS_EFFECTS` had 
 checked at all.
 
 - **The bonus tokens check themselves.** `gainBonus` carries `bonus_desc`, BGA's own
-  words for what the token does. All **8 tokens seen, 35 gains, every description
+  words for what the token does. All **8 tokens seen, 148 gains, every description
   identical to ours** — no inference required.
 - **The tech ladder is an A/B, not a comparison.** Two things block a direct check: the
   board is double-sided (`TECH_EFFECTS` is keyed `(faction, side, level)` and `setTech`
@@ -186,13 +197,13 @@ checked at all.
   declaring agreement would be circular, so the two readings — ours and "only level L
   fires" — are made to *compete* on the same evidence, where a side counts as possible
   only if it explains every advance of that faction in that game, both players'.
-  Result: **our reading is contradicted nowhere and pins the side uniquely in 9 of 9
-  game-factions; the rival is impossible in 7 of 9.** One bit of freedom against up to
+  Result: **our reading is contradicted nowhere and pins the side uniquely in 31 of 31
+  game-factions; the rival is impossible in 27 of 31.** One bit of freedom against up to
   five levels of consequence is a real constraint.
 - **`influence` is ambient here too, and that cost a wrong answer first.** Counting it as
   evidence made robot and animod impossible on *every* log, while a hand check of those
   same logs matched the ladder step for step. The cause is the rule the magnitude audit
-  measured 85/85: a card entering a column advances that column's planet, and `mobilize`
+  measured 328/328: a card entering a column advances that column's planet, and `mobilize`
   puts cards into columns — so any ladder step that mobilizes drags influence behind it
   whatever its own `influence_each` says. What still discriminates is mobilize, transfer,
   discard, zenithium, credits and leader.
