@@ -270,7 +270,12 @@
 .duel-wm-txt{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.05rem;font-weight:700;min-width:44px;text-align:right;white-space:nowrap;color:var(--text)}
 .duel-wm.done .duel-wm-txt{color:#8fe07a}
 .duel-wm-t{opacity:.5;font-weight:400}
-.duel-reserved-row{display:flex;gap:10px;margin-top:6px;flex-wrap:wrap}
+.duel-reserved-row{display:flex;gap:10px;margin-top:6px;flex-wrap:nowrap}
+/* NOWRAP, not wrap: three reserves are the maximum the rules allow and they must always
+   read as one hand. Wrapping was never a fallback that helped — the third card dropped
+   onto its own line and the box grew — and it fired for a reason no arithmetic here can
+   see (the scrollbar note below). Not wrapping makes the sizing below the ONLY thing
+   that decides how wide a reserve is. */
 /* Reserved cards are sized so exactly THREE fit on ONE row of the player box: card width =
    (box content width − the two 10px row gaps, with a few px of slack) / 3, read off the
    .duel-player inline-size container (100cqw). Height keeps the 62:86 (=1.387) small-card
@@ -279,6 +284,18 @@
    The .card.card-small prefix (0,4,0) is REQUIRED to out-specify the shared .card.card-small
    internals (0,3,0) — a bare .duel-reserved-row .card-* (0,2,0) silently loses to them. */
 .duel-reserved-row{--card-w-small:calc((100cqw - 24px) / 3);--card-h-small:calc(var(--card-w-small) * 1.387)}
+/* …and the cards may SHRINK below that width, because 100cqw can over-report the row.
+   .duel-player is a scroll container on desktop (overflow-y:auto, see the min-width:1121px
+   block) and Chrome does NOT subtract a classic scrollbar from the container-query size:
+   with the box scrolling, cqw stayed 598 while the row was really 583, so three cards were
+   each cut to a third of 598 and the third wrapped. Measured on Chrome/Windows at 2560x1600;
+   INVISIBLE to `npm run screens`, whose headless Chromium has OVERLAY scrollbars (0px) —
+   the browser gate cannot see this class of bug at all, which is why the guard is a CSS-text
+   test instead. scrollbar-gutter:stable (below) makes cqw honest; flex-shrink is the belt to
+   its braces, and covers any other few-px mismatch (sub-pixel rounding, a wider scrollbar
+   theme) the same way. min-width:0 because a flex item's automatic minimum is its MIN-CONTENT
+   width, which for the 3-crown card sits at 86-99% of the assigned width and would pin it. */
+.duel-reserved-row .card.card-small{flex-shrink:1;min-width:0}
 .duel-reserved-row .card.card-small{padding:calc(var(--card-h-small)*0.049) calc(var(--card-h-small)*0.043) calc(var(--card-h-small)*0.043)}
 .duel-reserved-row .card.card-small .card-header{margin-bottom:calc(var(--card-h-small)*0.043)}
 .duel-reserved-row .card.card-small .card-points{font-size:calc(var(--card-h-small)*0.147);min-width:0}
@@ -430,7 +447,15 @@
      reserved cards) can't fit it SCROLLS inside its own bounds instead of the card spilling
      out past the box border. margin-top:auto still pins reserved to the foot when it fits
      (auto margins only eat POSITIVE free space; with overflow it resolves to 0). */
-  .duel-gamescreen .duel-col-side .duel-player{flex:1 1 0;min-height:0;margin-bottom:0;display:flex;flex-direction:column;overflow-y:auto}
+  /* scrollbar-gutter:stable RESERVES the scrollbar's width whether or not the box is
+     scrolling right now. Two things follow, and the first is a correctness fix, not polish:
+     the box is a container-query container, and Chrome computes 100cqw WITHOUT subtracting
+     a classic scrollbar — so a scrolling box handed the reserved row a cqw ~17px wider than
+     the row really was and the third reserve wrapped (see the .duel-reserved-row note). A
+     reserved gutter IS subtracted, so the arithmetic matches the row again. Second, the
+     cards stop resizing the moment the scrollbar appears or goes away. Costs nothing where
+     scrollbars overlay (macOS, phones, headless Chromium): there the gutter is 0. */
+  .duel-gamescreen .duel-col-side .duel-player{flex:1 1 0;min-height:0;margin-bottom:0;display:flex;flex-direction:column;overflow-y:auto;scrollbar-gutter:stable}
   .duel-gamescreen .duel-col-side .duel-reserved-row{margin-top:auto}
   /* the log fills its (viewport-bounded) column and scrolls inside — the row-2 1fr height
      caps it to the screen, min-height:0 lets the inner move-log overflow-scroll. */

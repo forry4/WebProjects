@@ -52,6 +52,9 @@ were each a real misread on the table, so they are worth not undoing:
   simply no token. All fifteen spaces have one fixed height and readable copy;
   the modal carries whatever a long effect cannot show. The level-2 bonus is a
   fixed-size token on that rung, not variable-length text or another section.
+  On a phone the board starts collapsed into three faction cells, each showing
+  only both seats' current levels; expanding restores the full ladder. The
+  named seat key stays visible in both states so those numbers are unambiguous.
 - **The Leader badge renders on BOTH seats**, including its `lv-0` "No badge"
   state — it used to render only under its owner, so no badge and no chip looked
   identical, and the badge is what sets the hand limit printed over the hand.
@@ -78,13 +81,15 @@ were each a real misread on the table, so they are worth not undoing:
 - **Placed Agents are one mini-card stack, not two controls.** The top Agent is
   the face, up to two subdued offset outlines show depth, and the face says the
   total. Do not bring back a detached `+N below` button: it looked unrelated to
-  the card it counted. A press opens the full column when its count is above 1.
+  the card it counted. The face itself shows only the top Agent's name and a
+  clear count; cost, faction and rules belong in the modal. A press opens the
+  full column when its count is above 1.
 - **Desktop board columns size independently.** `.or-board-main` owns influence
   and both Agent panels; `.or-sideboards` owns technology and the log. Do not
   span the sideboard through outer-grid rows — that made its height stretch the
   influence panel into a large empty slab below Jupiter. At one column the
-  wrapper becomes `display: contents` and order is influence → technology/log →
-  placed Agents → decision → hand.
+  wrappers become `display: contents`; on phones the order is influence →
+  technology → placed Agents → decision → hand → log.
 - **The desktop targets are 2560×1600 and 1920×1080.** Orbit's in-game header
   is full-bleed with the menu/name 20px from the viewport edges; unlike lobby
   headers, it must not inherit the centred page measure. The table may grow to
@@ -92,6 +97,9 @@ were each a real misread on the table, so they are worth not undoing:
   must fit either target without page-level horizontal or vertical scrolling.
   `screens.mjs` measures both targets so future content-height changes cannot
   quietly spend that fit.
+- **On phones the Log is the final board section**, after the hand and any live
+  action controls. It is history, not the next decision, and must not split the
+  board state from the cards a player acts with.
 - **Nothing on the table scrolls sideways except the hand.** The influence rows,
   the technology grid and both placed-Agent grids reflow instead: on a phone a
   planet's name moves above its track, and the placed-Agent columns are chips so

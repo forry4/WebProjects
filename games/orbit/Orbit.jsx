@@ -181,17 +181,34 @@ function InfluenceBoard({ game, myId, catalog, onInfo }) {
    tokens live on the numbered rung itself. Full rules text remains one press
    away, so the board can use readable type instead of fitting paragraphs. */
 function TechBoard({ game, myId, otherId, myName, theirName, catalog, onInfo }) {
+  const [collapsed, setCollapsed] = useState(true);
   const me = game.players?.[myId];
   const them = game.players?.[otherId];
-  return <section className="or-tech" aria-label="Technology board">
+  return <section className={`or-tech${collapsed ? " collapsed" : ""}`} aria-label="Technology board">
     <header>
       <h2>Technology</h2>
       <span className="or-tech-key">
         <b className="mine"><i aria-hidden="true" />{myName || "You"}</b>
         <b className="theirs"><i aria-hidden="true" />{theirName || "Opponent"}</b>
       </span>
+      <button type="button" className="or-tech-toggle" aria-expanded={!collapsed}
+        aria-controls="or-tech-body" onClick={() => setCollapsed((old) => !old)}>
+        {collapsed ? "Show tracks" : "Hide tracks"}<i aria-hidden="true">⌄</i>
+      </button>
     </header>
-    <div className="or-tech-grid">
+    <div className="or-tech-summary" aria-label="Current technology levels">
+      {FACTIONS.map((faction) => <div className={`or-tech-summary-row or-${faction}`} key={faction}>
+        <strong><i aria-hidden="true">{FACTION_GLYPH[faction]}</i>{faction}</strong>
+        <span className="mine" title={`${myName || "You"} — level ${me?.technology?.[faction] || 0}`}>
+          <i aria-hidden="true" /><b>{me?.technology?.[faction] || 0}</b>
+        </span>
+        <span className="theirs" title={`${theirName || "Opponent"} — level ${them?.technology?.[faction] || 0}`}>
+          <i aria-hidden="true" /><b>{them?.technology?.[faction] || 0}</b>
+        </span>
+      </div>)}
+    </div>
+    <div className="or-tech-body" id="or-tech-body">
+      <div className="or-tech-grid">
       {FACTIONS.map((faction) => {
         const mineLevel = me?.technology?.[faction] || 0;
         const theirLevel = them?.technology?.[faction] || 0;
@@ -218,8 +235,9 @@ function TechBoard({ game, myId, otherId, myName, theirName, catalog, onInfo }) 
           </div>)}
         </div>;
       })}
+      </div>
+      <p className="or-row-bonus">Complete all three tracks: level 1 → +1 influence · level 2 → +2 · level 3 → +3</p>
     </div>
-    <p className="or-row-bonus">Complete all three tracks: level 1 → +1 influence · level 2 → +2 · level 3 → +3</p>
   </section>;
 }
 
@@ -270,9 +288,8 @@ function Columns({ game, pid, name, mine, onInfo }) {
           {top ? <button type="button" className={`or-slot${cards.length > 1 ? " stacked" : ""}`}
             title={`${cards.length} Agent${cards.length === 1 ? "" : "s"} — ${top.name} on top`}
             onClick={() => onInfo(stackInfo)}>
-            <span className="or-slot-top"><b>{top.cost}</b><i>{FACTION_GLYPH[top.faction]}</i></span>
             <strong>{top.name}</strong>
-            <span className="or-slot-count">{cards.length === 1 ? "1 agent" : `${cards.length} agents`}</span>
+            <span className="or-slot-count"><b>{cards.length}</b>{cards.length === 1 ? " agent" : " agents"}</span>
           </button> : <span className="or-column-empty">empty</span>}
         </div>;
       })}

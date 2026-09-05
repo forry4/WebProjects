@@ -5632,6 +5632,18 @@ try {
 			geometry.jupiterGap >= 0 && geometry.jupiterGap <= 24, JSON.stringify(geometry));
 		check("placed Agents use one card-stack face, not a detached stack control",
 			geometry.detachedStackControls === 0, JSON.stringify(geometry));
+		const placedFaces = await page.evaluate(() => {
+			const slots = [...document.querySelectorAll(".or-slot")];
+			return {
+				slots: slots.length,
+				extraFacts: document.querySelectorAll(".or-slot .or-slot-top").length,
+				complete: slots.every((slot) => !!slot.querySelector("strong")?.textContent.trim()
+					&& /^\d+\s+agents?$/i.test(slot.querySelector(".or-slot-count")?.textContent.trim() || "")),
+			};
+		});
+		check("a played Agent shows only its top name and an unambiguous stack count",
+			placedFaces.slots > 0 && placedFaces.extraFacts === 0 && placedFaces.complete,
+			JSON.stringify(placedFaces));
 		// The two desktop targets are product sizes, not incidental screenshots.
 		// At 2560 the shared page measure used to put the menu/name more than 500px
 		// from their edges; at 1920 the board ran about 160px below the fold. Keep
@@ -5728,6 +5740,44 @@ try {
 		check("bonus tokens are uniformly compact and clear of every planet track",
 			inner.bonuses.every(({ w, h }) => Math.abs(w - h) <= 1 && w <= 30)
 			&& inner.tokenOverlaps === 0, JSON.stringify(inner));
+
+		// PHONE HIERARCHY. Technology starts as three tiny progress summaries,
+		// expands back to all fifteen real spaces, and the Log comes after the
+		// hand instead of interrupting the board before the player's controls.
+		const collapsedTech = await page.evaluate(() => {
+			const body = document.querySelector(".or-tech-body");
+			const hand = document.querySelector(".or-hand-zone").getBoundingClientRect();
+			const logBox = document.querySelector(".or-log").getBoundingClientRect();
+			const summaries = [...document.querySelectorAll(".or-tech-summary-row")];
+			return {
+				bodyHidden: getComputedStyle(body).display === "none",
+				summaries: summaries.length,
+				levels: summaries.map((row) => [...row.querySelectorAll(":scope > span > b")]
+					.map((el) => el.textContent.trim())),
+				logAfterHand: logBox.top >= hand.bottom - 1,
+			};
+		});
+		check("technology collapses on a phone to both players' level on all three tracks",
+			collapsedTech.bodyHidden && collapsedTech.summaries === 3
+			&& collapsedTech.levels.every((levels) => levels.length === 2
+				&& levels.every((level) => /^\d+$/.test(level))), JSON.stringify(collapsedTech));
+		check("the Log is the final board section on a phone",
+			collapsedTech.logAfterHand, JSON.stringify(collapsedTech));
+		if (process.env.ORBIT_SHOTS) {
+			await page.screenshot({ path: "test-results/orbit-390x844-after.png", fullPage: true });
+		}
+		await page.locator(".or-tech-toggle").click({ timeout: 10_000 }).catch(() => {});
+		await sleep(100);
+		const expandedTech = await page.evaluate(() => ({
+			bodyVisible: getComputedStyle(document.querySelector(".or-tech-body")).display !== "none",
+			spaces: [...document.querySelectorAll(".or-tech-space")]
+				.filter((el) => el.getBoundingClientRect().height > 0).length,
+			expanded: document.querySelector(".or-tech-toggle")?.getAttribute("aria-expanded"),
+		}));
+		check("the compact technology summary expands to the complete ladder",
+			expandedTech.bodyVisible && expandedTech.spaces === 15 && expandedTech.expanded === "true",
+			JSON.stringify(expandedTech));
+		await page.locator(".or-tech-toggle").click({ timeout: 10_000 }).catch(() => {});
 
 		// Every readable face opens the same modal, so the condensed column chip
 		// loses no rules text: press one and its Agent's own effect comes back.
