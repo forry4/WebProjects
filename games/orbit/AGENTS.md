@@ -64,6 +64,31 @@ Three findings worth keeping:
   Seven of the first ten games harvested had it on. Filter on the option before
   downloading; the audit also skips any log containing those card ids.
 
+`tools/bga_effect_audit.py` is the companion that checks what a card DOES, not what it
+costs. Result on the same three logs: of 58 cards whose effects could be cleanly
+attributed, **57 produced nothing our data cannot account for**; one (301 Sneaky Jules)
+showed a single unexplained leader change, which is one observation and not yet a defect.
+
+Three things make that number mean something, and each was a wrong answer first:
+
+- **The unit is a TURN SEGMENT**: a `moveCard` play up to the next `setHandSize` (the
+  end-of-turn draw). A card with a choice resolves over several `move_id`s — card 502's
+  `influence(2), zenithium(2), leader(2)` lands one move AFTER the play. Running each
+  segment to the next card play instead swallowed the opponent's whole turn, and the
+  audit then "found" most of the deck mistranscribed.
+- **Segments containing a tech advance, a bonus token or a planet capture are DISCARDED.**
+  `TECH_EFFECTS` and `BONUS_EFFECTS` between them reach every kind in the vocabulary, so
+  once one fires, "the card could have caused this downstream" is true of anything and the
+  comparison stops discriminating — it would score cards clean by being unable to accuse
+  them.
+- **`leader` is deliberately not treated as ambient**, because it discriminates: cards
+  that declare a leader effect show `updateLeader` in 13 of 15 clean segments; cards that
+  do not, in 1 of 74. Calling it ambient would have silenced the only finding.
+
+Watch `declared_kinds` when adding a task type: `choose_branch` keeps its alternatives
+under `branches`, and missing that made three `choose` cards declare *nothing*, which the
+audit duly reported as unaccounted effects — the parser accusing the data of its own gap.
+
 No pytest gates this: the corpus lives outside the repo, so a test would have to skip
 when it is absent, and `core/tests/test_no_conditional_skips.py` bans that. Same call as
 Rag Tag's parity harness — it stays a tool you run, and findings become unit tests.
