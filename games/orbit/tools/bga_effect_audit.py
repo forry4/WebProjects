@@ -56,11 +56,22 @@ DEFAULT_CORPUS = os.environ.get("ZENITH_CORPUS", "C:/Users/Forrest/Zenith_corpus
 GOODIES = frozenset({119, 120, 219, 220, 319, 320, 419, 420, 519, 520})
 
 #: Events that say nothing about what a card did.
+#:
+#: `undo` and `playCardDiploTech` were in here and MUST NOT BE -- they are boundaries, not
+#: noise, and treating them as noise is what produced this audit's one and only finding.
+#: See `segments`.
 NOISE = frozenset({
     "gameStateChange", "updateReflexionTime", "lastMove", "showCurTech", "info", "logs",
     "gameStateMultipleActiveUpdate", "simpleNode", "updateBonusDeck", "setPlayerCounter",
-    "undo", "gameover", "moveCard", "playCardDiploTech",
+    "gameover", "moveCard",
 })
+
+#: A play that was TAKEN BACK. Everything attributed to the card so far did not happen.
+UNDO = "undo"
+
+#: The card used as a resource (its diplomacy / technology value) rather than played for
+#: its effect. The credits and badges that follow are the ACTION's, not the card's.
+ALT_USE = "playCardDiploTech"
 
 #: BGA event -> the effect kind it is evidence of.
 EVENT_KIND = {
@@ -136,7 +147,20 @@ def declared_kinds(tasks, out=None):
 
 
 def segments(path):
-    """(card_id, [events]) per turn segment: a play up to the end-of-turn draw."""
+    """(card_id, [events]) per turn segment: a play up to the end-of-turn draw.
+
+    A SEGMENT IN PROGRESS IS ABANDONED, NOT CLOSED, on `undo` or `playCardDiploTech`.
+    Both were originally filtered as noise, and that is exactly how this audit's one
+    unexplained card arose: a player played card 301, hit undo three times, then used the
+    same card as a diplo/tech resource instead. With both events invisible the segmenter
+    stitched the retracted play onto the later action and reported card 301 as producing
+    +3 credits and a leader swap it has no rule for -- the audit accusing a card of an
+    action it had been undone out of.
+
+    They are common: 52 undos and 47 alternative uses across three games. The visible
+    cost was one false finding; the invisible one is the other direction, a foreign
+    effect absorbed into a card's profile and read as agreement.
+    """
     by = collections.defaultdict(list)
     for packet in json.load(open(path, encoding="utf-8")):
         for event in packet.get("data") or []:
@@ -152,6 +176,8 @@ def segments(path):
                 raw = (event.get("args") or {}).get("card_num")
                 card = int(raw) if raw not in (None, "") else None
                 current = []
+            elif kind in (UNDO, ALT_USE):
+                card, current = None, []       # abandoned: never reaches `out`
             elif kind == "setHandSize":
                 if card is not None:
                     out.append((card, current))

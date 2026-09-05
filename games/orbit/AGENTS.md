@@ -65,11 +65,10 @@ Three findings worth keeping:
   downloading; the audit also skips any log containing those card ids.
 
 `tools/bga_effect_audit.py` is the companion that checks what a card DOES, not what it
-costs. Result on the same three logs: of 58 cards whose effects could be cleanly
-attributed, **57 produced nothing our data cannot account for**; one (301 Sneaky Jules)
-showed a single unexplained leader change, which is one observation and not yet a defect.
+costs. Result on the same three logs: of 56 cards whose effects could be cleanly
+attributed, **all 56 produced nothing our data cannot account for**.
 
-Three things make that number mean something, and each was a wrong answer first:
+Four things make that number mean something, and each was a wrong answer first:
 
 - **The unit is a TURN SEGMENT**: a `moveCard` play up to the next `setHandSize` (the
   end-of-turn draw). A card with a choice resolves over several `move_id`s — card 502's
@@ -83,15 +82,56 @@ Three things make that number mean something, and each was a wrong answer first:
   them.
 - **`leader` is deliberately not treated as ambient**, because it discriminates: cards
   that declare a leader effect show `updateLeader` in 13 of 15 clean segments; cards that
-  do not, in 1 of 74. Calling it ambient would have silenced the only finding.
+  do not, in 1 of 74. Calling it ambient would have hidden the audit's one finding.
+- **`undo` and `playCardDiploTech` are BOUNDARIES, not noise** — and this is the one that
+  actually caught something. Both started out in `NOISE`, and the audit's single
+  unexplained card was the result: a player played card 301, hit undo three times, then
+  used the same card as a diplo/tech resource instead. With both events invisible the
+  segmenter stitched the retracted play onto the later action and reported 301 as
+  producing +3 credits and a leader swap it has no rule for — the audit accusing a card
+  of an action it had been undone out of. A segment in progress is now ABANDONED on
+  either event. They are not rare: 52 undos and 47 alternative uses across three games.
+  The visible cost was one false finding; the invisible one runs the other way, a foreign
+  effect absorbed into a card's profile and read as agreement.
 
 Watch `declared_kinds` when adding a task type: `choose_branch` keeps its alternatives
 under `branches`, and missing that made three `choose` cards declare *nothing*, which the
 audit duly reported as unaccounted effects — the parser accusing the data of its own gap.
 
-No pytest gates this: the corpus lives outside the repo, so a test would have to skip
-when it is absent, and `core/tests/test_no_conditional_skips.py` bans that. Same call as
-Rag Tag's parity harness — it stays a tool you run, and findings become unit tests.
+`tools/bga_magnitude_audit.py` is the third and sharpest: not what kind of effect, but
+**how much, and onto which planet**. It reuses the effect audit's segmenter, so only the
+comparison is new. On the same three logs: **131 grants that could have contradicted our
+data, none did**, and the opening influence held 85/85.
+
+- **It measures what the kinds audit ASSUMED.** That audit treats `influence` as ambient
+  because "every card advances its own planet when played" — a load-bearing assumption
+  carried on nothing. Here it is checked: the first `movePlanet` of a segment is the
+  played card's own planet at +1, in 85 of 85 segments.
+- **What a card can grant is a SET, not a number**, because half the deck's payouts are
+  computed: `exile_tier` pays 2/4/7, `card_cost` pays the cost of some card, `per_nonempty`
+  pays per track (and BGA emits one event per track where our engine adds the lump sum —
+  same total, different presentation). So the check is membership, one-directional like
+  the cost audit: a magnitude BGA produced that our card cannot is a finding; a declared
+  amount never seen says nothing.
+- **A comparison that cannot fail is not counted.** An empty set (the card declares no
+  payout of that kind) and the `card_cost` set (every cost in the deck) both admit
+  anything. 58 observations fall in that bucket and are reported separately rather than
+  padding the 131.
+- **`restriction` is deliberately NOT checked, and the near-miss is the lesson.**
+  `middle` looks like it means the three middle planets, and card 409's observed grants
+  (Terra, Mars, Venus) would have confirmed that beautifully. `engine.py` reads it as
+  *tracks whose disc sits at zero* — a game-state position, unrecoverable from a log with
+  no setup dump. Hardcoding the plausible reading would have produced a confident
+  agreement between two things that were never compared.
+
+Both audits report zero, so **both were re-proved non-vacuous at that zero baseline**:
+seven perturbations (an influence amount, a named planet, a zenithium amount, the
+exile_tier ladder, a card's own planet, and two cards stripped of an effect) each drive
+the count off zero, and the pre-perturbation output is restored exactly afterwards.
+
+No pytest gates any of this: the corpus lives outside the repo, so a test would have to
+skip when it is absent, and `core/tests/test_no_conditional_skips.py` bans that. Same call
+as Rag Tag's parity harness — they stay tools you run, and findings become unit tests.
 
 Two things the build already surfaced:
 
