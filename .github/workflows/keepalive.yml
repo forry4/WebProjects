@@ -23,6 +23,21 @@ name: Keep backend warm
 # DST: 7am LOCAL = 14:00 UTC in summer (PDT) / 15:00 UTC in winter (PST). The early
 # starts at 13:0x-14:0x UTC + the ~90-min run length bridge 7am in BOTH seasons. The
 # hourly window 14:00-05:59 UTC covers 7am-10pm PDT (and PST with <=1h overhang).
+#
+# A GITHUB-SIDE INCIDENT CAN SILENTLY DE-REGISTER THIS SCHEDULE, AND THE SYMPTOM IS
+# HOUR-SHAPED, NOT A UNIFORM SLOWDOWN. On 2026-08-26 an Actions incident ("Actions jobs
+# failed to start") left the 13:00-16:00 UTC triggers dead while every later hour kept
+# firing and workflow_dispatch stayed fine — so the workflow looked alive (5-8 runs/day,
+# all green) while the band holding ALL THREE pre-7am warm-ups fired ZERO times for nine
+# days. Backend warm coverage went ~23h/day -> ~7h/day and the morning play window was
+# cold every day; the only outward sign was the external monitor's 503s.
+# THE FIX IS A PUSH THAT TOUCHES THIS FILE on the default branch — that re-registers the
+# cron. It does NOT self-heal, and it deploys nothing (this path is in neither
+# deploy-pages.yml's nor deploy-render.yml's filter).
+# DIAGNOSE IT BY START HOUR, NEVER BY RUN COUNT OR CONCLUSION: histogram
+# run_started_at from /actions/workflows/keepalive.yml/runs and compare against the cron
+# hours below. A whole dead BAND is this bug; uniformly fewer runs is ordinary GitHub
+# scheduler drift. Re-registered 2026-09-04.
 
 on:
   schedule:
