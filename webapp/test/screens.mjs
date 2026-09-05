@@ -5736,13 +5736,12 @@ try {
 		gameView.log = Array.from({ length: 80 }, (_, i) => ({ turn: i + 1, message: `History ${i + 1}: Orbiter gains influence on Mercury.` }));
 		socket.send(JSON.stringify(fixture));
 		await page.waitForFunction(() => document.querySelectorAll(".or-log p").length === 80);
-		// THE HAND COUNTER IS THE BADGE'S NUMBER. The fixture holds the Gold badge
-		// and six cards, so the seat that owns it must read 6/6 while the seat
-		// without it reads against 4 — one `handLimit` behind both, because a
-		// second hand-rolled expression is how a counter ends up disagreeing with
-		// the badge printed beside it. The log rows are the pre-parts `message`
-		// shape here, which must still render as plain text.
-		const counters = await page.evaluate(() => ({
+		// THE HAND COUNTER PRINTS THE LIMIT ONLY WHEN IT IS NOT THE COUNT. Every
+		// turn ends by drawing back up to it, so a permanent `6 / 6` on both rails
+		// is a tautology; the two states that differ are the ones worth the ink.
+		// All THREE shapes are steered onto frames rather than sampled, because the
+		// seeded deal would otherwise park one of them at "never" for good.
+		const readCounters = () => page.evaluate(() => ({
 			rails: [...document.querySelectorAll(".or-player")].map((rail) => ({
 				badge: rail.querySelector(".or-leader").textContent.trim(),
 				cards: rail.querySelector(".or-hand-count").textContent.replace(/\s+/g, " ").trim(),
@@ -5750,17 +5749,31 @@ try {
 			hand: document.querySelector(".or-hand-head .or-hand-count").textContent.replace(/\s+/g, " ").trim(),
 			legacy: document.querySelector(".or-log p").textContent.includes("History 1"),
 		}));
+		const counters = await readCounters();
 		const badged = counters.rails.find((rail) => /gold/i.test(rail.badge));
 		const plain = counters.rails.find((rail) => /no badge/i.test(rail.badge));
-		check("the Gold badge raises that seat's hand limit to 6 on the rail and over the hand",
-			!!badged && badged.cards.startsWith("6 / 6") && counters.hand.startsWith("6 / 6"),
+		// AT the limit: the count alone, on the rail and over the hand. The Gold
+		// badge's 6 is still asserted — through `handLimit`, one line below.
+		check("a seat sitting at its hand limit prints the count and no ratio",
+			!!badged && badged.cards === "6 cards" && counters.hand === "6 cards",
 			JSON.stringify(counters));
-		// STEERED to five cards and no badge, because it is the case that reads as
-		// broken: a hand is never discarded down, so losing the badge legitimately
-		// leaves a seat over its limit and the counter must SAY so rather than
-		// print a ratio that looks like an arithmetic bug.
-		check("...and a badge-less seat is counted against 4, over-limit cards marked as kept",
+		// ABOVE it: the case that reads as broken. A hand is never discarded down,
+		// so giving up the badge legitimately strands a seat over its limit, and a
+		// bare `5` beside a limit of 4 is exactly what has to be explained.
+		check("...a seat over its limit shows what it is over and that it keeps them",
 			!!plain && plain.cards === "5 / 4 cards kept", JSON.stringify(counters));
+		// BELOW it, mid-turn: the ratio says how many come back at end of turn.
+		self.hand = self.hand.slice(0, 4);
+		gameView.legal_moves = [{ action: "recruit", card_id: self.hand[0].id }];
+		socket.send(JSON.stringify(fixture));
+		await page.waitForFunction(() => document.querySelectorAll(".or-hand-zone .or-agent").length === 4);
+		const below = await readCounters();
+		check("...and a seat below it shows the limit it will draw back up to",
+			below.hand === "4 / 6 cards", JSON.stringify(below));
+		// Restore the six-card frame the rest of this block is written against.
+		while (self.hand.length < 6) self.hand.push({ ...self.hand[0], id: 1000 + self.hand.length });
+		socket.send(JSON.stringify(fixture));
+		await page.waitForFunction(() => document.querySelectorAll(".or-hand-zone .or-agent").length === 6);
 		check("a log entry written before the parts format still renders",
 			counters.legacy, JSON.stringify(counters.legacy));
 		await page.locator(".or-hand-zone .or-agent").first().click();

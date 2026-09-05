@@ -206,17 +206,20 @@ function LeaderBadge({ leader, pid }) {
 }
 
 
-/* The cards counter is `held / limit` on BOTH rails, because the badge that
-   raises the limit can be on either seat and a bare count cannot say whether
-   five cards is normal. Going OVER the limit is legal — nobody ever discards
-   down — so the over case is marked as kept rather than rendered as a number
-   that looks broken. */
+/* THE LIMIT IS PRINTED ONLY WHEN IT IS NOT THE COUNT. Every turn ends by drawing
+   back up to it, so a seat sits AT its limit for almost the whole game and a
+   permanent `6 / 6` on both rails is a tautology taking up the width of a real
+   fact. The two states where the number differs are the ones worth the ink:
+   below it mid-turn (cards already played, and how many come back), and ABOVE it
+   after the badge is given up, which is legal — a hand is never discarded down —
+   and is the state a bare `5` next to a limit of 4 makes look broken. The badge
+   chip beside this already names the limit in full, and so does the tooltip. */
 function HandCount({ held, limit }) {
   const over = held > limit;
   return <span className={`or-hand-count${over ? " over" : ""}`}
     title={over ? `${held} Agents held, over the limit of ${limit}. An effect put them there and a hand is never discarded down.`
       : `${held} of a ${limit}-card hand limit, refilled at the end of that player’s turn.`}>
-    <b>{held}</b> / {limit} cards{over ? <em> kept</em> : null}
+    <b>{held}</b>{held === limit ? null : <> / {limit}</>} cards{over ? <em> kept</em> : null}
   </span>;
 }
 

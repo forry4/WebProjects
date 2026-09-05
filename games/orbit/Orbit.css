@@ -231,8 +231,10 @@
 .or-resources { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .75rem; margin-top: .18rem; color: var(--or-dim); font-size: .7rem; }
 .or-resources b { color: var(--or-ink); font-size: .88rem; }
 .or-resource-cards { display: inline-flex; align-items: center; gap: .24rem; }
-/* `held / limit`, on both rails and over the hand. Over the limit is LEGAL --
-   a hand is never discarded down -- so it is labelled, not painted as an error. */
+/* The count, on both rails and over the hand. The LIMIT joins it only when it is
+   not the count -- a turn ends by drawing back up to it, so `6 / 6` would be
+   permanent. Over the limit is LEGAL (a hand is never discarded down), so that
+   state is labelled rather than painted as an error. */
 .or-hand-count { display: inline-flex; align-items: baseline; gap: .22rem; white-space: nowrap; }
 .or-hand-count.over { color: #ecd9a4; }
 .or-hand-count em { font-size: .82em; font-style: normal; letter-spacing: .04em; opacity: .85; }

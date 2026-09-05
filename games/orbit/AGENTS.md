@@ -460,12 +460,16 @@ were each a real misread on the table, so they are worth not undoing:
 - **One `handLimit()` decides the hand counter, and both rails plus the hand head
   read it.** The limit moves MID-TURN with the badge, and a second hand-rolled
   expression is how a counter ends up disagreeing with the badge printed beside
-  it. Both seats print `held / limit` — a bare count cannot say whether five cards
-  is normal, and the badge can be on either seat. **Going over the limit is LEGAL**
-  (a hand is never discarded down, so losing the badge strands you above it, which
-  happens in every game) and is labelled `kept` rather than rendered as a ratio
-  that reads like an arithmetic bug. `screens.mjs` steers both cases onto one
-  frame: Gold badge at 6/6, badge-less at 5/4 kept.
+  it. **It is PRINTED only when it is not the count.** Every turn ends by drawing
+  back up to it, so a seat sits at its limit for almost the whole game and a
+  permanent `6 / 6` on both rails is a tautology with the width of a real fact;
+  the badge chip beside it already names the limit, as does the tooltip. The two
+  states that differ earn the ink: below it mid-turn, and ABOVE it after the badge
+  is given up. **Going over is LEGAL** — a hand is never discarded down, so losing
+  the badge strands you above it, which happens in every game — and is labelled
+  `kept`, because a bare `5` beside a limit of 4 is what reads as an arithmetic
+  bug. `screens.mjs` steers all three shapes onto frames rather than sampling: at
+  6 cards, over at 5 / 4 kept, below at 4 / 6.
 - **On phones the Log is the final board section**, after the hand and any live
   action controls. It is history, not the next decision, and must not split the
   board state from the cards a player acts with. All sizes keep the full log and
