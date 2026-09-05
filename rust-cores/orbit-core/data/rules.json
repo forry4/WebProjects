@@ -1,0 +1,2257 @@
+{
+  "bonus_effects": {
+    "1": [
+      {
+        "amount": 3,
+        "target": "self",
+        "type": "credits"
+      }
+    ],
+    "2": [
+      {
+        "amount": 4,
+        "target": "self",
+        "type": "credits"
+      }
+    ],
+    "3": [
+      {
+        "amount": 1,
+        "target": "self",
+        "type": "influence"
+      }
+    ],
+    "4": [
+      {
+        "level": 1,
+        "type": "leader"
+      }
+    ],
+    "5": [
+      {
+        "amount": 1,
+        "target": "self",
+        "type": "zenithium"
+      }
+    ],
+    "6": [
+      {
+        "count": 2,
+        "influence_each": false,
+        "type": "mobilize"
+      }
+    ],
+    "7": [
+      {
+        "count": 2,
+        "owner": "opponent",
+        "type": "exile"
+      }
+    ],
+    "8": [
+      {
+        "count": 1,
+        "type": "transfer"
+      }
+    ]
+  },
+  "bonus_pool": [
+    1,
+    1,
+    2,
+    2,
+    3,
+    3,
+    3,
+    3,
+    4,
+    4,
+    5,
+    5,
+    5,
+    6,
+    7,
+    8
+  ],
+  "card_effects": {
+    "101": [
+      {
+        "amount": 4,
+        "target": "self",
+        "type": "credits"
+      },
+      {
+        "cost": {
+          "amount": 1,
+          "resource": "zenithium_to_opponent"
+        },
+        "label": "Give 1 Zenithium for +2 Terra influence",
+        "then": [
+          {
+            "amount": 2,
+            "planet": "terra",
+            "target": "self",
+            "type": "influence"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "102": [
+      {
+        "count": 2,
+        "exclude": "mercury",
+        "owner": "self",
+        "require_full": true,
+        "reward": {
+          "amount": 10,
+          "resource": "credits"
+        },
+        "type": "exile"
+      }
+    ],
+    "103": [
+      {
+        "planet": "mercury",
+        "reward": "zenithium",
+        "type": "exile_tier"
+      }
+    ],
+    "104": [
+      {
+        "amount": 1,
+        "planet": "mars",
+        "target": "self",
+        "type": "influence"
+      },
+      {
+        "level": 1,
+        "type": "leader"
+      }
+    ],
+    "105": [
+      {
+        "amount": 1,
+        "target": "self",
+        "type": "influence"
+      },
+      {
+        "then": [
+          {
+            "amount": 3,
+            "target": "self",
+            "type": "credits"
+          }
+        ],
+        "type": "if_leader"
+      }
+    ],
+    "106": [
+      {
+        "amount": 3,
+        "target": "self",
+        "type": "zenithium"
+      }
+    ],
+    "107": [
+      {
+        "type": "draw_bonus"
+      },
+      {
+        "cost": {
+          "amount": 1,
+          "resource": "leader"
+        },
+        "label": "Give the Leader for 7 Credits",
+        "then": [
+          {
+            "amount": 7,
+            "target": "self",
+            "type": "credits"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "108": [
+      {
+        "amount": 5,
+        "target": "self",
+        "type": "credits"
+      },
+      {
+        "then": [
+          {
+            "type": "draw_bonus"
+          }
+        ],
+        "type": "if_leader"
+      }
+    ],
+    "109": [
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "influence"
+      },
+      {
+        "cost": {
+          "amount": 1,
+          "resource": "zenithium_to_opponent"
+        },
+        "label": "Give 1 Zenithium for +2 on a different planet",
+        "then": [
+          {
+            "amount": 2,
+            "type": "influence_other"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "110": [
+      {
+        "amounts": [
+          1,
+          1
+        ],
+        "type": "split_influence"
+      },
+      {
+        "planets": [
+          "mercury",
+          "venus",
+          "terra",
+          "mars",
+          "jupiter"
+        ],
+        "type": "transfer_each"
+      }
+    ],
+    "111": [
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "zenithium"
+      },
+      {
+        "cost": {
+          "amount": 1,
+          "resource": "leader"
+        },
+        "label": "Give the Leader for 2 Zenithium",
+        "then": [
+          {
+            "amount": 2,
+            "target": "self",
+            "type": "zenithium"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "112": [
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "influence"
+      },
+      {
+        "cost": {
+          "amount": 1,
+          "resource": "leader"
+        },
+        "label": "Give the Leader for +2 on a different planet",
+        "then": [
+          {
+            "amount": 2,
+            "type": "influence_other"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "113": [
+      {
+        "count": 2,
+        "influence_each": false,
+        "type": "mobilize"
+      },
+      {
+        "cost": {
+          "amount": 1,
+          "resource": "leader"
+        },
+        "label": "Give the Leader to mobilize 3 more cards",
+        "then": [
+          {
+            "count": 3,
+            "influence_each": false,
+            "type": "mobilize"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "114": [
+      {
+        "cost": {
+          "amount": 3,
+          "resource": "credits_to_opponent"
+        },
+        "label": "Give 3 Credits for +2 influence",
+        "then": [
+          {
+            "amount": 2,
+            "exclude": "mercury",
+            "target": "self",
+            "type": "influence"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "115": [
+      {
+        "planet": "mercury",
+        "reward": "influence",
+        "type": "exile_tier"
+      }
+    ],
+    "116": [
+      {
+        "then": [
+          {
+            "amount": 1,
+            "planet": "mercury",
+            "target": "self",
+            "type": "influence"
+          }
+        ],
+        "type": "if_leader"
+      }
+    ],
+    "117": [
+      {
+        "count": 1,
+        "reward": null,
+        "type": "discard_hand"
+      },
+      {
+        "level": 1,
+        "type": "leader"
+      }
+    ],
+    "118": [
+      {
+        "count": "all",
+        "reward": null,
+        "type": "discard_hand"
+      },
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "influence"
+      }
+    ],
+    "201": [
+      {
+        "amount": 4,
+        "target": "self",
+        "type": "credits"
+      },
+      {
+        "cost": {
+          "amount": 1,
+          "resource": "zenithium_to_opponent"
+        },
+        "label": "Give 1 Zenithium for +2 Mars influence",
+        "then": [
+          {
+            "amount": 2,
+            "planet": "mars",
+            "target": "self",
+            "type": "influence"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "202": [
+      {
+        "amount": 1,
+        "resource": "zenithium",
+        "type": "per_tech_first"
+      }
+    ],
+    "203": [
+      {
+        "planet": "venus",
+        "reward": "zenithium",
+        "type": "exile_tier"
+      }
+    ],
+    "204": [
+      {
+        "amount": 1,
+        "planet": "jupiter",
+        "target": "self",
+        "type": "influence"
+      },
+      {
+        "level": 1,
+        "type": "leader"
+      }
+    ],
+    "205": [
+      {
+        "count": 2,
+        "owner": "opponent",
+        "type": "exile"
+      },
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "zenithium"
+      }
+    ],
+    "206": [
+      {
+        "amount": 1,
+        "target": "opponent",
+        "type": "zenithium"
+      },
+      {
+        "amount": 3,
+        "target": "self",
+        "type": "zenithium"
+      }
+    ],
+    "207": [
+      {
+        "amount": 4,
+        "target": "self",
+        "type": "zenithium"
+      }
+    ],
+    "208": [
+      {
+        "discount": 2,
+        "faction": null,
+        "lowest": false,
+        "type": "develop"
+      }
+    ],
+    "209": [
+      {
+        "amount": 6,
+        "target": "self",
+        "type": "credits"
+      }
+    ],
+    "210": [
+      {
+        "discount": 1,
+        "faction": "human",
+        "lowest": false,
+        "type": "develop"
+      }
+    ],
+    "211": [
+      {
+        "discount": 1,
+        "faction": "robot",
+        "lowest": false,
+        "type": "develop"
+      }
+    ],
+    "212": [
+      {
+        "discount": 1,
+        "faction": "animod",
+        "lowest": false,
+        "type": "develop"
+      }
+    ],
+    "213": [
+      {
+        "amount": 4,
+        "resource": "credits",
+        "type": "per_tech_first"
+      }
+    ],
+    "214": [
+      {
+        "discount": 99,
+        "faction": null,
+        "lowest": true,
+        "type": "develop"
+      }
+    ],
+    "215": [
+      {
+        "planet": "venus",
+        "reward": "influence",
+        "type": "exile_tier"
+      }
+    ],
+    "216": [
+      {
+        "then": [
+          {
+            "amount": 1,
+            "planet": "venus",
+            "target": "self",
+            "type": "influence"
+          }
+        ],
+        "type": "if_leader"
+      }
+    ],
+    "217": [
+      {
+        "amount": 2,
+        "owner": "self",
+        "type": "per_nonempty"
+      }
+    ],
+    "218": [
+      {
+        "exclude": "venus",
+        "resource": "zenithium",
+        "tiers": [
+          [
+            1,
+            1
+          ],
+          [
+            2,
+            2
+          ],
+          [
+            4,
+            3
+          ]
+        ],
+        "type": "spend_tier"
+      }
+    ],
+    "301": [
+      {
+        "amount": 4,
+        "target": "self",
+        "type": "credits"
+      },
+      {
+        "cost": {
+          "amount": 1,
+          "resource": "zenithium_to_opponent"
+        },
+        "label": "Give 1 Zenithium for +2 influence on a middle track",
+        "then": [
+          {
+            "amount": 2,
+            "restriction": "middle",
+            "target": "self",
+            "type": "influence"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "302": [
+      {
+        "amount": 2,
+        "target": "opponent",
+        "type": "credits"
+      },
+      {
+        "amount": 8,
+        "target": "self",
+        "type": "credits"
+      }
+    ],
+    "303": [
+      {
+        "planet": "terra",
+        "reward": "zenithium",
+        "type": "exile_tier"
+      }
+    ],
+    "304": [
+      {
+        "amount": 1,
+        "restriction": "dominated",
+        "target": "self",
+        "type": "influence"
+      },
+      {
+        "level": 1,
+        "type": "leader"
+      }
+    ],
+    "305": [
+      {
+        "count": 1,
+        "reward": null,
+        "type": "discard_hand"
+      },
+      {
+        "amount": 1,
+        "target": "self",
+        "type": "zenithium"
+      }
+    ],
+    "306": [
+      {
+        "amount": 1,
+        "target": "self",
+        "type": "zenithium"
+      }
+    ],
+    "307": [
+      {
+        "amount": 1,
+        "exclude": "terra",
+        "target": "opponent",
+        "type": "influence"
+      },
+      {
+        "amount": 3,
+        "target": "self",
+        "type": "zenithium"
+      }
+    ],
+    "308": [
+      {
+        "type": "reset_planet"
+      }
+    ],
+    "309": [
+      {
+        "amounts": [
+          1,
+          1,
+          1
+        ],
+        "type": "split_influence"
+      }
+    ],
+    "310": [
+      {
+        "planets": [
+          "mercury",
+          "venus",
+          "mars",
+          "jupiter"
+        ],
+        "reward": "influence",
+        "type": "optional_exile_each"
+      }
+    ],
+    "311": [
+      {
+        "amount": 2,
+        "exclude": "terra",
+        "target": "self",
+        "type": "influence"
+      }
+    ],
+    "312": [
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "influence"
+      },
+      {
+        "amount": 2,
+        "restriction": "opponent_side",
+        "target": "self",
+        "type": "influence"
+      }
+    ],
+    "313": [
+      {
+        "amounts": [
+          1,
+          1
+        ],
+        "type": "split_influence"
+      }
+    ],
+    "314": [
+      {
+        "center": 2,
+        "neighbor": 1,
+        "type": "adjacent_three"
+      }
+    ],
+    "315": [
+      {
+        "planet": "terra",
+        "reward": "influence",
+        "type": "exile_tier"
+      }
+    ],
+    "316": [
+      {
+        "then": [
+          {
+            "amount": 1,
+            "planet": "terra",
+            "target": "self",
+            "type": "influence"
+          }
+        ],
+        "type": "if_leader"
+      }
+    ],
+    "317": [
+      {
+        "planets": [
+          "mercury",
+          "venus",
+          "mars",
+          "jupiter"
+        ],
+        "reward": "zenithium",
+        "type": "optional_exile_each"
+      }
+    ],
+    "318": [
+      {
+        "count": 1,
+        "reward": "matching_influence",
+        "type": "discard_hand"
+      }
+    ],
+    "401": [
+      {
+        "amount": 4,
+        "target": "self",
+        "type": "credits"
+      },
+      {
+        "cost": {
+          "amount": 1,
+          "resource": "zenithium_to_opponent"
+        },
+        "label": "Give 1 Zenithium for +2 Mercury influence",
+        "then": [
+          {
+            "amount": 2,
+            "planet": "mercury",
+            "target": "self",
+            "type": "influence"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "402": [
+      {
+        "amount": 1,
+        "exclude": "mars",
+        "target": "opponent",
+        "type": "influence"
+      },
+      {
+        "amount": 10,
+        "target": "self",
+        "type": "credits"
+      }
+    ],
+    "403": [
+      {
+        "planet": "mars",
+        "reward": "zenithium",
+        "type": "exile_tier"
+      }
+    ],
+    "404": [
+      {
+        "amount": 1,
+        "planet": "venus",
+        "target": "self",
+        "type": "influence"
+      },
+      {
+        "level": 1,
+        "type": "leader"
+      }
+    ],
+    "405": [
+      {
+        "branches": [
+          {
+            "label": "Gain 1 Zenithium",
+            "tasks": [
+              {
+                "amount": 1,
+                "target": "self",
+                "type": "zenithium"
+              }
+            ]
+          },
+          {
+            "label": "Gain 7 Credits",
+            "tasks": [
+              {
+                "amount": 7,
+                "target": "self",
+                "type": "credits"
+              }
+            ]
+          }
+        ],
+        "label": "Choose Caesar's reward",
+        "type": "choose_branch"
+      }
+    ],
+    "406": [
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "zenithium"
+      }
+    ],
+    "407": [
+      {
+        "branches": [
+          {
+            "label": "Transfer 1 card",
+            "tasks": [
+              {
+                "count": 1,
+                "type": "transfer"
+              }
+            ]
+          },
+          {
+            "label": "Gain 1 Zenithium",
+            "tasks": [
+              {
+                "amount": 1,
+                "target": "self",
+                "type": "zenithium"
+              }
+            ]
+          }
+        ],
+        "label": "Choose V4NC3's effect",
+        "type": "choose_branch"
+      }
+    ],
+    "408": [
+      {
+        "branches": [
+          {
+            "label": "Transfer 2 cards",
+            "tasks": [
+              {
+                "count": 2,
+                "type": "transfer"
+              }
+            ]
+          },
+          {
+            "label": "Gain 8 Credits",
+            "tasks": [
+              {
+                "amount": 8,
+                "target": "self",
+                "type": "credits"
+              }
+            ]
+          }
+        ],
+        "label": "Choose Ramses's effect",
+        "type": "choose_branch"
+      }
+    ],
+    "409": [
+      {
+        "amount": 2,
+        "restriction": "middle",
+        "target": "self",
+        "type": "influence"
+      }
+    ],
+    "410": [
+      {
+        "count": 1,
+        "influence_each": false,
+        "type": "mobilize"
+      },
+      {
+        "amount": 5,
+        "target": "self",
+        "type": "credits"
+      }
+    ],
+    "411": [
+      {
+        "count": 1,
+        "reward": "matching_influence",
+        "type": "transfer"
+      }
+    ],
+    "412": [
+      {
+        "count": 1,
+        "influence_each": false,
+        "type": "mobilize"
+      },
+      {
+        "count": 1,
+        "type": "transfer"
+      },
+      {
+        "count": 1,
+        "owner": "opponent",
+        "type": "exile"
+      }
+    ],
+    "413": [
+      {
+        "count": 3,
+        "one_at_a_time": true,
+        "owner": "opponent",
+        "reward": "matching_influence",
+        "type": "exile"
+      }
+    ],
+    "414": [
+      {
+        "amount": 1,
+        "exclude": "mars",
+        "target": "self",
+        "type": "influence"
+      }
+    ],
+    "415": [
+      {
+        "planet": "mars",
+        "reward": "influence",
+        "type": "exile_tier"
+      }
+    ],
+    "416": [
+      {
+        "then": [
+          {
+            "amount": 1,
+            "planet": "mars",
+            "target": "self",
+            "type": "influence"
+          }
+        ],
+        "type": "if_leader"
+      }
+    ],
+    "417": [
+      {
+        "type": "take_board_bonus"
+      }
+    ],
+    "418": [
+      {
+        "count": 3,
+        "influence_each": true,
+        "type": "mobilize"
+      }
+    ],
+    "501": [
+      {
+        "amount": 4,
+        "target": "self",
+        "type": "credits"
+      },
+      {
+        "cost": {
+          "amount": 1,
+          "resource": "zenithium_to_opponent"
+        },
+        "label": "Give 1 Zenithium for +2 Venus influence",
+        "then": [
+          {
+            "amount": 2,
+            "planet": "venus",
+            "target": "self",
+            "type": "influence"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "502": [
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "influence"
+      },
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "zenithium"
+      },
+      {
+        "level": 2,
+        "type": "leader"
+      }
+    ],
+    "503": [
+      {
+        "planet": "jupiter",
+        "reward": "zenithium",
+        "type": "exile_tier"
+      }
+    ],
+    "504": [
+      {
+        "branches": [
+          {
+            "label": "Take the gold Leader",
+            "tasks": [
+              {
+                "level": 2,
+                "type": "leader"
+              }
+            ]
+          },
+          {
+            "label": "Gain 8 Credits",
+            "tasks": [
+              {
+                "amount": 8,
+                "target": "self",
+                "type": "credits"
+              }
+            ]
+          }
+        ],
+        "label": "Choose Geta's reward",
+        "type": "choose_branch"
+      }
+    ],
+    "505": [
+      {
+        "count": 1,
+        "reward": "card_cost",
+        "type": "transfer"
+      }
+    ],
+    "506": [
+      {
+        "amount": 3,
+        "target": "opponent",
+        "type": "credits"
+      },
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "zenithium"
+      }
+    ],
+    "507": [
+      {
+        "amount": 1,
+        "planet": "terra",
+        "target": "self",
+        "type": "influence"
+      },
+      {
+        "level": 1,
+        "type": "leader"
+      }
+    ],
+    "508": [
+      {
+        "amount": 1,
+        "target": "self",
+        "type": "influence"
+      },
+      {
+        "then": [
+          {
+            "amount": 1,
+            "target": "self",
+            "type": "zenithium"
+          }
+        ],
+        "type": "if_leader"
+      }
+    ],
+    "509": [
+      {
+        "amount": 3,
+        "target": "self",
+        "type": "zenithium"
+      },
+      {
+        "then": [
+          {
+            "amount": 1,
+            "target": "self",
+            "type": "zenithium"
+          }
+        ],
+        "type": "if_leader"
+      }
+    ],
+    "510": [
+      {
+        "count": 1,
+        "owner": "opponent",
+        "reward": "card_cost",
+        "type": "exile"
+      }
+    ],
+    "511": [
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "influence"
+      },
+      {
+        "amount": 6,
+        "then": [
+          {
+            "amount": 1,
+            "type": "influence_other"
+          }
+        ],
+        "type": "if_credits"
+      }
+    ],
+    "512": [
+      {
+        "amount": 5,
+        "target": "self",
+        "type": "credits"
+      },
+      {
+        "cost": {
+          "amount": 1,
+          "resource": "leader"
+        },
+        "label": "Give the Leader for 7 Credits",
+        "then": [
+          {
+            "amount": 7,
+            "target": "self",
+            "type": "credits"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "513": [
+      {
+        "amount": 2,
+        "owner": "opponent",
+        "type": "per_nonempty"
+      }
+    ],
+    "514": [
+      {
+        "count": 2,
+        "type": "transfer"
+      },
+      {
+        "cost": {
+          "amount": 1,
+          "resource": "leader"
+        },
+        "label": "Give the Leader to transfer 2 more cards",
+        "then": [
+          {
+            "count": 2,
+            "type": "transfer"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "515": [
+      {
+        "planet": "jupiter",
+        "reward": "influence",
+        "type": "exile_tier"
+      }
+    ],
+    "516": [
+      {
+        "then": [
+          {
+            "amount": 1,
+            "planet": "jupiter",
+            "target": "self",
+            "type": "influence"
+          }
+        ],
+        "type": "if_leader"
+      }
+    ],
+    "517": [
+      {
+        "count": 1,
+        "reward": "card_cost",
+        "type": "discard_hand"
+      }
+    ],
+    "518": [
+      {
+        "exclude": "jupiter",
+        "resource": "credits",
+        "tiers": [
+          [
+            3,
+            1
+          ],
+          [
+            7,
+            2
+          ],
+          [
+            12,
+            3
+          ]
+        ],
+        "type": "spend_tier"
+      }
+    ]
+  },
+  "cards": {
+    "101": {
+      "cost": 1,
+      "description": "Gain 4 Credits and you can give 1 Zenithium to your opponent to gain 2 influences on TERRA",
+      "faction": "human",
+      "id": 101,
+      "name": "Lula Smart",
+      "planet": "mercury",
+      "rule": "4,4_5,1=1,3,2"
+    },
+    "102": {
+      "cost": 1,
+      "description": "Exile 2 of your cards to a track other than MERCURY to gain 10 Credits",
+      "faction": "animod",
+      "id": 102,
+      "name": "Chaka",
+      "planet": "mercury",
+      "rule": "52_38"
+    },
+    "103": {
+      "cost": 2,
+      "description": "Exile 2/4/7 of your MERCURY cards and gain 2/4/7 Zenithium respectively",
+      "faction": "robot",
+      "id": 103,
+      "name": "WµL",
+      "planet": "mercury",
+      "rule": "40=6,1,2>3,2|6,1,4>3,4|6,1,7>3,7"
+    },
+    "104": {
+      "cost": 6,
+      "description": "Gain 1 influence on MARS and gain the Leader badge",
+      "faction": "human",
+      "id": 104,
+      "name": "Master Din",
+      "planet": "mercury",
+      "rule": "1,4,1_8,1"
+    },
+    "105": {
+      "cost": 5,
+      "description": "Gain 1 influence AND gain 3 Credits if you have the Leader badge",
+      "faction": "robot",
+      "id": 105,
+      "name": "HUXL3Y",
+      "planet": "mercury",
+      "rule": "1,0,1_11=4,3"
+    },
+    "106": {
+      "cost": 7,
+      "description": "Gain 3 Zenithium",
+      "faction": "animod",
+      "id": 106,
+      "name": "Nero",
+      "planet": "mercury",
+      "rule": "3,3"
+    },
+    "107": {
+      "cost": 1,
+      "description": "Draw 1 BONUS token and gain 7 additional Credits if you give the Leader badge",
+      "faction": "robot",
+      "id": 107,
+      "name": "ORW3LL",
+      "planet": "mercury",
+      "rule": "51_2_16=4,7"
+    },
+    "108": {
+      "cost": 3,
+      "description": "Gain 5 Credits and gain 1 BONUS token if you have the Leader badge",
+      "faction": "human",
+      "id": 108,
+      "name": "Guy Gambler",
+      "planet": "mercury",
+      "rule": "4,5_51_11=2"
+    },
+    "109": {
+      "cost": 9,
+      "description": "Gain 2 influence on one track and gain 2 influences on another track if you give 1 Zenithium to your opponent",
+      "faction": "robot",
+      "id": 109,
+      "name": "CL4RKE",
+      "planet": "mercury",
+      "rule": "1,0,2_5,1=1,-6,2"
+    },
+    "110": {
+      "cost": 10,
+      "description": "Gain 1 influence on two different planets. Transfer 1 card from each column",
+      "faction": "animod",
+      "id": 110,
+      "name": "Magellan",
+      "planet": "mercury",
+      "rule": "1,0,1_1,-6,1_14,1,1_14,1,2_14,1,3_14,1,4_14,1,5"
+    },
+    "111": {
+      "cost": 5,
+      "description": "Gain 2 Zenithium. Gain 2 additional Zenithium if you give the Leader badge",
+      "faction": "human",
+      "id": 111,
+      "name": "Double Joe",
+      "planet": "mercury",
+      "rule": "3,2_16=3,2"
+    },
+    "112": {
+      "cost": 9,
+      "description": "Gain 2 influence on one track and gain 2 influences on another track if you give the Leader badge",
+      "faction": "animod",
+      "id": 112,
+      "name": "Khan",
+      "planet": "mercury",
+      "rule": "1,0,2_16=1,-6,2"
+    },
+    "113": {
+      "cost": 2,
+      "description": "Mobilize 2 cards. Mobilize 3 additional cards if you give the Leader badge",
+      "faction": "robot",
+      "id": 113,
+      "name": "H4MILTØN",
+      "planet": "mercury",
+      "rule": "51_17,2_16=17,3"
+    },
+    "114": {
+      "cost": 2,
+      "description": "You can give 3 Credits to your opponent to gain 2 influences on a track other than MERCURY",
+      "faction": "human",
+      "id": 114,
+      "name": "Secret Kali",
+      "planet": "mercury",
+      "rule": "18,3=1,-1,2"
+    },
+    "115": {
+      "cost": 3,
+      "description": "Exile 2/4/7 of your MERCURY cards and respectively gain 1/2/3 influence(s) on MERCURY",
+      "faction": "animod",
+      "id": 115,
+      "name": "Amytis",
+      "planet": "mercury",
+      "rule": "40=6,1,2>1,1,1|6,1,4>1,1,2|6,1,7>1,1,3"
+    },
+    "116": {
+      "cost": 4,
+      "description": "If you have the Leader badge, gain 1 influence on MERCURY",
+      "faction": "robot",
+      "id": 116,
+      "name": "W3LLS",
+      "planet": "mercury",
+      "rule": "11=1,1,1"
+    },
+    "117": {
+      "cost": 3,
+      "description": "Discard 1 card from your hand to gain the Leader badge",
+      "faction": "animod",
+      "id": 117,
+      "name": "Atlas",
+      "planet": "mercury",
+      "rule": "19,1_8,1"
+    },
+    "118": {
+      "cost": 7,
+      "description": "Discard your entire hand to gain 2 influences on a track of your choice",
+      "faction": "human",
+      "id": 118,
+      "name": "Punk Mari",
+      "planet": "mercury",
+      "rule": "19,0_1,0,2"
+    },
+    "201": {
+      "cost": 1,
+      "description": "Gain 4 Credits and you can give 1 Zenithium to your opponent to gain 2 influence on MARS",
+      "faction": "human",
+      "id": 201,
+      "name": "Hiroshi Sun",
+      "planet": "venus",
+      "rule": "4,4_5,1=1,4,2"
+    },
+    "202": {
+      "cost": 1,
+      "description": "Gain 1 Zenithium per first level you have reached in the Technology board",
+      "faction": "human",
+      "id": 202,
+      "name": "Ilda Flores",
+      "planet": "venus",
+      "rule": "7,1"
+    },
+    "203": {
+      "cost": 2,
+      "description": "Exile 2/4/7 of your VENUS cards and gain 2/4/7 Zenithium respectively",
+      "faction": "robot",
+      "id": 203,
+      "name": "LUC4S",
+      "planet": "venus",
+      "rule": "40=6,2,2>3,2|6,2,4>3,4|6,2,7>3,7"
+    },
+    "204": {
+      "cost": 6,
+      "description": "Gain 1 influence on JUPITER and gain the Leader badge",
+      "faction": "human",
+      "id": 204,
+      "name": "King Harold",
+      "planet": "venus",
+      "rule": "1,5,1_8,1"
+    },
+    "205": {
+      "cost": 6,
+      "description": "Exile 2 opponent's cards and gain 2 Zenithium",
+      "faction": "robot",
+      "id": 205,
+      "name": "V4N VØGT",
+      "planet": "venus",
+      "rule": "6,-1,2_3,2"
+    },
+    "206": {
+      "cost": 3,
+      "description": "Your opponent gains 1 Zenithium, you gain 3 Zenithium",
+      "faction": "animod",
+      "id": 206,
+      "name": "Felis",
+      "planet": "venus",
+      "rule": "3,1,-1_3,3"
+    },
+    "207": {
+      "cost": 9,
+      "description": "Gain 4 Zenithium",
+      "faction": "human",
+      "id": 207,
+      "name": "Professor Zed",
+      "planet": "venus",
+      "rule": "3,4"
+    },
+    "208": {
+      "cost": 10,
+      "description": "Develop a Technology of your choice with a reduction of 2 Zenithium",
+      "faction": "robot",
+      "id": 208,
+      "name": "AS1MØV",
+      "planet": "venus",
+      "rule": "52_9,0,2"
+    },
+    "209": {
+      "cost": 1,
+      "description": "Gain 6 Credits",
+      "faction": "animod",
+      "id": 209,
+      "name": "Cresus",
+      "planet": "venus",
+      "rule": "4,6"
+    },
+    "210": {
+      "cost": 6,
+      "description": "Develop a HUMAN Technology with a reduction of 1 Zenithium",
+      "faction": "human",
+      "id": 210,
+      "name": "Doc Wissen",
+      "planet": "venus",
+      "rule": "52_9,2,1"
+    },
+    "211": {
+      "cost": 6,
+      "description": "Develop a ROBOT Technology with a reduction of 1 Zenithium",
+      "faction": "robot",
+      "id": 211,
+      "name": "BR4DBURY",
+      "planet": "venus",
+      "rule": "52_9,1,1"
+    },
+    "212": {
+      "cost": 6,
+      "description": "Develop an ANIMOD Technology with a reduction of 1 Zenithium",
+      "faction": "animod",
+      "id": 212,
+      "name": "Archimedes",
+      "planet": "venus",
+      "rule": "52_9,3,1"
+    },
+    "213": {
+      "cost": 2,
+      "description": "Gain 4 Credits per first level you have reached in the Technology board",
+      "faction": "animod",
+      "id": 213,
+      "name": "Moussa",
+      "planet": "venus",
+      "rule": "10,4"
+    },
+    "214": {
+      "cost": 7,
+      "description": "Develop one of your lowest Technologies for free",
+      "faction": "robot",
+      "id": 214,
+      "name": "BUJØLD",
+      "planet": "venus",
+      "rule": "9,4,10"
+    },
+    "215": {
+      "cost": 3,
+      "description": "Exile 2/4/7 of your VENUS cards and respectively gain 1/2/3 influence(s) on VENUS",
+      "faction": "animod",
+      "id": 215,
+      "name": "Pachacuti",
+      "planet": "venus",
+      "rule": "40=6,2,2>1,2,1|6,2,4>1,2,2|6,2,7>1,2,3"
+    },
+    "216": {
+      "cost": 4,
+      "description": "If you have the Leader badge, gain influence on VENUS",
+      "faction": "robot",
+      "id": 216,
+      "name": "C1X1N",
+      "planet": "venus",
+      "rule": "11=1,2,1"
+    },
+    "217": {
+      "cost": 2,
+      "description": "Gain 2 Credits per Influence track where you have at least one card",
+      "faction": "animod",
+      "id": 217,
+      "name": "Geronimo",
+      "planet": "venus",
+      "rule": "12,1=4,2"
+    },
+    "218": {
+      "cost": 3,
+      "description": "You can spend 1/2/4 Zenithium to respectively gain 1/2/3 influence(s) on a track other than VENUS",
+      "faction": "human",
+      "id": 218,
+      "name": "Stessy Power",
+      "planet": "venus",
+      "rule": "40=3,-1>1,-2,1|3,-2>1,-2,2|3,-4>1,-2,3"
+    },
+    "301": {
+      "cost": 1,
+      "description": "Gain 4 Credits and you can give 1 Zenithium to your opponent to gain 2 influences on a track where the influence disc is on its middle space",
+      "faction": "human",
+      "id": 301,
+      "name": "Sneaky Jules",
+      "planet": "terra",
+      "rule": "4,4_5,1=1,8,2"
+    },
+    "302": {
+      "cost": 1,
+      "description": "Your opponent gains 2 Credits, you gain 8 Credits",
+      "faction": "animod",
+      "id": 302,
+      "name": "Zenon",
+      "planet": "terra",
+      "rule": "4,2,-1_4,8"
+    },
+    "303": {
+      "cost": 2,
+      "description": "Exile 2/4/7 of your TERRA cards and gain 2/4/7 Zenithium respectively",
+      "faction": "robot",
+      "id": 303,
+      "name": "V3RN3",
+      "planet": "terra",
+      "rule": "40=6,3,2>3,2|6,3,4>3,4|6,3,7>3,7"
+    },
+    "304": {
+      "cost": 5,
+      "description": "Gain 1 influence on a dominated planet and gain the Leader badge",
+      "faction": "human",
+      "id": 304,
+      "name": "Lord Creep",
+      "planet": "terra",
+      "rule": "1,7,1_8,1"
+    },
+    "305": {
+      "cost": 2,
+      "description": "Discard 1 card from your hand to gain 1 Zenithium",
+      "faction": "animod",
+      "id": 305,
+      "name": "Elisabeth",
+      "planet": "terra",
+      "rule": "19,1_3,1"
+    },
+    "306": {
+      "cost": 1,
+      "description": "Gain 1 Zenithium",
+      "faction": "robot",
+      "id": 306,
+      "name": "BRUSSØLØ",
+      "planet": "terra",
+      "rule": "3,1"
+    },
+    "307": {
+      "cost": 4,
+      "description": "Give 1 influence to your opponent on a track other than TERRA to gain 3 Zenithium",
+      "faction": "human",
+      "id": 307,
+      "name": "Baron Goro",
+      "planet": "terra",
+      "rule": "1,-3,-1_3,3"
+    },
+    "308": {
+      "cost": 7,
+      "description": "Return 1 influence disc to its middle space",
+      "faction": "human",
+      "id": 308,
+      "name": "Sir Sam",
+      "planet": "terra",
+      "rule": "20,0"
+    },
+    "309": {
+      "cost": 8,
+      "description": "Gain 1 influence on 3 different tracks",
+      "faction": "animod",
+      "id": 309,
+      "name": "Charlemagne",
+      "planet": "terra",
+      "rule": "43,1"
+    },
+    "310": {
+      "cost": 6,
+      "description": "For each track other than TERRA, you can exile 1 of your cards to gain 1 influence on the corresponding track",
+      "faction": "robot",
+      "id": 310,
+      "name": "H3RB3RT",
+      "planet": "terra",
+      "rule": "47,1=1,1,1_47,2=1,2,1_47,4=1,4,1_47,5=1,5,1"
+    },
+    "311": {
+      "cost": 6,
+      "description": "Gain 2 influences on a track other than TERRA",
+      "faction": "human",
+      "id": 311,
+      "name": "Helena Kerr",
+      "planet": "terra",
+      "rule": "1,-3,2"
+    },
+    "312": {
+      "cost": 9,
+      "description": "Gain 2 influences. Gain 2 influences on 1 track where the Influence disk is on your opponent's side",
+      "faction": "animod",
+      "id": 312,
+      "name": "Gilgamesch",
+      "planet": "terra",
+      "rule": "1,0,2_1,7,2"
+    },
+    "313": {
+      "cost": 6,
+      "description": "Gain 1 influence on 2 different tracks",
+      "faction": "robot",
+      "id": 313,
+      "name": "F4RM3R",
+      "planet": "terra",
+      "rule": "1,0,1_1,-6,1"
+    },
+    "314": {
+      "cost": 10,
+      "description": "Gain 2 influences on a track. Gain 1 influence on each of the neighboring tracks",
+      "faction": "animod",
+      "id": 314,
+      "name": "Augustus",
+      "planet": "terra",
+      "rule": "22,2,1"
+    },
+    "315": {
+      "cost": 3,
+      "description": "Exile 2/4/7 of your TERRA cards and respectively gain 1/2/3 influence(s) on TERRA",
+      "faction": "animod",
+      "id": 315,
+      "name": "Tiberius",
+      "planet": "terra",
+      "rule": "40=6,3,2>1,3,1|6,3,4>1,3,2|6,3,7>1,3,3"
+    },
+    "316": {
+      "cost": 4,
+      "description": "If you have the Leader badge, gain 1 influence on TERRA",
+      "faction": "robot",
+      "id": 316,
+      "name": "M4TH3SØN",
+      "planet": "terra",
+      "rule": "11=1,3,1"
+    },
+    "317": {
+      "cost": 5,
+      "description": "For each track other than TERRA, you can exile 1 of your cards to gain 1 Zenithium",
+      "faction": "robot",
+      "id": 317,
+      "name": "LØV3CR4FT",
+      "planet": "terra",
+      "rule": "47,1=3,1_47,2=3,1_47,4=3,1_47,5=3,1"
+    },
+    "318": {
+      "cost": 4,
+      "description": "Discard 1 card from your hand and gain 1 influence on the planet of the corresponding color",
+      "faction": "human",
+      "id": 318,
+      "name": "Ice June",
+      "planet": "terra",
+      "rule": "57="
+    },
+    "401": {
+      "cost": 1,
+      "description": "Gain 4 Credits and you can give 1 Zenithium to your opponent to gain 2 influences on MERCURY",
+      "faction": "human",
+      "id": 401,
+      "name": "Jack Curry",
+      "planet": "mars",
+      "rule": "4,4_52_5,1=1,1,2"
+    },
+    "402": {
+      "cost": 1,
+      "description": "Give 1 influence to your opponent on a track other than MARS to gain 10 Credits",
+      "faction": "animod",
+      "id": 402,
+      "name": "Titus",
+      "planet": "mars",
+      "rule": "1,-4,-1_4,10"
+    },
+    "403": {
+      "cost": 2,
+      "description": "Exile 2/4/7 of your MARS cards and gain 2/4/7 Zenithium respectively",
+      "faction": "robot",
+      "id": 403,
+      "name": "RØB1NSØN",
+      "planet": "mars",
+      "rule": "40=6,4,2>3,2|6,4,4>3,4|6,4,7>3,7"
+    },
+    "404": {
+      "cost": 6,
+      "description": "Gain 1 influence on VENUS and gain the Leader badge",
+      "faction": "human",
+      "id": 404,
+      "name": "Don Dune",
+      "planet": "mars",
+      "rule": "1,2,1_8,1"
+    },
+    "405": {
+      "cost": 2,
+      "description": "Gain 1 Zenithium OR gain 7 Credits",
+      "faction": "animod",
+      "id": 405,
+      "name": "Caesar",
+      "planet": "mars",
+      "rule": "37=3,1|4,7"
+    },
+    "406": {
+      "cost": 4,
+      "description": "Gain 2 Zenithium",
+      "faction": "robot",
+      "id": 406,
+      "name": "MC4FFR3Y",
+      "planet": "mars",
+      "rule": "3,2"
+    },
+    "407": {
+      "cost": 2,
+      "description": "Transfer a card OR gain 1 Zenithium",
+      "faction": "robot",
+      "id": 407,
+      "name": "V4NC3",
+      "planet": "mars",
+      "rule": "37=14,1|3,1"
+    },
+    "408": {
+      "cost": 3,
+      "description": "Transfer two cards OR gain 8 Credits",
+      "faction": "animod",
+      "id": 408,
+      "name": "Ramses",
+      "planet": "mars",
+      "rule": "37=14,2|4,8"
+    },
+    "409": {
+      "cost": 6,
+      "description": "Gain 2 influences on a track where the influence disc is in its middle space",
+      "faction": "robot",
+      "id": 409,
+      "name": "4ND3RSØN",
+      "planet": "mars",
+      "rule": "23,2"
+    },
+    "410": {
+      "cost": 1,
+      "description": "Mobilize 1 card and gain 5 Credits",
+      "faction": "robot",
+      "id": 410,
+      "name": "W4TSØN",
+      "planet": "mars",
+      "rule": "51_17,1_4,5"
+    },
+    "411": {
+      "cost": 5,
+      "description": "Transfer 1 card and gain 1 influence on the planet of the corresponding color",
+      "faction": "animod",
+      "id": 411,
+      "name": "Caligula",
+      "planet": "mars",
+      "rule": "14,1,0,1_1,6,1"
+    },
+    "412": {
+      "cost": 4,
+      "description": "Mobilize 1 card. Transfer 1 opposing card. Exile 1 opposing card.",
+      "faction": "human",
+      "id": 412,
+      "name": "Charlize Gun",
+      "planet": "mars",
+      "rule": "51_17,1_14,1_6,-1,1"
+    },
+    "413": {
+      "cost": 10,
+      "description": "Exile 1 opposing card and gain 1 influence on the planet of the corresponding color (x3)",
+      "faction": "human",
+      "id": 413,
+      "name": "Lady Moore",
+      "planet": "mars",
+      "rule": "6,-1,1_1,6,1_6,-1,1_1,6,1_6,-1,1_1,6,1"
+    },
+    "414": {
+      "cost": 3,
+      "description": "Gain 1 influence on a track other than MARS",
+      "faction": "human",
+      "id": 414,
+      "name": "Little Bob",
+      "planet": "mars",
+      "rule": "1,-4,1"
+    },
+    "415": {
+      "cost": 3,
+      "description": "Exile 2/4/7 of your MARS cards and gain 1/2/3 influence(s) on MARS respectively",
+      "faction": "animod",
+      "id": 415,
+      "name": "Septimus",
+      "planet": "mars",
+      "rule": "40=6,4,2>1,4,1|6,4,4>1,4,2|6,4,7>1,4,3"
+    },
+    "416": {
+      "cost": 4,
+      "description": "If you have the Leader badge, gain 1 influence on MARS",
+      "faction": "robot",
+      "id": 416,
+      "name": "BISHØP",
+      "planet": "mars",
+      "rule": "11=1,4,1"
+    },
+    "417": {
+      "cost": 4,
+      "description": "Take 1 BONUS token from those in play",
+      "faction": "human",
+      "id": 417,
+      "name": "Handy Luke",
+      "planet": "mars",
+      "rule": "45"
+    },
+    "418": {
+      "cost": 9,
+      "description": "Mobilize 3 cards and gain the corresponding influences",
+      "faction": "animod",
+      "id": 418,
+      "name": "Domitian",
+      "planet": "mars",
+      "rule": "51_17,1_1,6,1_17,1_1,6,1_17,1_1,6,1"
+    },
+    "501": {
+      "cost": 1,
+      "description": "Gain 4 Credits and you can give 1 Zenithium to your opponent to gain 2 influence on VENUS",
+      "faction": "human",
+      "id": 501,
+      "name": "Agent Ezra",
+      "planet": "jupiter",
+      "rule": "4,4_5,1=1,2,2"
+    },
+    "502": {
+      "cost": 10,
+      "description": "Gain 2 influences on a track, 2 Zenithium and the gold side Leader badge",
+      "faction": "human",
+      "id": 502,
+      "name": "Queen Suzanne",
+      "planet": "jupiter",
+      "rule": "1,0,2_3,2_8,2"
+    },
+    "503": {
+      "cost": 2,
+      "description": "Exile 2/4/7 of your JUPITER cards and gain 2/4/7 Zenithium respectively",
+      "faction": "robot",
+      "id": 503,
+      "name": "B4RJ4V3L",
+      "planet": "jupiter",
+      "rule": "40=6,5,2>3,2|6,5,4>3,4|6,5,7>3,7"
+    },
+    "504": {
+      "cost": 3,
+      "description": "Gain the gold side Leader badge OR gain 8 Credits",
+      "faction": "animod",
+      "id": 504,
+      "name": "Geta",
+      "planet": "jupiter",
+      "rule": "37=8,2|4,8"
+    },
+    "505": {
+      "cost": 4,
+      "description": "Transfer 1 opposing card and gain its cost in Credits",
+      "faction": "human",
+      "id": 505,
+      "name": "Captain Andreev",
+      "planet": "jupiter",
+      "rule": "15_52_14,1_4,0"
+    },
+    "506": {
+      "cost": 2,
+      "description": "Your opponent gains 3 Credits, you gain 2 Zenithium",
+      "faction": "human",
+      "id": 506,
+      "name": "Lisa Charity",
+      "planet": "jupiter",
+      "rule": "4,3,-1_3,2"
+    },
+    "507": {
+      "cost": 6,
+      "description": "Gain 1 influence on TERRA and gain the Leader badge",
+      "faction": "human",
+      "id": 507,
+      "name": "Milady Jones",
+      "planet": "jupiter",
+      "rule": "1,3,1_8,1"
+    },
+    "508": {
+      "cost": 5,
+      "description": "Gain 1 influence AND 1 Zenithium if you have the Leader badge",
+      "faction": "robot",
+      "id": 508,
+      "name": "P.K.D1CK",
+      "planet": "jupiter",
+      "rule": "1,0,1_11=3,1"
+    },
+    "509": {
+      "cost": 8,
+      "description": "Gain 3 Zenithium. Gain 1 additional Zenithium if you have the Leader badge",
+      "faction": "robot",
+      "id": 509,
+      "name": "CH4MB3RS",
+      "planet": "jupiter",
+      "rule": "3,3_11=3,1"
+    },
+    "510": {
+      "cost": 3,
+      "description": "Exile 1 opponent's card and gain its cost in Credits",
+      "faction": "animod",
+      "id": 510,
+      "name": "Bajazet",
+      "planet": "jupiter",
+      "rule": "6,-1,1_4,0"
+    },
+    "511": {
+      "cost": 8,
+      "description": "Gain 2 influence on one track and gain 1 influence on another track if you have at least 6 Credits",
+      "faction": "robot",
+      "id": 511,
+      "name": "THØMPSØN",
+      "planet": "jupiter",
+      "rule": "1,0,2_27,6=1,-6,1"
+    },
+    "512": {
+      "cost": 1,
+      "description": "Gain 5 Credits and gain an additional 7 Credits if you give the Leader badge",
+      "faction": "animod",
+      "id": 512,
+      "name": "Annie",
+      "planet": "jupiter",
+      "rule": "4,5_16=4,7"
+    },
+    "513": {
+      "cost": 1,
+      "description": "Gain 2 Credits per track where the opponent has at least one card",
+      "faction": "animod",
+      "id": 513,
+      "name": "Ivan",
+      "planet": "jupiter",
+      "rule": "12,-1=4,2"
+    },
+    "514": {
+      "cost": 4,
+      "description": "Transfer 2 opponent's cards and transfer 2 additional cards if you give the Leader badge",
+      "faction": "robot",
+      "id": 514,
+      "name": "GIBSØN",
+      "planet": "jupiter",
+      "rule": "14,2_16=14,2"
+    },
+    "515": {
+      "cost": 3,
+      "description": "Exile 2/4/7 of your JUPITER cards and respectively gain 1/2/3 influence(s) on JUPITER",
+      "faction": "animod",
+      "id": 515,
+      "name": "Arnulf",
+      "planet": "jupiter",
+      "rule": "40=6,5,2>1,5,1|6,5,4>1,5,2|6,5,7>1,5,3"
+    },
+    "516": {
+      "cost": 4,
+      "description": "If you have the Leader badge, gain 1 influence on JUPITER",
+      "faction": "robot",
+      "id": 516,
+      "name": "M4RT1N",
+      "planet": "jupiter",
+      "rule": "11=1,5,1"
+    },
+    "517": {
+      "cost": 2,
+      "description": "Discard 1 card from your hand and gain its cost in Credits",
+      "faction": "human",
+      "id": 517,
+      "name": "Donald Smooth",
+      "planet": "jupiter",
+      "rule": "56"
+    },
+    "518": {
+      "cost": 1,
+      "description": "Spend 3/7/12 Credits to gain respectively 1/2/3 influence(s) on a track other than JUPITER",
+      "faction": "animod",
+      "id": 518,
+      "name": "Suleiman",
+      "planet": "jupiter",
+      "rule": "40=46,3>1,-5,1|46,7>1,-5,2|46,12>1,-5,3"
+    }
+  },
+  "rules": "fa1b6aadd44afb4dea80160c665572c3db10a73cca7fdde1dc89a6e4608bb3d3",
+  "tech_effects": {
+    "animod/1/1": [
+      {
+        "count": 1,
+        "owner": "opponent",
+        "type": "exile"
+      }
+    ],
+    "animod/1/2": [
+      {
+        "amount": 5,
+        "target": "self",
+        "type": "credits"
+      }
+    ],
+    "animod/1/3": [
+      {
+        "type": "draw_bonus"
+      },
+      {
+        "amount": 1,
+        "target": "self",
+        "type": "influence"
+      }
+    ],
+    "animod/1/4": [
+      {
+        "amount": 1,
+        "type": "all_planets"
+      }
+    ],
+    "animod/1/5": [
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "influence"
+      }
+    ],
+    "animod/2/1": [
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "credits"
+      }
+    ],
+    "animod/2/2": [
+      {
+        "amount": 1,
+        "type": "two_adjacent"
+      }
+    ],
+    "animod/2/3": [
+      {
+        "count": 3,
+        "type": "transfer"
+      }
+    ],
+    "animod/2/4": [
+      {
+        "count": 3,
+        "influence_each": true,
+        "type": "mobilize"
+      }
+    ],
+    "animod/2/5": [
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "influence"
+      }
+    ],
+    "human/1/1": [
+      {
+        "type": "draw_bonus"
+      }
+    ],
+    "human/1/2": [
+      {
+        "amount": 1,
+        "resource": "zenithium",
+        "type": "steal"
+      }
+    ],
+    "human/1/3": [
+      {
+        "count": 3,
+        "influence_each": false,
+        "type": "mobilize"
+      }
+    ],
+    "human/1/4": [
+      {
+        "amount": 2,
+        "type": "two_adjacent"
+      }
+    ],
+    "human/1/5": [
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "influence"
+      }
+    ],
+    "human/2/1": [
+      {
+        "amount": 1,
+        "target": "self",
+        "type": "influence"
+      }
+    ],
+    "human/2/2": [
+      {
+        "count": 2,
+        "influence_each": false,
+        "type": "mobilize"
+      }
+    ],
+    "human/2/3": [
+      {
+        "amount": 3,
+        "resource": "credits",
+        "type": "steal"
+      }
+    ],
+    "human/2/4": [
+      {
+        "center": 1,
+        "neighbor": 1,
+        "type": "adjacent_three"
+      }
+    ],
+    "human/2/5": [
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "influence"
+      }
+    ],
+    "robot/1/1": [
+      {
+        "count": 1,
+        "type": "transfer"
+      }
+    ],
+    "robot/1/2": [
+      {
+        "level": 1,
+        "type": "leader"
+      }
+    ],
+    "robot/1/3": [
+      {
+        "amounts": [
+          2,
+          1
+        ],
+        "type": "split_influence"
+      }
+    ],
+    "robot/1/4": [
+      {
+        "amount": 20,
+        "target": "self",
+        "type": "credits"
+      }
+    ],
+    "robot/1/5": [
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "influence"
+      }
+    ],
+    "robot/2/1": [
+      {
+        "count": 1,
+        "influence_each": false,
+        "type": "mobilize"
+      }
+    ],
+    "robot/2/2": [
+      {
+        "count": 1,
+        "influence_each": false,
+        "type": "mobilize"
+      },
+      {
+        "count": 1,
+        "owner": "opponent",
+        "type": "exile"
+      },
+      {
+        "count": 1,
+        "type": "transfer"
+      }
+    ],
+    "robot/2/3": [
+      {
+        "amount": 10,
+        "target": "self",
+        "type": "credits"
+      }
+    ],
+    "robot/2/4": [
+      {
+        "amount": 2,
+        "count": 2,
+        "distinct": true,
+        "type": "exile_for_matching"
+      }
+    ],
+    "robot/2/5": [
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "influence"
+      }
+    ]
+  }
+}

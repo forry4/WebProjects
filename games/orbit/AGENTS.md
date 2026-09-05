@@ -1,5 +1,31 @@
 # Orbit development notes
 
+## AI foundations (2026-09-05)
+
+The agreed campaign is in `AI_PLAN.md`. Phase 1 is implemented locally in
+`ai/`, `tools/export_native.py`, `tools/native_parity.py`, and
+`rust-cores/orbit-core/`; the live random opponent is unchanged.
+
+- Python remains the live authority. Regenerate native mechanical data with
+  `python -m games.orbit.tools.export_native` after changing rule sources; CI
+  uses `--check` to reject stale data. Rules fingerprints invalidate old archives.
+- Run `cargo test --locked --release --manifest-path rust-cores/orbit-core/Cargo.toml`
+  and `python -m games.orbit.tools.native_parity --games 64`. The latter compares
+  every mechanical field, both legal-move lists and both policy observations;
+  explicit shuffle tapes separate rules parity from RNG implementation.
+- `native_state`/Rust `State` are PRIVILEGED. Only `observation` and the matching
+  Rust observation method go into policies. Opposing terminal hands remain hidden.
+- Offline `Session` holds separate observation histories. Public played-card
+  identity must survive same-action discard/reshuffle/draw, and the display log
+  cannot be used as recurrent memory. Live integration is a later phase.
+- `sample_hidden` is a current-observation prior, NOT a history-conditioned belief.
+  Do not use its label or conservation tests to claim full-history consistency.
+- The user authorized Phase 1 after verifying gameplay. Existing BGA audits are
+  bounded evidence, not full replay parity; Python/Rust agreement does not extend
+  their coverage. No BGA game is used as a training example.
+
+## Rules and serving
+
 Orbit is the site's 1v1 implementation of *Zenith* (2025). `engine.py` is the
 only rules authority. The React client sends one object from `legal_moves`; it
 must never calculate resources, influence, captures, or card outcomes itself.

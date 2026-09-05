@@ -1,0 +1,34 @@
+name: Rust CI (orbit-core)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'rust-cores/orbit-core/**'
+      - 'games/orbit/**'
+      - '.github/workflows/rust-orbit.yml'
+  pull_request:
+    paths:
+      - 'rust-cores/orbit-core/**'
+      - 'games/orbit/**'
+      - '.github/workflows/rust-orbit.yml'
+  workflow_dispatch:
+
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install WASM target
+        run: rustup target add wasm32-unknown-unknown
+      - name: Check generated mechanical reference
+        run: python -m games.orbit.tools.export_native --check
+      - name: Native tests
+        run: cargo test --locked --release --manifest-path rust-cores/orbit-core/Cargo.toml
+      - name: Check browser compilation
+        run: cargo check --locked --target wasm32-unknown-unknown --lib --manifest-path rust-cores/orbit-core/Cargo.toml
+      - name: Decision-by-decision Python parity, every board and effect program
+        run: python -m games.orbit.tools.native_parity --games 64
