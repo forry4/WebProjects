@@ -17,6 +17,8 @@
  * rendered ITS OWN screen: distinct, substantial content and no uncaught page errors.
  *
  * Run: `npm run screens` (from webapp/). Needs Python + the backend requirements.
+ * Use `--only=blockName[,blockName]` for a focused, named screen contract; CI
+ * uses this for a game-only release, while any shared change keeps the full gate.
  */
 import { spawn, spawnSync } from "node:child_process";
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -31,6 +33,9 @@ const repoRoot = path.resolve(webappDir, "..");
 const PORT = 5173;            // CORS-allowlisted; see above
 const API_PORT = 8000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const onlyArg = process.argv.find((arg) => arg.startsWith("--only="));
+const ONLY_BLOCKS = (onlyArg?.slice("--only=".length) || process.env.SCREENS_ONLY || "")
+	.split(",").map((name) => name.trim()).filter(Boolean);
 
 // Each game owns one route and must render a marker only IT can produce. The marker is
 // a CSS class from that game's own stylesheet, so a screen that silently fell back to
@@ -5854,7 +5859,18 @@ try {
 			+ `${orphans.join(", ")} — add each to laneA or laneB (see the lane comment above).`);
 	}
 
-	await Promise.all([runLane(laneA), runLane(laneB)]);
+	const allBlocks = [...laneA, ...laneB];
+	if (ONLY_BLOCKS.length) {
+		const byName = new Map(allBlocks.map((fn) => [fn.name, fn]));
+		const unknown = ONLY_BLOCKS.filter((name) => !byName.has(name));
+		if (unknown.length) {
+			throw new Error(`unknown focused screen block(s): ${unknown.join(", ")}`);
+		}
+		console.log(`SCREENS FOCUS — ${ONLY_BLOCKS.join(", ")}`);
+		await runLane(ONLY_BLOCKS.map((name) => byName.get(name)));
+	} else {
+		await Promise.all([runLane(laneA), runLane(laneB)]);
+	}
 
 	if (failures.length || shell.length) {
 		console.error(`\nSCREENS FAIL — ${failures.length} screen(s), ${shell.length} shell interaction(s).`);

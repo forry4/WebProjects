@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview --port 5173",
     "smoke": "node test/smoke.mjs",
-    "screens": "node test/screens.mjs"
+    "screens": "node test/screens.mjs",
+    "screens:orbit": "node test/screens.mjs --only=orbitPlay"
   },
   "dependencies": {
     "react": "^18.2.0",

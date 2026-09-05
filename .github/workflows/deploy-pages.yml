@@ -54,7 +54,7 @@ permissions:
 
 # Concurrency is split PER JOB (below), not set here, because the two jobs want
 # opposite policies and a workflow-level group can only pick one:
-#   * build (the gates) IS cancellable — its only output is the artifact, and once
+#   * build (the frontend gates) IS cancellable — its only output is the artifact, and once
 #     a newer push exists, finishing the old gates proves nothing anyone will ship.
 #     Cancelling it is what lets a rapid follow-up push start its own gates
 #     immediately instead of queueing behind ~2 minutes of a superseded run.
@@ -71,14 +71,42 @@ jobs:
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The focused screen selection compares this push with its parent.
+          fetch-depth: 2
 
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
 
       - name: Install dependencies
         working-directory: webapp
-        run: npm install
+        run: npm ci
+
+      # Game-local changes exercise that game's full real-backend play-through.
+      # A shared, shell, test-harness, or mixed change stays on the complete suite;
+      # this is a reduction in redundant coverage, not a weakening of its boundary.
+      - name: Select render-gate scope
+        id: screen_scope
+        shell: bash
+        run: |
+          before='${{ github.event.before }}'
+          if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ] \
+            || ! git cat-file -e "$before^{commit}" 2>/dev/null; then
+            echo "scope=full" >> "$GITHUB_OUTPUT"
+            echo "No comparable parent commit; using the full render gate."
+            exit 0
+          fi
+          changed=$(git diff --name-only "$before" "${{ github.sha }}")
+          if [ -n "$changed" ] && ! printf '%s\n' "$changed" | grep -qv '^games/orbit/'; then
+            echo "scope=orbit" >> "$GITHUB_OUTPUT"
+            echo "Orbit-only change; using its focused real play-through."
+          else
+            echo "scope=full" >> "$GITHUB_OUTPUT"
+            echo "Shared or mixed change; using the full render gate."
+          fi
 
       # Cache the browser DOWNLOAD (~170MB), which is what made this step 22s on a
       # cold runner. Keyed on the lockfile because that is what pins Playwright's
@@ -145,7 +173,19 @@ jobs:
         working-directory: webapp
         env:
           SCREENS_REUSE_BUILD: '1'
-        run: npm run screens
+        run: |
+          if [ "${{ steps.screen_scope.outputs.scope }}" = "orbit" ]; then
+            npm run screens:orbit
+          else
+            npm run screens
+          fi
+
+      - name: Validation summary
+        if: always()
+        run: |
+          echo "## Pages validation" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Render-gate scope: \`${{ steps.screen_scope.outputs.scope || 'not reached' }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Local pushes compile only; this workflow is the authoritative browser gate." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build
         working-directory: webapp

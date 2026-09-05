@@ -1,33 +1,13 @@
 #!/bin/sh
-# Pre-push gate: run the deploy workflows' own checks BEFORE the push, so a red
-# suite is caught on this machine instead of becoming a red run on main.
+# Fast pre-push feedback for normal work.
 #
-# Nearly every red run in the 2026-08-06/07 launch ledger would have been
-# caught by exactly this: the Python suite is ~1 min since the -n auto work,
-# and smoke+screens are the same gates deploy-pages.yml runs.
+# GitHub Actions is the authoritative, exhaustive gate. Running its Python and
+# browser suites locally first made every frontend release pay for two serial
+# copies of expensive validation. Set FULL_LOCAL_GATES=1 for a full local
+# release rehearsal when it is useful.
 #
-# ACTIVATION is opt-in, once per clone:   git config core.hooksPath .githooks
-# (core.hooksPath redirects ALL hooks to this directory — if you keep personal
-# hooks in .git/hooks, copy them in here or they stop firing.)
-#
-# Escape hatches:
-#   git push --no-verify        skip the hook this once (git's own switch)
-#   SKIP_GATES=1 git push       same, for tooling that can't pass flags
-#   GATES_DRY_RUN=1 git push    print which gates WOULD run, run none
-#
-# Scope, deliberately narrow:
-#   * Only pushes that update refs/heads/main are gated — deploys only fire
-#     there, and a feature-branch push should never pay a multi-minute toll.
-#   * A push touching only *.md runs nothing (neither deploy fires on docs).
-#   * The Python suite runs for ANY other change, matching python-app.yml
-#     (no path filter there — and the suite reads .jsx and .css as text, so
-#     frontend edits genuinely can fail it: test_history_limit,
-#     test_btn_has_a_variant, test_css_tokens).
-#   * smoke + screens run only when the push can change the BUNDLE — the
-#     deploy-pages.yml filter: webapp/**, games/**, shared/**, books/**,
-#     bggfilter/**,
-#     minus *.md and minus Python tests/ dirs. webapp/test/ (singular) is
-#     the gate itself and is deliberately inside the filter.
+# ACTIVATION is opt-in, once per clone: git config core.hooksPath .githooks
+# Escape hatches: git push --no-verify, SKIP_GATES=1, GATES_DRY_RUN=1.
 
 [ "$SKIP_GATES" = "1" ] && exit 0
 
@@ -67,7 +47,7 @@ done
 say() { printf '[pre-push] %s\n' "$*"; }
 
 if [ "$GATES_DRY_RUN" = "1" ]; then
-    say "dry run — would gate: pytest=$need_py smoke+screens=$need_fe"
+    say "dry run — frontend compile=$need_fe; full local rehearsal=${FULL_LOCAL_GATES:-0}"
     exit 0
 fi
 
@@ -76,10 +56,17 @@ fi
 root=$(git rev-parse --show-toplevel) || exit 1
 cd "$root" || exit 1
 
+if [ "$FULL_LOCAL_GATES" != "1" ]; then
+    if [ "$need_fe" = "1" ]; then
+        say "frontend compile check…"
+        ( cd webapp && npm run build ) || exit $?
+    fi
+    say "full Python and browser validation will run once in GitHub Actions."
+    exit 0
+fi
+
 # Prefer the repository's isolated environment when it exists. On Windows, an
-# unactivated `.venv` is otherwise invisible to `command -v`, so the hook picked
-# the global Python and failed on pytest.ini's required `-n auto` option even though
-# the project environment was complete.
+# unactivated `.venv` is otherwise invisible to `command -v`.
 if [ -x "$root/.venv/Scripts/python.exe" ]; then
     PY="$root/.venv/Scripts/python.exe"
 elif [ -x "$root/.venv/bin/python" ]; then
@@ -88,34 +75,30 @@ else
     PY=$(command -v python || command -v python3)
 fi
 if [ -z "$PY" ]; then
-    say "python not found on PATH — cannot run the gates (git push --no-verify to override)"
+    say "python not found on PATH — cannot run the full local rehearsal"
     exit 1
 fi
 
-if [ "$need_py" = "1" ]; then
-    say "Python suite (the Render deploy gate, ~1 min; --no-verify skips)..."
-    "$PY" -m pytest -q || {
-        say "PYTEST FAILED — push to main blocked. Fix, or git push --no-verify."
+# A process already listening on 8000 makes the browser gate fail only after it
+# has spent minutes running. Refuse the rehearsal immediately and name the fix.
+if [ "$need_fe" = "1" ]; then
+    "$PY" -c "import socket,sys; s=socket.socket(); s.settimeout(.15); busy=s.connect_ex(('127.0.0.1',8000)) == 0; s.close(); sys.exit(1 if busy else 0)"
+    if [ $? -ne 0 ]; then
+        say "port 8000 is already in use — stop the local API before the browser gate."
         exit 1
-    }
+    fi
+fi
+
+if [ "$need_py" = "1" ]; then
+    say "full Python suite…"
+    "$PY" -m pytest -q || exit $?
 fi
 
 if [ "$need_fe" = "1" ]; then
-    say "frontend gates — smoke, then screens (the Pages deploy gates, ~80s)..."
-    ( cd webapp && npm run smoke ) || {
-        say "SMOKE FAILED — push to main blocked. Fix, or git push --no-verify."
-        exit 1
-    }
-    # smoke just ran the identical `vite build`, so hand that bundle over instead of
-    # building it twice. screens VERIFIES the offer rather than trusting it — it
-    # rebuilds unless dist/ is newer than every source file — so the build-first
-    # invariant survives even if smoke bailed early or a file was touched between
-    # the two. See runBuild() in webapp/test/screens.mjs.
-    ( cd webapp && SCREENS_REUSE_BUILD=1 npm run screens ) || {
-        say "SCREENS FAILED — push to main blocked. Fix, or git push --no-verify."
-        exit 1
-    }
+    say "full frontend rehearsal…"
+    ( cd webapp && npm run smoke ) || exit $?
+    ( cd webapp && SCREENS_REUSE_BUILD=1 npm run screens ) || exit $?
 fi
 
-say "all gates green — pushing."
+say "all requested local gates green — pushing."
 exit 0
