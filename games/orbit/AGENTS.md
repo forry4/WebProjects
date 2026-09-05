@@ -235,12 +235,59 @@ checked at all.
   what a card is allowed to have produced. All three older audits were re-run to confirm
   their numbers did not move.
 
+`tools/bga_trigger_audit.py` is the fifth, and it closes the hole the other four leave by
+construction. They discard any segment containing a tech advance, a bonus token or a
+planet capture — which discards, entirely, the eight cards whose *whole effect is to fire
+one*: 208/210/211/212/214 (`develop`), 107/108 (`draw_bonus`), 417 (`take_board_bonus`).
+
+It asks the opposite question. The others ask "did this card produce something it
+CANNOT?", meaningless here since the trigger legitimately produces anything. This asks
+**"did it produce the specific thing it DECLARES?"** — which for a develop card has an
+arithmetic answer.
+
+- **The payment is the measurement, and it was calibrated before it was trusted.**
+  `engine.py` charges `max(0, new_level − discount)`, logged as the `deltaSolium`
+  immediately before the `setTech`. That reading was checked first on the **545 ordinary
+  advances** taken as the `technology` action, where the discount is known to be zero —
+  all 545 match. Only then were the card discounts measured against it: **648 payments,
+  0 mismatches** (208 at −2, 210/211/212 at −1, 214 free). Every faction claim holds too
+  (210 human, 211 robot, 212 animod: 71 of 71), and 214's "one of your LOWEST" holds
+  18 of 18 against tech levels rebuilt from the `setTech` stream.
+- **107's rider is scored BOTH ways.** "7 additional Credits if you give the Leader badge"
+  is conditional, so a hand-over must come with +7 *and* no hand-over must come without
+  it: 7 taken, 15 declined, 0 contradictions.
+- **A conditional trigger's ABSENCE proves nothing, and forgetting that accuses the data.**
+  Card 108 is "gain 1 BONUS token IF YOU HAVE the Leader badge"; reading it as an
+  unconditional draw reported seven perfectly correct badge-less plays as a card failing
+  to act. `CONDITIONAL` marks triggers nested under `if_leader` / `optional` /
+  `choose_branch`, and a control confirms it is load-bearing rather than decoration.
+- **The bonus checks are weak on purpose.** `draw_bonus` and `take_board_bonus` differ in
+  where the token comes from and the log does not say, so this cannot separate 107/108
+  from 417 and does not pretend to.
+
+**`undo` has now produced a false finding FOUR times, each in a different disguise**, and
+it is the single most reliable way to be wrong about a BGA log:
+
+1. filtered as noise, it stitched a retracted play onto a later action (card 301);
+2. it left a *retracted tech advance* in the rebuilt level model, so card 214 was accused
+   of raising a track that was not its lowest — the track it "already had" had been taken
+   back sixty moves earlier;
+3. segments ending in `undo` were still being scored, so four correct plays of card 107
+   were read as the card doing nothing;
+4. and the fix for (3) set its flag *after* the close instead of before, so the flag
+   landed on the following segment and the same four were reported again.
+
+Treat every reconstruction of state from a log as owing `undo` an answer. Here that is a
+journal of advances since the last end-of-turn draw, rolled back when one arrives; a
+control confirms the rollback is load-bearing.
+
 Every audit reports zero, so **each was proved non-vacuous at that zero baseline**:
-eleven perturbations in all — an influence amount, a named planet, a zenithium amount,
+sixteen perturbations in all — an influence amount, a named planet, a zenithium amount,
 the exile_tier ladder, a card's own planet, two cards stripped of an effect, two tech
-levels given wrong effects, a bonus description altered, and the level-2 fixed token
-withheld — each drives its count off zero, and the pre-perturbation output is restored
-exactly afterwards.
+levels given wrong effects, a bonus description altered, the level-2 fixed token withheld,
+a develop discount, a develop faction, a "free" advance made payable, a false "lowest"
+claim, and 107's rider amount — each drives its count off zero, and the pre-perturbation
+output is restored exactly afterwards.
 
 No pytest gates any of this: the corpus lives outside the repo, so a test would have to
 skip when it is absent, and `core/tests/test_no_conditional_skips.py` bans that. Same call
