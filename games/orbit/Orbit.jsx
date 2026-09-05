@@ -80,6 +80,45 @@ function PlanetName({ planet, className = "" }) {
   return <b className={`or-pl or-${planet}${className ? ` ${className}` : ""}`}>{planet}</b>;
 }
 
+// Read-only faces offer the same detail view with either mouse button.
+function detailClick(open) {
+  return {
+    onClick: open,
+    onContextMenu: (event) => { event.preventDefault(); event.stopPropagation(); open(event); },
+  };
+}
+
+function MoveLog({ entries = [] }) {
+  const viewport = useRef(null);
+  useEffect(() => {
+    const node = viewport.current;
+    const follow = () => { node.scrollTop = node.scrollHeight; };
+    follow();
+    const observer = new ResizeObserver(follow);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [entries]);
+  return <section className="or-log"><h2>Log</h2><div ref={viewport}>
+    {entries.map((entry, i) => <p key={`${entry.turn}-${i}`}><b>{entry.turn}</b>{entry.message}</p>)}
+  </div></section>;
+}
+
+function Hand({ children }) {
+  const viewport = useRef(null);
+  useEffect(() => {
+    const node = viewport.current;
+    const fit = () => {
+      const css = getComputedStyle(node);
+      const available = node.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight);
+      node.style.setProperty("--or-hand-scale", Math.min(1, (available - 5 * parseFloat(css.columnGap)) / (6 * 145)));
+    };
+    const observer = new ResizeObserver(fit);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  return <div className="or-hand" ref={viewport}>{children}</div>;
+}
+
 
 function captureSummary(captured = []) {
   return captured.map((planet, index) => (
@@ -132,7 +171,7 @@ function PlayerRail({ player, name, active, me, leader, hint, onInfo }) {
         return <button type="button" key={planet} className={`or-played-agent or-${planet}`}
           disabled={!cards.length} title={`${cards.length} ${planet} Agent${cards.length === 1 ? "" : "s"}. ${cards.length ? "Open details" : "None played"}`}
           aria-label={`${cards.length} ${planet} Agent${cards.length === 1 ? "" : "s"}${cards.length ? ". Open details" : ""}`}
-          onClick={() => cards.length && onInfo?.({ kind: "column", planet, cards, owner })}>
+          {...detailClick(() => cards.length && onInfo?.({ kind: "column", planet, cards, owner }))}>
           {cards.length}
         </button>;
       })}</div>
@@ -158,7 +197,7 @@ function Bonus({ token, catalog, onInfo, compact = false, className = "" }) {
   return <button type="button"
     className={`or-bonus${compact ? " compact" : ""}${className ? ` ${className}` : ""}`}
     aria-label={`${text}. Open bonus details`} title={`${text} — tap to read`}
-    onClick={onInfo ? (event) => { event.stopPropagation(); onInfo({ kind: "bonus", token }); } : undefined}>
+    {...(onInfo ? detailClick((event) => { event.stopPropagation(); onInfo({ kind: "bonus", token }); }) : {})}>
     <i aria-hidden="true">✦</i><span className="or-sr-only">{text}</span>
   </button>;
 }
@@ -236,7 +275,7 @@ function TechBoard({ game, myId, otherId, myName, theirName, catalog, onInfo }) 
             <button type="button"
               className={`or-tech-space${mineLevel === space.level ? " mine" : ""}${theirLevel === space.level ? " theirs" : ""}`}
               title={`Level ${space.level}: ${space.description}`}
-              onClick={() => onInfo({ kind: "tech", faction, level: space.level, description: space.description })}>
+              {...detailClick(() => onInfo({ kind: "tech", faction, level: space.level, description: space.description }))}>
               <span className="or-tech-rail">
                 <b className="or-tech-lv">{space.level}</b>
                 {seats(space.level)}
@@ -279,7 +318,7 @@ function AgentCard({ card, selected, onClick, onInfo, hidden = false }) {
 
 /* THE PLACED-AGENT COLUMNS, CONDENSED SO ALL FIVE PLANETS FIT. Each occupied
    column is one recognisable mini-card with up to two offset layers behind it;
-   the count is printed on the face. That reads as a stack without the old
+   the count sits beside the planet name. That reads as a stack without the old
    detached "+N below" button looking like a second unrelated control.
    The section names its OWNER unambiguously — "Your agents" with a seat dot,
    never a bare possessive a player has to match against a half-read name.
@@ -297,12 +336,11 @@ function Columns({ game, pid, name, mine, onInfo }) {
           ? { kind: "column", planet, cards, owner: mine ? "Your" : `${name || "Opponent"}’s` }
           : { kind: "card", card: top };
         return <div className={`or-column or-${planet}`} key={planet}>
-          <span className="or-column-head"><PlanetName planet={planet} /></span>
+          <span className="or-column-head"><PlanetName planet={planet} /><b className="or-column-count" aria-label={`${cards.length} Agents`}>{cards.length}</b></span>
           {top ? <button type="button" className={`or-slot${cards.length > 1 ? " stacked" : ""}`}
             title={`${cards.length} Agent${cards.length === 1 ? "" : "s"} — ${top.name} on top`}
-            onClick={() => onInfo(stackInfo)}>
+            {...detailClick(() => onInfo(stackInfo))}>
             <strong>{top.name}</strong>
-            <span className="or-slot-count"><b>{cards.length}</b>{cards.length === 1 ? " agent" : " agents"}</span>
           </button> : <span className="or-column-empty">empty</span>}
         </div>;
       })}
@@ -365,7 +403,7 @@ function InfoModal({ info, catalog, onClose, onInfo }) {
     title = info.planet;
     body = <ul className="or-info-list">
       {[...info.cards].reverse().map((card, index) => <li key={card.id}>
-        <button type="button" onClick={() => onInfo({ kind: "card", card })}>
+        <button type="button" {...detailClick(() => onInfo({ kind: "card", card }))}>
           <span className="or-info-li-head"><b>{card.cost}</b><strong>{card.name}</strong>
             {index === 0 && <em>top</em>}</span>
           <span>{card.description}</span>
@@ -745,39 +783,39 @@ export default function Orbit({ myId, authUser, onExit }) {
       </section>}
       {game.phase === "mulligan" && !isMyTurn && <section className="or-status"><span className="or-spinner" /> Waiting for the other mulligan…</section>}
 
-      {game.phase !== "mulligan" && <>
+      {game.phase !== "mulligan" && <div className="or-board-layout">
         <div className="or-board-main">
           <InfluenceBoard game={game} myId={myId} catalog={catalog} onInfo={setInfo} />
           <Columns game={game} pid={otherId} name={names[otherId]} onInfo={setInfo} />
           <Columns game={game} pid={myId} name={names[myId]} mine onInfo={setInfo} />
+          {!over && game.pending && game.pending_pid === myId && <DecisionPanel game={game} catalog={catalog} sendMove={sendMove} />}
+          {!over && game.pending && game.pending_pid !== myId && <section className="or-status"><span className="or-spinner" /> {names[game.pending_pid] || "Opponent"} is resolving {game.pending.source}…</section>}
+          {!over && !game.pending && !isMyTurn && <section className="or-status"><span className="or-spinner" /> {names[game.turn_pid] || "Opponent"} is choosing an action…</section>}
+
+          <section className="or-hand-zone">
+            <div className="or-hand-head"><span className="or-eyebrow">Your hand</span>
+              <span>{me.hand.length} / {game.leader?.owner === myId ? (game.leader.level === 2 ? 6 : 5) : 4}</span></div>
+            <Hand>{me.hand.map((card) => <AgentCard card={card} key={card.id} selected={selectedCard === card.id} onInfo={setInfo}
+              onClick={isMyTurn && !game.pending ? () => setSelectedCard(card.id) : null} />)}</Hand>
+            {selectedCard != null && isMyTurn && !game.pending && <div className="or-action-bar">
+              <span>Play <b>{me.hand.find((card) => card.id === selectedCard)?.name}</b> as:</span>
+              <div>{["recruit", "technology", "leader"].map((action) => {
+                const move = cardMoves.find((candidate) => candidate.action === action);
+                const label = action === "recruit"
+                  ? `Recruit · ${recruitCost} Credits`
+                  : action === "technology"
+                    ? `Develop ${selectedAgent?.faction || "Technology"} · ${technologyCost} Zenithium`
+                    : `Become Leader · ${selectedAgent?.faction || "Faction"}`;
+                return <button type="button" key={action} disabled={!move} onClick={() => move && sendMove(move)}>{label}</button>;
+              })}</div>
+            </div>}
+          </section>
         </div>
         <div className="or-sideboards"><TechBoard game={game} myId={myId} otherId={otherId} catalog={catalog}
           myName={names[myId]} theirName={names[otherId]} onInfo={setInfo} />
-          <section className="or-log"><h2>Log</h2><div>{(game.log || []).slice(-14).map((entry, i) => <p key={`${entry.turn}-${i}`}><b>{entry.turn}</b>{entry.message}</p>)}</div></section>
+          <MoveLog entries={game.log} />
         </div>
-        {!over && game.pending && game.pending_pid === myId && <DecisionPanel game={game} catalog={catalog} sendMove={sendMove} />}
-        {!over && game.pending && game.pending_pid !== myId && <section className="or-status"><span className="or-spinner" /> {names[game.pending_pid] || "Opponent"} is resolving {game.pending.source}…</section>}
-        {!over && !game.pending && !isMyTurn && <section className="or-status"><span className="or-spinner" /> {names[game.turn_pid] || "Opponent"} is choosing an action…</section>}
-
-        <section className="or-hand-zone">
-          <div className="or-hand-head"><span className="or-eyebrow">Your hand</span>
-            <span>{me.hand.length} / {game.leader?.owner === myId ? (game.leader.level === 2 ? 6 : 5) : 4}</span></div>
-          <div className="or-hand">{me.hand.map((card) => <AgentCard card={card} key={card.id} selected={selectedCard === card.id} onInfo={setInfo}
-            onClick={isMyTurn && !game.pending ? () => setSelectedCard(card.id) : null} />)}</div>
-          {selectedCard != null && isMyTurn && !game.pending && <div className="or-action-bar">
-            <span>Play <b>{me.hand.find((card) => card.id === selectedCard)?.name}</b> as:</span>
-            <div>{["recruit", "technology", "leader"].map((action) => {
-              const move = cardMoves.find((candidate) => candidate.action === action);
-              const label = action === "recruit"
-                ? `Recruit · ${recruitCost} Credits`
-                : action === "technology"
-                  ? `Develop ${selectedAgent?.faction || "Technology"} · ${technologyCost} Zenithium`
-                  : `Become Leader · ${selectedAgent?.faction || "Faction"}`;
-              return <button type="button" key={action} disabled={!move} onClick={() => move && sendMove(move)}>{label}</button>;
-            })}</div>
-          </div>}
-        </section>
-      </>}
+      </div>}
     </main>
     <InfoModal info={info} catalog={catalog} onInfo={setInfo} onClose={() => setInfo(null)} />
     {showRules && <RulesModal title="How to play — Orbit" onClose={() => setShowRules(false)}><OrbitRules /></RulesModal>}

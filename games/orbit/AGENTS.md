@@ -68,7 +68,8 @@ were each a real misread on the table, so they are worth not undoing:
   in two compact lines.
 - **Every readable face opens the same modal** — a card, a bonus token, a
   technology space, a whole column. Plain click when the click is free,
-  press-and-hold / right-click (`shared/gestures.js`) when it is not. A hand
+  and right-click opens the same details on every face. Hand cards also use
+  press-and-hold (`shared/gestures.js`) when plain click selects a play. A hand
   card is therefore never `disabled`: `.playable` is what says the click will
   play it, and `screens.mjs` waits on that class for "this seat has legal
   moves". The page selects no text (`user-select: none`, inputs exempt), because
@@ -79,10 +80,10 @@ were each a real misread on the table, so they are worth not undoing:
   A technology bonus sits on its LEVEL-2 space, which is the space that pays it,
   not above the whole column.
 - **Placed Agents are one mini-card stack, not two controls.** The top Agent is
-  the face, up to two subdued offset outlines show depth, and the face says the
-  total. Do not bring back a detached `+N below` button: it looked unrelated to
-  the card it counted. The face itself shows only the top Agent's name and a
-  clear count; cost, faction and rules belong in the modal. A press opens the
+  the face, up to two subdued offset outlines show depth, and the count sits to
+  the right of the planet name. Do not bring back a detached `+N below` button:
+  it looked unrelated to the card it counted. The shorter face shows only the
+  top Agent's name; cost, faction and rules belong in the modal. A press opens the
   full column when its count is above 1.
 - **The rail counts are the PHONE treatment of those panels, and only that.**
   Each rail carries five planet-coloured counts under Credits/Zenithium/cards;
@@ -97,9 +98,12 @@ were each a real misread on the table, so they are worth not undoing:
   the source payload's prose is the authority, and a regex-summarised glyph row
   is a lossy second one.
 - **Desktop board columns size independently.** `.or-board-main` owns influence
-  and both Agent panels; `.or-sideboards` owns technology and the log. Do not
-  span the sideboard through outer-grid rows — that made its height stretch the
-  influence panel into a large empty slab below Jupiter. At one column the
+  and both Agent panels, decisions and the hand; `.or-sideboards` owns technology
+  and the log. `.or-board-layout` fills the remaining viewport; only the log
+  absorbs spare height. The left grid uses `minmax(0, 1fr)` so a six-card hand
+  cannot force it over the right column. Hand cards scale uniformly to fit six
+  on desktop. Do not stretch the influence panel into blank space below Jupiter.
+  At one column the
   wrappers become `display: contents`; on phones the order is influence →
   technology → placed Agents → decision → hand → log.
 - **The desktop targets are 2560×1600 and 1920×1080.** Orbit's in-game header
@@ -111,7 +115,10 @@ were each a real misread on the table, so they are worth not undoing:
   quietly spend that fit.
 - **On phones the Log is the final board section**, after the hand and any live
   action controls. It is history, not the next decision, and must not split the
-  board state from the cards a player acts with.
+  board state from the cards a player acts with. All sizes keep the full log and
+  scroll its own viewport to the newest entry on updates and resizes.
+- **Influence lines extend beyond both goal circles.** Technology seat dots
+  identify the occupied level; do not add blue/orange borders or side glows to it.
 - **Nothing on the table scrolls sideways except the hand.** The influence rows,
   the technology grid and both placed-Agent grids reflow instead: on a phone a
   planet's name moves above its track, and the placed-Agent columns are chips so

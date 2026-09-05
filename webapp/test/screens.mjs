@@ -5493,6 +5493,16 @@ try {
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
 			JSON.stringify({ id: "orbit-harness", name: "Orbiter", guest: true })));
 		const page = await ctx.newPage();
+		let socket, latestFrame, fixtureMode = false;
+		await page.routeWebSocket("**/orbit/ws/**", (ws) => {
+			socket = ws;
+			const server = ws.connectToServer();
+			server.onMessage((message) => {
+				const data = JSON.parse(String(message));
+				if (data.room?.game) latestFrame = data;
+				if (!fixtureMode) ws.send(message);
+			});
+		});
 		const errors = [];
 		page.on("pageerror", (e) => errors.push(String(e)));
 		const check = (name, cond, detail = "") => {
@@ -5650,20 +5660,78 @@ try {
 				slots: slots.length,
 				extraFacts: document.querySelectorAll(".or-slot .or-slot-top").length,
 				complete: slots.every((slot) => !!slot.querySelector("strong")?.textContent.trim()
-					&& /^\d+\s+agents?$/i.test(slot.querySelector(".or-slot-count")?.textContent.trim() || "")),
+					&& /^\d+$/.test(slot.closest(".or-column").querySelector(".or-column-count")?.textContent.trim() || "")
+					&& !slot.querySelector(".or-slot-count")),
 			};
 		});
-		check("a played Agent shows only its top name and an unambiguous stack count",
+		check("a played Agent shows its name with the count beside its planet",
 			placedFaces.slots > 0 && placedFaces.extraFacts === 0 && placedFaces.complete,
 			JSON.stringify(placedFaces));
-		// The two desktop targets are product sizes, not incidental screenshots.
+		// Stress the presentation through a room update, after the real action.
+		// Fixture moves are never sent to the server.
+		fixtureMode = true;
+		const fixture = structuredClone(latestFrame);
+		fixture.type = "room_update";
+		const gameView = fixture.room.game;
+		const self = gameView.players["orbit-harness"];
+		while (self.hand.length < 6) self.hand.push({ ...self.hand[0], id: 1000 + self.hand.length });
+		self.columns[self.hand[0].planet] = [self.hand[0], self.hand[1]];
+		for (const player of Object.values(gameView.players)) player.technology.robot = 1;
+		gameView.leader = { owner: "orbit-harness", level: 2 };
+		gameView.pending = null;
+		gameView.pending_pid = null;
+		gameView.turn_pid = "orbit-harness";
+		gameView.legal_moves = [{ action: "recruit", card_id: self.hand[0].id }];
+		gameView.log = Array.from({ length: 80 }, (_, i) => ({ turn: i + 1, message: `History ${i + 1}: Orbiter gains influence on Mercury.` }));
+		socket.send(JSON.stringify(fixture));
+		await page.waitForFunction(() => document.querySelectorAll(".or-log p").length === 80);
+		await page.locator(".or-hand-zone .or-agent").first().click();
+		for (const selector of [".or-hand-zone .or-agent", ".or-influence button.or-bonus", ".or-tech-token", ".or-tech-space", ".or-slot.stacked"]) {
+			await page.locator(selector).first().click({ button: "right" });
+			check(`right-click opens details for ${selector}`, await page.locator(".or-info").isVisible());
+			await page.keyboard.press("Escape");
+		}
+		await page.locator(".or-slot.stacked").first().click({ button: "right" });
+		await page.locator(".or-info-list button").first().click({ button: "right" });
+		check("right-click opens an Agent within a column", await page.locator(".or-info-cost").count() === 1);
+		await page.keyboard.press("Escape");
+		await page.locator(".or-log > div").evaluate((el) => { el.scrollTop = 0; });
+		gameView.log.push({ turn: 81, message: "Newest move stays visible" });
+		socket.send(JSON.stringify(fixture));
+		await page.waitForFunction(() => document.querySelectorAll(".or-log p").length === 81);
+		check("a new log entry scrolls to the latest move", await page.locator(".or-log > div").evaluate(
+			(el) => el.scrollHeight > el.clientHeight && Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) <= 2));
+		const checkTrackPresentation = async (label) => {
+			const trackStyle = await page.evaluate(() => {
+				const goalsExtend = [...document.querySelectorAll(".or-track-spaces")].every((track) => {
+					const r = track.getBoundingClientRect();
+					const goals = [...track.querySelectorAll(".goal")].map((el) => el.getBoundingClientRect());
+					const line = getComputedStyle(track, "::before");
+					return line.content !== "none" && parseFloat(line.borderTopWidth) > 0
+						&& goals[0].left + goals[0].width / 2 - 8 > r.left + 4
+						&& goals[1].left + goals[1].width / 2 + 8 < r.right - 4;
+				});
+				const occupied = document.querySelector(".or-tech-space.mine.theirs");
+				const vacant = document.querySelector(".or-tech-space:not(.mine):not(.theirs)");
+				return { goalsExtend, dots: occupied.querySelectorAll(".or-tech-seats i").length,
+					noGlow: getComputedStyle(occupied).boxShadow === "none"
+						&& getComputedStyle(occupied).borderColor === getComputedStyle(vacant).borderColor };
+			});
+			check(`${label}: track lines pass both ends and technology uses dots without side lighting`,
+				trackStyle.goalsExtend && trackStyle.dots === 2 && trackStyle.noGlow, JSON.stringify(trackStyle));
+		};
+		await checkTrackPresentation("Desktop");
+		// The desktop targets are product sizes, not incidental screenshots.
 		// At 2560 the shared page measure used to put the menu/name more than 500px
 		// from their edges; at 1920 the board ran about 160px below the fold. Keep
 		// both contracts measurable while the compact board evolves.
-		for (const viewport of [{ width: 2560, height: 1600 }, { width: 1920, height: 1080 }]) {
+		for (const viewport of [{ width: 2560, height: 1600 }, { width: 1920, height: 1080 }, { width: 1366, height: 768 }, { width: 1280, height: 800 }, { width: 1024, height: 768 }]) {
 			await page.setViewportSize(viewport);
 			await sleep(200);
 			const desktop = await page.evaluate(() => {
+				const hand = document.querySelector(".or-hand-zone").getBoundingClientRect();
+				const logBox = document.querySelector(".or-log").getBoundingClientRect();
+				const cards = [...document.querySelectorAll(".or-hand-zone .or-agent")].map((el) => el.getBoundingClientRect());
 				const menu = document.querySelector(".lby-head-left .gm-btn").getBoundingClientRect();
 				const user = document.querySelector(".lby-head-right").getBoundingClientRect();
 				const techHeights = [...document.querySelectorAll(".or-tech-space")]
@@ -5679,12 +5747,19 @@ try {
 					viewportWidth: innerWidth,
 					techHeights: [...new Set(techHeights)],
 					maxSlotHeight: Math.max(...slotHeights),
+					logBottom: logBox.bottom,
+					logBesideHand: logBox.left >= hand.right,
+					sixFit: cards.length === 6 && cards.every((r) => r.left >= hand.left && r.right <= hand.right),
+					uniformCards: Math.max(...cards.map((r) => r.width)) - Math.min(...cards.map((r) => r.width)) < 1,
 					hint: document.querySelector(".or-player.mine .or-player-hint")?.textContent.trim(),
 					handSubhead: document.querySelectorAll(".or-hand-head h2").length,
 				};
 			});
 			check(`Orbit fills ${viewport.width}x${viewport.height} without page scrolling`,
 				!desktop.wide && !desktop.tall, JSON.stringify(desktop));
+			check(`the log reaches the bottom beside six equal cards at ${viewport.width}px`,
+				desktop.logBesideHand && Math.abs(desktop.logBottom - viewport.height) <= 12
+				&& desktop.sixFit && desktop.uniformCards, JSON.stringify(desktop));
 			check(`the ${viewport.width}px game header reaches both screen edges`,
 				desktop.menuLeft <= 22 && desktop.userRight >= desktop.viewportWidth - 22,
 				JSON.stringify(desktop));
@@ -5793,6 +5868,7 @@ try {
 		check("the compact technology summary expands to the complete ladder",
 			expandedTech.bodyVisible && expandedTech.spaces === 15 && expandedTech.expanded === "true",
 			JSON.stringify(expandedTech));
+		await checkTrackPresentation("Phone");
 		await page.locator(".or-tech-toggle").click({ timeout: 10_000 }).catch(() => {});
 
 		// Every readable face opens the same modal, so neither treatment loses rules
