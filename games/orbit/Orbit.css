@@ -171,8 +171,8 @@
    paints its stripe, its dot and its active glow from that. `.mine` is the
    opt-in and the default is the opponent, so a panel that forgets to say is
    never mistaken for yours. */
-.or-player { --or-seat: var(--or-them); }
-.or-player.mine { --or-seat: var(--or-me); }
+.or-player, .or-columns { --or-seat: var(--or-them); }
+.or-player.mine, .or-columns.mine { --or-seat: var(--or-me); }
 .or-seat-dot {
   flex: none;
   width: .62rem;
@@ -224,9 +224,12 @@
 .or-captures { display: inline-flex; align-items: center; gap: .18rem; margin-left: .22rem; padding-left: .42rem; border-left: 1px solid var(--or-line); }
 .or-capture-disc { width: .7rem; height: .7rem; border: 1px solid rgba(255,255,255,.72); border-radius: 50%; background: currentColor; box-shadow: 0 1px 4px #0008; }
 
-/* Played Agents belong with the player who owns them. The five colour chips
-   show only a count; their columns' specific cards are one press away. */
-.or-played-agents { display: flex; align-items: center; gap: .38rem; margin-top: .35rem; padding-top: .32rem; border-top: 1px solid var(--or-line); }
+/* PHONES ONLY. On a phone the two full placed-Agent panels are two more
+   full-width slabs to scroll past, so there the five counts fold into their
+   owner's rail and the cards stay one press away. Above the phone tier the
+   panels below the influence board are the real read and these are hidden —
+   the same information must never be on screen twice. */
+.or-played-agents { display: none; align-items: center; gap: .38rem; margin-top: .35rem; padding-top: .32rem; border-top: 1px solid var(--or-line); }
 .or-played-agents > span { color: var(--or-dim); font-size: .56rem; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
 .or-played-agents > div { display: grid; grid-template-columns: repeat(5, 1.5rem); gap: .28rem; }
 .or-played-agent { display: grid; place-items: center; width: 1.5rem; height: 1.25rem; padding: 0; border: 1px solid currentColor; border-radius: 5px; background: color-mix(in srgb, currentColor 18%, #15182d); color: inherit; font: 800 .7rem/1 ui-monospace, monospace; cursor: pointer; }
@@ -353,6 +356,45 @@
 .or-log p { display: grid; grid-template-columns: 1.6rem 1fr; gap: .35rem; margin: .28rem 0; color: #bbc1d5; font-size: .68rem; line-height: 1.28; }
 .or-log p b { color: #747d9c; }
 
+/* ── Placed Agents ───────────────────────────────────────────────────────────
+   Five planets, always all five, at every width. The face is a chip; the text
+   lives in the modal. */
+.or-columns { padding: .52rem; }
+/* `.or-table > section` sets the panel border, so the seat stripe has to be
+   written from the same depth to win rather than reaching for !important. */
+.or-table > .or-columns { border-left: 3px solid var(--or-seat); }
+.or-columns h3 { display: flex; align-items: center; gap: .4rem; margin: 0 0 .34rem; color: var(--or-dim); font-size: .68rem; letter-spacing: .08em; text-transform: uppercase; }
+.or-columns.mine h3 { color: var(--or-ink); }
+.or-column-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .4rem; }
+.or-column { min-width: 0; padding: .22rem .3rem .34rem; border-top: 3px solid currentColor; border-radius: 8px; background: linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.018)); }
+.or-column-head { display: flex; justify-content: center; align-items: center; min-height: .9rem; margin-bottom: .22rem; font-size: .58rem; }
+.or-column-head .or-pl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.or-slot {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: .12rem;
+  width: 100%;
+  height: 3.25rem;
+  margin: 0 .22rem .22rem 0;
+  padding: .28rem .32rem;
+  border: 1px solid currentColor;
+  border-radius: 7px;
+  background: linear-gradient(160deg, rgba(255,255,255,.14), rgba(13,15,31,.97) 62%);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.or-slot.stacked { box-shadow: 3px 3px 0 -1px #171a31, 3px 3px 0 0 color-mix(in srgb, currentColor 62%, #171a31), 6px 6px 0 -1px #171a31, 6px 6px 0 0 color-mix(in srgb, currentColor 38%, #171a31); }
+.or-slot:hover { box-shadow: 0 0 0 2px var(--lby-accent); }
+.or-slot.stacked:hover { box-shadow: 3px 3px 0 -1px #171a31, 3px 3px 0 0 color-mix(in srgb, currentColor 62%, #171a31), 6px 6px 0 -1px #171a31, 6px 6px 0 0 color-mix(in srgb, currentColor 38%, #171a31), 0 0 0 2px var(--lby-accent); }
+.or-slot strong { display: -webkit-box; align-self: center; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--or-ink); font-family: Georgia, serif; font-size: .7rem; line-height: 1.08; }
+.or-slot-count { display: inline-flex; align-items: baseline; gap: .18rem; color: #aab2cd; font-size: .5rem; font-weight: 850; letter-spacing: .04em; text-transform: uppercase; }
+.or-slot-count b { color: currentColor; font-size: .72rem; line-height: 1; }
+.or-column-empty { display: grid; place-items: center; height: 3.25rem; border: 1px dashed color-mix(in srgb, currentColor, transparent 66%); border-radius: 7px; color: #646d8c; font-size: .56rem; letter-spacing: .05em; text-transform: uppercase; }
+
 /* ── Hand ───────────────────────────────────────────────────────────────── */
 /* THE WHOLE CARD IS OUTLINED IN ITS PLANET'S COLOUR, which is what replaced the
    planet glyph. It already said `border: 2px solid currentColor` and still came
@@ -370,11 +412,10 @@
 .or-agent-top { display: flex; justify-content: space-between; align-items: center; color: currentColor; }
 .or-agent-top i { color: var(--or-fac, currentColor); font-size: 1.05rem; font-style: normal; }
 .or-agent-top b { display: grid; place-items: center; width: 1.55rem; height: 1.55rem; border-radius: 50%; background: #f2f0e8; color: #121526; font-size: .84rem; }
-.or-card-symbols { flex: 1; display: flex; flex-wrap: wrap; align-content: center; justify-content: center; gap: .5rem .6rem; padding: .45rem .1rem .15rem; }
-.or-card-symbol { display: inline-flex; align-items: end; gap: .08rem; color: var(--or-ink); line-height: 1; }
-.or-card-symbol i { color: var(--or-fac, currentColor); font-size: 1.38rem; font-style: normal; }
-.or-card-symbol b { color: var(--or-ink); font: 850 .68rem/1 ui-monospace, monospace; }
-.or-modal-symbols { flex: initial; justify-content: flex-start; padding: 0 0 .75rem; border-bottom: 1px solid var(--or-line); }
+.or-agent strong { margin: .48rem 0 .3rem; color: var(--or-ink); font-family: Georgia, serif; font-size: .92rem; }
+.or-agent-text { flex: 1; color: #cbd0e2; font-size: .68rem; line-height: 1.28; }
+.or-agent-foot { display: flex; align-items: center; gap: .3rem; color: var(--or-dim); font-size: .6rem; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; }
+.or-agent-foot .or-pl { letter-spacing: .07em; }
 .or-agent.hidden { align-items: center; justify-content: center; border-color: #697296; background: repeating-linear-gradient(135deg, #161a38 0 8px, #222850 8px 16px); color: #9ba7d7; letter-spacing: .22em; }
 
 .or-hand-zone { grid-column: 1 / -1; padding: .6rem .8rem .7rem; }
@@ -436,20 +477,12 @@
 .or-info-cost b { display: grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: 50%; background: #f2f0e8; color: #121526; font-size: .82rem; }
 .or-info-text { margin: 0 0 .8rem; color: var(--or-ink); font-size: .92rem; line-height: 1.45; }
 .or-info-note { margin: 0; padding-top: .7rem; border-top: 1px solid var(--or-line); color: #8b93b0; font-size: .7rem; line-height: 1.45; }
-.or-symbol-legend { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .32rem .6rem; margin: 0 0 .8rem; padding: .65rem; border: 1px solid var(--or-line); border-radius: 8px; background: #ffffff06; }
-.or-symbol-legend-title { grid-column: 1 / -1; color: var(--or-ink) !important; font-size: .58rem !important; font-weight: 850 !important; letter-spacing: .09em; text-transform: uppercase; }
-.or-symbol-legend > span { display: flex; align-items: center; gap: .32rem; min-width: 0; color: var(--or-dim); font-size: .62rem; line-height: 1.2; }
-.or-symbol-legend i { width: 1rem; color: var(--or-fac, var(--lby-accent)); font-size: 1rem; font-style: normal; text-align: center; }
-.or-symbol-legend b { color: inherit; font-weight: 750; }
-.or-symbol-legend.compact { grid-template-columns: 1fr; }
 .or-info-list { display: grid; gap: .4rem; margin: 0; padding: 0; list-style: none; }
 .or-info-list button { display: grid; gap: .2rem; width: 100%; padding: .5rem .6rem; border: 1px solid var(--or-line); border-radius: 8px; background: #ffffff08; color: #aeb5cb; font: inherit; font-size: .68rem; line-height: 1.35; text-align: left; cursor: pointer; }
 .or-info-list button:hover { border-color: currentColor; background: #ffffff12; }
 .or-info-li-head { display: flex; align-items: center; gap: .4rem; }
 .or-info-li-head b { display: grid; place-items: center; width: 1.25rem; height: 1.25rem; border-radius: 50%; background: #f2f0e8; color: #121526; font-size: .66rem; }
-.or-info-li-head .or-card-symbols { flex: initial; justify-content: flex-start; gap: .25rem; padding: 0; }
-.or-info-li-head .or-card-symbol i { font-size: .9rem; }
-.or-info-li-head .or-card-symbol b { font-size: .57rem; }
+.or-info-li-head strong { color: var(--or-ink); font-family: Georgia, serif; font-size: .82rem; }
 .or-info-li-head em { margin-left: auto; color: var(--lby-accent); font-size: .58rem; font-style: normal; letter-spacing: .1em; text-transform: uppercase; }
 
 .or-confirm { position: fixed; z-index: 1000; inset: 0; display: grid; place-items: center; padding: 1rem; background: #050612cc; }
@@ -478,6 +511,8 @@
   .or-board-main > .or-influence { order: 1; }
   .or-sideboards { display: contents; }
   .or-sideboards > .or-tech, .or-sideboards > .or-log { grid-column: 1; order: 2; }
+  .or-board-main > .or-columns { order: 3; }
+  .or-board-main > .or-columns.mine { order: 4; }
   .or-decision, .or-status, .or-result { order: 5; }
   .or-hand-zone { order: 6; }
   .or-board-main, .or-sideboards, .or-hand-zone, .or-decision, .or-status, .or-result, .or-mulligan { grid-column: 1; }
@@ -486,6 +521,9 @@
 }
 
 @media (max-width: 760px) {
+  /* The rail counts replace both placed-Agent panels here, not supplement them. */
+  .or-played-agents { display: flex; }
+  .or-columns { display: none; }
   /* Technology starts as a compact scoreboard on phones. Its two seat dots
      use the same named key as the full ladder; expanding restores every equal
      rung and its level-2 token. */

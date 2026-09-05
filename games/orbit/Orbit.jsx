@@ -12,7 +12,6 @@ import { buildPath, pushPath, replacePath, subscribe } from "../../shared/router
 import { useAutoReconnect } from "../../shared/useAutoReconnect.js";
 import { useCardInfoGesture } from "../../shared/gestures.js";
 import OrbitRules from "./rules.jsx";
-import { CardSymbols, SymbolLegend } from "./symbols.jsx";
 import orbitCssText from "./Orbit.css?inline";
 
 
@@ -269,10 +268,46 @@ function AgentCard({ card, selected, onClick, onInfo, hidden = false }) {
   if (!card) return null;
   return <button type="button" className={`or-agent or-${card.planet} or-${card.faction}${selected ? " selected" : ""}${onClick ? " playable" : ""}`}
     onClick={onClick || (onInfo ? () => onInfo({ kind: "card", card }) : undefined)}
-    disabled={!onClick && !onInfo} aria-label={`${card.name}. ${card.description}`} title={`${card.name} — ${card.description}`} {...info}>
+    disabled={!onClick && !onInfo} title={card.description} {...info}>
     <span className="or-agent-top"><b>{card.cost}</b><i>{FACTION_GLYPH[card.faction]}</i></span>
-    <CardSymbols card={card} />
+    <strong>{card.name}</strong>
+    <span className="or-agent-text">{card.description}</span>
+    <span className="or-agent-foot"><PlanetName planet={card.planet} /> · {card.faction}</span>
   </button>;
+}
+
+
+/* THE PLACED-AGENT COLUMNS, CONDENSED SO ALL FIVE PLANETS FIT. Each occupied
+   column is one recognisable mini-card with up to two offset layers behind it;
+   the count is printed on the face. That reads as a stack without the old
+   detached "+N below" button looking like a second unrelated control.
+   The section names its OWNER unambiguously — "Your agents" with a seat dot,
+   never a bare possessive a player has to match against a half-read name.
+   Reading your own recruit into the opponent's panel is the exact mistake the
+   old pair of identical panels invited. */
+function Columns({ game, pid, name, mine, onInfo }) {
+  const player = game.players?.[pid];
+  return <section className={`or-columns${mine ? " mine" : " theirs"}`}>
+    <h3><i className="or-seat-dot" aria-hidden="true" />{mine ? "Your agents" : `${name || "Opponent"} · agents`}</h3>
+    <div className="or-column-grid">
+      {PLANETS.map((planet) => {
+        const cards = player?.columns?.[planet] || [];
+        const top = cards[cards.length - 1];
+        const stackInfo = cards.length > 1
+          ? { kind: "column", planet, cards, owner: mine ? "Your" : `${name || "Opponent"}’s` }
+          : { kind: "card", card: top };
+        return <div className={`or-column or-${planet}`} key={planet}>
+          <span className="or-column-head"><PlanetName planet={planet} /></span>
+          {top ? <button type="button" className={`or-slot${cards.length > 1 ? " stacked" : ""}`}
+            title={`${cards.length} Agent${cards.length === 1 ? "" : "s"} — ${top.name} on top`}
+            onClick={() => onInfo(stackInfo)}>
+            <strong>{top.name}</strong>
+            <span className="or-slot-count"><b>{cards.length}</b>{cards.length === 1 ? " agent" : " agents"}</span>
+          </button> : <span className="or-column-empty">empty</span>}
+        </div>;
+      })}
+    </div>
+  </section>;
 }
 
 
@@ -303,9 +338,7 @@ function InfoModal({ info, catalog, onClose, onInfo }) {
         <span className="or-info-faction"><i>{FACTION_GLYPH[card.faction]}</i>{card.faction}</span>
         <span className="or-info-cost"><b>{card.cost}</b> Credits</span>
       </p>
-      <CardSymbols card={card} className="or-modal-symbols" />
       <p className="or-info-text">{card.description}</p>
-      <SymbolLegend card={card} compact />
       <p className="or-info-note">Recruiting costs the printed price minus the Agents already in
         its <PlanetName planet={card.planet} /> column, and gains 1 influence there before this
         text resolves.</p>
@@ -333,8 +366,9 @@ function InfoModal({ info, catalog, onClose, onInfo }) {
     body = <ul className="or-info-list">
       {[...info.cards].reverse().map((card, index) => <li key={card.id}>
         <button type="button" onClick={() => onInfo({ kind: "card", card })}>
-          <span className="or-info-li-head"><b>{card.cost}</b><CardSymbols card={card} />
+          <span className="or-info-li-head"><b>{card.cost}</b><strong>{card.name}</strong>
             {index === 0 && <em>top</em>}</span>
+          <span>{card.description}</span>
         </button>
       </li>)}
     </ul>;
@@ -714,6 +748,8 @@ export default function Orbit({ myId, authUser, onExit }) {
       {game.phase !== "mulligan" && <>
         <div className="or-board-main">
           <InfluenceBoard game={game} myId={myId} catalog={catalog} onInfo={setInfo} />
+          <Columns game={game} pid={otherId} name={names[otherId]} onInfo={setInfo} />
+          <Columns game={game} pid={myId} name={names[myId]} mine onInfo={setInfo} />
         </div>
         <div className="or-sideboards"><TechBoard game={game} myId={myId} otherId={otherId} catalog={catalog}
           myName={names[myId]} theirName={names[otherId]} onInfo={setInfo} />

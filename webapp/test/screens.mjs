@@ -5524,7 +5524,7 @@ try {
 		const seating = await page.evaluate(() => ({
 			badges: [...document.querySelectorAll(".or-player .or-leader")].map((el) => el.textContent.trim()),
 			key: [...document.querySelectorAll(".or-tech-key b")].map((el) => el.textContent.trim()),
-			mine: document.querySelectorAll(".or-player.mine .or-played-agents").length,
+			mine: document.querySelectorAll(".or-columns.mine h3").length,
 			glyphs: /[☿♀⊕♂♃]/.test(document.querySelector(".or-table").textContent),
 		}));
 		check("both seats show a Leader badge state and are named on the tech key",
@@ -5620,28 +5620,36 @@ try {
 			return {
 				wide: document.documentElement.scrollWidth > window.innerWidth + 1,
 				cards: document.querySelectorAll(".or-hand-zone .or-agent").length,
-				playedCounts: document.querySelectorAll(".or-played-agent").length,
+				columns: document.querySelectorAll(".or-column").length,
+				railCounts: [...document.querySelectorAll(".or-played-agent")]
+					.filter((el) => el.getBoundingClientRect().width > 0).length,
 				jupiterGap: Math.round(influence.bottom - jupiter.bottom),
 				detachedStackControls: document.querySelectorAll(".or-stack").length,
 			};
 		});
 		check("the complete public table and private hand remain on the page",
-			!geometry.wide && geometry.cards > 0 && geometry.playedCounts === 10,
+			!geometry.wide && geometry.cards > 0 && geometry.columns === 10,
 			JSON.stringify(geometry));
 		check("the planet panel ends cleanly after Jupiter",
 			geometry.jupiterGap >= 0 && geometry.jupiterGap <= 24, JSON.stringify(geometry));
-		check("played Agents stay in the player rails, not a detached stack control",
+		check("placed Agents use one card-stack face, not a detached stack control",
 			geometry.detachedStackControls === 0, JSON.stringify(geometry));
+		// The rail counts are the PHONE treatment of the same information. Above
+		// the phone tier the panels are the read and the counts must be absent —
+		// two live copies of one fact is the state this check exists to forbid.
+		check("a desktop shows the placed-Agent panels and not the rail counts",
+			geometry.columns === 10 && geometry.railCounts === 0, JSON.stringify(geometry));
 		const placedFaces = await page.evaluate(() => {
-			const chips = [...document.querySelectorAll(".or-played-agent")];
+			const slots = [...document.querySelectorAll(".or-slot")];
 			return {
-				chips: chips.length,
-				separatePanels: document.querySelectorAll(".or-columns").length,
-				complete: chips.length === 10 && chips.every((chip) => /^\d+$/.test(chip.textContent.trim())),
+				slots: slots.length,
+				extraFacts: document.querySelectorAll(".or-slot .or-slot-top").length,
+				complete: slots.every((slot) => !!slot.querySelector("strong")?.textContent.trim()
+					&& /^\d+\s+agents?$/i.test(slot.querySelector(".or-slot-count")?.textContent.trim() || "")),
 			};
 		});
-		check("each player rail shows only five planet-coloured played-Agent counts",
-			placedFaces.separatePanels === 0 && placedFaces.complete,
+		check("a played Agent shows only its top name and an unambiguous stack count",
+			placedFaces.slots > 0 && placedFaces.extraFacts === 0 && placedFaces.complete,
 			JSON.stringify(placedFaces));
 		// The two desktop targets are product sizes, not incidental screenshots.
 		// At 2560 the shared page measure used to put the menu/name more than 500px
@@ -5655,7 +5663,7 @@ try {
 				const user = document.querySelector(".lby-head-right").getBoundingClientRect();
 				const techHeights = [...document.querySelectorAll(".or-tech-space")]
 					.map((el) => Math.round(el.getBoundingClientRect().height));
-				const countHeights = [...document.querySelectorAll(".or-played-agent")]
+				const slotHeights = [...document.querySelectorAll(".or-slot, .or-column-empty")]
 					.map((el) => Math.round(el.getBoundingClientRect().height));
 				return {
 					wide: document.documentElement.scrollWidth > innerWidth + 1,
@@ -5665,7 +5673,7 @@ try {
 					userRight: Math.round(user.right),
 					viewportWidth: innerWidth,
 					techHeights: [...new Set(techHeights)],
-					maxCountHeight: Math.max(...countHeights),
+					maxSlotHeight: Math.max(...slotHeights),
 					hint: document.querySelector(".or-player.mine .or-player-hint")?.textContent.trim(),
 					handSubhead: document.querySelectorAll(".or-hand-head h2").length,
 				};
@@ -5675,9 +5683,9 @@ try {
 			check(`the ${viewport.width}px game header reaches both screen edges`,
 				desktop.menuLeft <= 22 && desktop.userRight >= desktop.viewportWidth - 22,
 				JSON.stringify(desktop));
-			check(`technology and played-Agent counts stay compact at ${viewport.width}px`,
+			check(`technology and placed-Agent rows stay compact at ${viewport.width}px`,
 				desktop.techHeights.length === 1 && desktop.techHeights[0] <= 46
-				&& desktop.maxCountHeight <= 30, JSON.stringify(desktop));
+				&& desktop.maxSlotHeight <= 60, JSON.stringify(desktop));
 			check("the turn hint lives beside your player name, not above the hand",
 				!!desktop.hint && desktop.handSubhead === 0,
 				JSON.stringify(desktop));
@@ -5704,18 +5712,22 @@ try {
 
 		// A SECTION CAN SIT INSIDE THE VIEWPORT AND STILL HIDE ITS CONTENT: the
 		// check above measures the panel's own box, and the influence rows, the
-		// technology grid used to satisfy it while scrolling sideways inside itself.
-		// Assert the inner boxes are not scrollers, and that all five played-Agent
-		// counts are actually on screen. The HAND is exempt and stays a
+		// technology grid and both placed-Agent grids used to satisfy it while
+		// scrolling sideways INSIDE themselves, which put two of five planets and
+		// a third of every track behind a horizontal drag on a page that scrolls
+		// vertically. Assert the inner boxes are not scrollers, and that all five
+		// planet columns are actually on screen. The HAND is exempt and stays a
 		// scroller on purpose — full-size cards, and up to six of them.
 		const inner = await page.evaluate(() => {
 			const scrollers = [...document.querySelectorAll(
 				".or-influence, .or-track, .or-track-spaces, .or-tech-grid, .or-played-agents")]
 				.filter((el) => el.scrollWidth > el.clientWidth + 1)
 				.map((el) => `${el.className}:${el.scrollWidth}>${el.clientWidth}`);
-			const counts = [...document.querySelectorAll(".or-played-agent")];
-			const offscreen = counts.filter((count) => {
-				const r = count.getBoundingClientRect();
+			const cells = [...document.querySelectorAll(".or-played-agent")];
+			const panels = [...document.querySelectorAll(".or-columns")]
+				.filter((el) => el.getBoundingClientRect().width > 0).length;
+			const offscreen = cells.filter((cell) => {
+				const r = cell.getBoundingClientRect();
 				return r.left < -1 || r.right > window.innerWidth + 1 || r.width < 8;
 			}).length;
 			const bonuses = [...document.querySelectorAll(".or-bonus")].map((el) => {
@@ -5728,12 +5740,14 @@ try {
 					const b = row.querySelector(".or-track-spaces").getBoundingClientRect();
 					return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
 				}).length;
-			return { scrollers, counts: counts.length, offscreen, bonuses, tokenOverlaps };
+			return { scrollers, cells: cells.length, panels, offscreen, bonuses, tokenOverlaps };
 		});
 		check("no board on a phone hides content behind a sideways scroll",
 			inner.scrollers.length === 0, JSON.stringify(inner.scrollers));
 		check("all five played-Agent counts are on screen for both seats",
-			inner.counts === 10 && inner.offscreen === 0, JSON.stringify(inner));
+			inner.cells === 10 && inner.offscreen === 0, JSON.stringify(inner));
+		check("a phone folds the placed-Agent panels into the two player rails",
+			inner.panels === 0, JSON.stringify(inner));
 		check("bonus tokens are uniformly compact and clear of every planet track",
 			inner.bonuses.every(({ w, h }) => Math.abs(w - h) <= 1 && w <= 30)
 			&& inner.tokenOverlaps === 0, JSON.stringify(inner));
@@ -5776,25 +5790,26 @@ try {
 			JSON.stringify(expandedTech));
 		await page.locator(".or-tech-toggle").click({ timeout: 10_000 }).catch(() => {});
 
-		// The count chip opens the exact column; from there one card's symbols open
-		// a full text-and-legend modal, so compacting the rail loses no rules text.
-		const chip = page.locator(".or-player.mine .or-played-agent:not(:disabled)").first();
-		const hasChip = await chip.count().catch(() => 0);
-		if (hasChip) {
-			await chip.click({ timeout: 10_000 }).catch(() => {});
+		// Every readable face opens the same modal, so neither treatment loses rules
+		// text. This runs at the phone size, where the rail count is the face: press
+		// one, then a card in the column it opens, and its own effect comes back.
+		const slot = page.locator(".or-player.mine .or-played-agent:not(:disabled)").first();
+		const hasSlot = await slot.count().catch(() => 0);
+		if (hasSlot) {
+			await slot.click({ timeout: 10_000 }).catch(() => {});
 			const columnInfo = await page.locator(".or-info-list button").count().catch(() => 0);
 			if (columnInfo) await page.locator(".or-info-list button").first().click().catch(() => {});
 			const cardInfo = await page.evaluate(() => {
 				const panel = document.querySelector(".or-info");
 				return panel ? panel.textContent.replace(/\s+/g, " ").trim() : "";
 			});
-			check("a played-Agent count opens card symbols, text, and its legend",
-				/Agent/.test(cardInfo) && /Credits/.test(cardInfo) && /Card symbol legend/.test(cardInfo),
+			check("pressing a placed Agent opens its full card text",
+				/Agent/.test(cardInfo) && /Credits/.test(cardInfo) && cardInfo.length > 60,
 				cardInfo.slice(0, 120));
 			await page.keyboard.press("Escape").catch(() => {});
 		} else {
-			check("a played-Agent count opens card symbols, text, and its legend", false,
-				"the turn played produced no recruited Agent count to press");
+			check("pressing a placed Agent opens its full card text", false,
+				"the turn played produced no recruited Agent to press");
 		}
 		check("no page errors while playing Orbit", errors.length === 0,
 			errors[0]?.slice(0, 200) || "");
