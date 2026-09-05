@@ -156,3 +156,169 @@ def test_illegal_move_is_atomic():
     before = copy.deepcopy(game)
     assert E.apply_move(game, "A", {"action": "recruit", "card_id": 999}) == (False, "Illegal move")
     assert game == before
+
+
+# ── The display log ──────────────────────────────────────────────────────────
+# THE LOG IS THE ONLY NARRATION IN THE GAME, and a client that renders it is not
+# proof it says anything: the old one wrote a line per card play and left every
+# disc, Credit, token and stolen Agent to be inferred from a board that had
+# already changed.  These tests hold it to "nothing happens silently".
+
+def _log_text(entry):
+    if "parts" not in entry:
+        return entry.get("message", "")
+    return "".join(p if isinstance(p, str) else p.get("v", "") for p in entry["parts"])
+
+
+def _tokens(entry, key):
+    return [p[key] for p in entry.get("parts", []) if isinstance(p, dict) and key in p]
+
+
+def _material(game):
+    """Everything a player can see change on the table."""
+
+    return {
+        "influence": dict(game["influence"]),
+        "leader": dict(game["leader"]),
+        "planet_bonus": dict(game["planet_bonus"]),
+        "technology_bonus": dict(game["technology_bonus"]),
+        "players": {
+            pid: {
+                "credits": p["credits"],
+                "zenithium": p["zenithium"],
+                "hand": len(p["hand"]),
+                "captured": list(p["captured"]),
+                "technology": dict(p["technology"]),
+                "columns": {k: list(v) for k, v in p["columns"].items()},
+            }
+            for pid, p in game["players"].items()
+        },
+    }
+
+
+def _random_game_steps(seed, cap=800):
+    """Play a random game, yielding (game, before, after, entries_written).
+
+    The entries are COLLECTED FROM ``_log``, never sliced off ``game["log"]``:
+    a long game hits ``LOG_CAP`` and the eviction shifts every index, which made
+    a first cut of this read an empty slice and "prove" that a badge had moved
+    with nothing written down.
+    """
+
+    game = E.new_game(["A", "B"], names={"A": "Ada", "B": "Bo"}, seed=seed)
+    rng = random.Random(seed * 31 + 5)
+    written = []
+    original = E._log
+
+    def recording(g, *parts, **data):
+        written.append(list(parts))
+        return original(g, *parts, **data)
+
+    E._log = recording
+    try:
+        for _ in range(cap):
+            if E.is_over(game):
+                return
+            if game["phase"] == "mulligan":
+                pid = next(p for p in game["players"] if p not in game["mulligan_done"])
+            else:
+                pid = game["pending_pid"] if game.get("pending") else game["turn_pid"]
+            moves = E.legal_moves(game, pid)
+            assert moves
+            before = _material(game)
+            written.clear()
+            assert E.apply_move(game, pid, rng.choice(moves))[0]
+            yield game, before, _material(game), [{"parts": p} for p in written]
+    finally:
+        E._log = original
+
+
+def test_every_material_change_is_written_down():
+    """No disc, Credit, token, badge or Agent moves without a line naming it.
+
+    The categories are checked SEPARATELY on purpose: "some entry was appended"
+    passes on a turn that logged the card play and silently moved four discs,
+    which is exactly the log this replaced.
+    """
+
+    seen = {k: 0 for k in ("influence", "credits", "zenithium", "captured",
+                           "leader", "technology", "columns", "bonus", "hand")}
+    for seed in range(12):
+        for game, before, after, fresh in _random_game_steps(seed):
+            text = " ".join(_log_text(entry) for entry in fresh)
+            planets = {p for entry in fresh for p in _tokens(entry, "p")}
+            factions = {p["f"] for entry in fresh for p in entry.get("parts", [])
+                        if isinstance(p, dict) and "f" in p}
+            cards = {c for entry in fresh for c in _tokens(entry, "c")}
+            bonuses = {b for entry in fresh for b in _tokens(entry, "b")}
+
+            for planet in PLANETS:
+                if before["influence"][planet] != after["influence"][planet]:
+                    seen["influence"] += 1
+                    assert planet in planets, f"{planet} disc moved unlogged: {text}"
+            if before["leader"] != after["leader"]:
+                seen["leader"] += 1
+                assert "Leader badge" in text, f"badge moved unlogged: {text}"
+            for slot in list(before["planet_bonus"]) + list(before["technology_bonus"]):
+                key = "planet_bonus" if slot in before["planet_bonus"] else "technology_bonus"
+                if before[key][slot] != after[key][slot]:
+                    seen["bonus"] += 1
+                    assert bonuses, f"a bonus token left {slot} unlogged: {text}"
+            for pid, name in (("A", "Ada"), ("B", "Bo")):
+                was, now = before["players"][pid], after["players"][pid]
+                if was["credits"] != now["credits"]:
+                    seen["credits"] += 1
+                    assert "Credit" in text and name in text, f"{name} Credits unlogged: {text}"
+                if was["zenithium"] != now["zenithium"]:
+                    seen["zenithium"] += 1
+                    assert "Zenithium" in text and name in text, f"{name} Zenithium unlogged: {text}"
+                if was["captured"] != now["captured"]:
+                    seen["captured"] += 1
+                    assert "CAPTURES" in text, f"{name} capture unlogged: {text}"
+                if was["technology"] != now["technology"]:
+                    seen["technology"] += 1
+                    changed = {f for f in FACTIONS if was["technology"][f] != now["technology"][f]}
+                    assert changed <= factions, f"{name} technology unlogged: {text}"
+                if was["columns"] != now["columns"]:
+                    seen["columns"] += 1
+                    assert cards, f"{name} column changed with no Agent named: {text}"
+                if was["hand"] != now["hand"]:
+                    seen["hand"] += 1
+                    assert name in text, f"{name} hand size changed unlogged: {text}"
+    # Non-vacuous: every category must actually have been exercised.
+    assert all(seen.values()), seen
+
+
+def test_the_log_never_names_a_card_nobody_can_see():
+    """A named Agent must be public AT THE MOMENT THE LINE IS WRITTEN.
+
+    The log is broadcast to both seats unredacted, so naming a card still in a
+    hand or in the deck would hand over hidden information.  Checked inside
+    ``_log`` rather than after the move: a reshuffle later in the same action
+    can legitimately pull a just-discarded Agent back into the hidden deck.
+    """
+
+    named = 0
+    original = E._log
+
+    def checked(game, *parts, **data):
+        nonlocal named
+        for part in parts:
+            if not isinstance(part, dict) or "c" not in part:
+                continue
+            named += 1
+            public = set(game["agent_discard"])
+            for player in game["players"].values():
+                for column in player["columns"].values():
+                    public.update(column)
+            assert part["c"] in public, f"log named hidden Agent {part['c']}: {parts}"
+        return original(game, *parts, **data)
+
+    E._log = checked
+    try:
+        for seed in range(6):
+            for _ in _random_game_steps(seed):
+                pass
+    finally:
+        E._log = original
+    assert named > 50, f"fixture must actually name Agents, saw {named}"

@@ -150,7 +150,7 @@ def test_history_survives_json_restore_and_retains_more_than_display_log():
                 assert restored.policy_input(viewer) == session.policy_input(viewer)
     assert E.is_over(session.game)
     assert restored is not None
-    assert len(session.game["log"]) == 300, "Fixture must actually hit display truncation"
+    assert len(session.game["log"]) == E.LOG_CAP, "Fixture must actually hit display truncation"
     assert session.game["log"][0]["turn"] > 0, "Mulligan events must have been evicted"
     for viewer in session.game["order"]:
         history = session.policy_input(viewer)["history"]

@@ -231,6 +231,11 @@
 .or-resources { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .75rem; margin-top: .18rem; color: var(--or-dim); font-size: .7rem; }
 .or-resources b { color: var(--or-ink); font-size: .88rem; }
 .or-resource-cards { display: inline-flex; align-items: center; gap: .24rem; }
+/* `held / limit`, on both rails and over the hand. Over the limit is LEGAL --
+   a hand is never discarded down -- so it is labelled, not painted as an error. */
+.or-hand-count { display: inline-flex; align-items: baseline; gap: .22rem; white-space: nowrap; }
+.or-hand-count.over { color: #ecd9a4; }
+.or-hand-count em { font-size: .82em; font-style: normal; letter-spacing: .04em; opacity: .85; }
 .or-captures { display: inline-flex; align-items: center; gap: .18rem; margin-left: .22rem; padding-left: .42rem; border-left: 1px solid var(--or-line); }
 .or-capture-disc { width: .7rem; height: .7rem; border: 1px solid rgba(255,255,255,.72); border-radius: 50%; background: currentColor; box-shadow: 0 1px 4px #0008; }
 
@@ -362,8 +367,29 @@
 .or-log { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .or-log h2 { flex: none; padding: .55rem .75rem; border-bottom: 1px solid var(--or-line); }
 .or-log > div { flex: 1; min-height: 0; contain: size; overflow: auto; padding: .3rem .7rem .55rem; }
-.or-log p { display: grid; grid-template-columns: 1.6rem 1fr; gap: .35rem; margin: .28rem 0; color: #bbc1d5; font-size: .68rem; line-height: 1.28; }
-.or-log p b { color: #747d9c; }
+.or-log p { display: grid; grid-template-columns: 1.6rem 1fr; gap: .35rem; margin: .28rem 0; padding-left: .3rem; border-left: 2px solid transparent; color: #bbc1d5; font-size: .68rem; line-height: 1.34; }
+/* `> b` on purpose: the turn number is the DIRECT child, and an entry's own
+   text now nests bold names and pressable tokens a level deeper. */
+.or-log p > b { color: #747d9c; }
+.or-log-line.mine { border-left-color: color-mix(in srgb, var(--or-me), transparent 55%); }
+.or-log-line.theirs { border-left-color: color-mix(in srgb, var(--or-them), transparent 55%); }
+/* The turn line is the log's only structure: without it a long resolution and
+   the next player's whole turn read as one paragraph. */
+.or-log-line.turn-start { margin-top: .6rem; padding-top: .38rem; border-top: 1px solid var(--or-line); color: var(--or-ink); font-weight: 700; }
+.or-log-line.turn-start:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.or-log-name { color: var(--or-ink); font-weight: 700; }
+/* A token in the log opens the SAME modal as the piece on the table. It is a
+   real button, so it is keyboard reachable, but it is styled as inline text —
+   a row of chips would drown the sentence it belongs to. */
+.or-log-ref {
+  display: inline; margin: 0; padding: 0 .05rem;
+  border: 0; border-bottom: 1px dotted currentColor; border-radius: 2px;
+  background: none; color: var(--or-ink); font: inherit; font-weight: 700;
+  text-align: left; cursor: pointer;
+}
+.or-log-ref:hover, .or-log-ref:focus-visible { background: #ffffff16; color: #fff; border-bottom-style: solid; }
+.or-log-tech { color: var(--or-fac, var(--or-ink)); }
+.or-log-bonus { color: #ecd9a4; }
 
 /* ── Placed Agents ───────────────────────────────────────────────────────────
    Five planets, always all five, at every width. The face is a chip; the text
@@ -485,6 +511,14 @@
 .or-info-cost b { display: grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: 50%; background: #f2f0e8; color: #121526; font-size: .82rem; }
 .or-info-text { margin: 0 0 .8rem; color: var(--or-ink); font-size: .92rem; line-height: 1.45; }
 .or-info-note { margin: 0; padding-top: .7rem; border-top: 1px solid var(--or-line); color: #8b93b0; font-size: .7rem; line-height: 1.45; }
+.or-info-note b { color: var(--or-ink); }
+/* THE FOOTNOTE UNDER THE PRINTED SENTENCE. Each term the card's own text uses
+   is defined once, in the reading order it appears. */
+.or-info-defs { margin-top: .85rem; padding-top: .7rem; border-top: 1px solid var(--or-line); }
+.or-info-defs h3 { margin: 0 0 .5rem; color: currentColor; font-size: .6rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.or-info-defs dl { display: grid; gap: .45rem; margin: 0; }
+.or-info-defs dt { color: var(--or-ink); font-size: .72rem; font-weight: 700; }
+.or-info-defs dd { margin: .1rem 0 0; color: #8b93b0; font-size: .68rem; line-height: 1.42; }
 .or-info-list { display: grid; gap: .4rem; margin: 0; padding: 0; list-style: none; }
 .or-info-list button { display: grid; gap: .2rem; width: 100%; padding: .5rem .6rem; border: 1px solid var(--or-line); border-radius: 8px; background: #ffffff08; color: #aeb5cb; font: inherit; font-size: .68rem; line-height: 1.35; text-align: left; cursor: pointer; }
 .or-info-list button:hover { border-color: currentColor; background: #ffffff12; }

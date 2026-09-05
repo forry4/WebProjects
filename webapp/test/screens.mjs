@@ -5629,6 +5629,53 @@ try {
 		const logAfter = await page.locator(".or-log p").count().catch(() => 0);
 		check("the action resolves and is broadcast into the log", logAfter > logBefore,
 			`${logBefore} -> ${logAfter}`);
+
+		// THE LOG NARRATES, IT DOES NOT JUST NAME THE CARD. A real turn has to
+		// have written down where the disc went, what the play cost and who drew
+		// what — the whole point of the entry being a list of parts rather than
+		// one sentence. Asserted against a SEEDED deal, so these are properties
+		// any Orbit turn has, never this particular hand's.
+		const narration = await page.evaluate(() => {
+			const lines = [...document.querySelectorAll(".or-log p")].map((p) => p.textContent);
+			const all = lines.join("\n");
+			return {
+				lines: lines.length,
+				turnMarks: document.querySelectorAll(".or-log-line.turn-start").length,
+				seated: document.querySelectorAll(".or-log-line.mine, .or-log-line.theirs").length,
+				refs: document.querySelectorAll(".or-log-ref").length,
+				disc: /influence on .+ the disc moves/i.test(all),
+				draw: /draws \d+ Agent/i.test(all),
+				money: /(Credits|Zenithium)/.test(all),
+			};
+		});
+		check("the log narrates disc movement, resources and the end-of-turn draw",
+			narration.disc && narration.draw && narration.money && narration.turnMarks >= 2,
+			JSON.stringify(narration));
+		check("...and marks whose action each line was", narration.seated > 0, JSON.stringify(narration));
+		// A NAME IN THE LOG IS A DOOR. Pressing an Agent named in a past entry
+		// opens the very same detail modal the table opens, so reading back is
+		// never "which card was that?".
+		check("the log names Agents as pressable references", narration.refs > 0,
+			JSON.stringify(narration));
+		if (narration.refs > 0) {
+			await page.locator(".or-log-card").first().click({ timeout: 10_000 }).catch(() => {});
+			const fromLog = await page.evaluate(() => {
+				const panel = document.querySelector(".or-info");
+				return panel ? { eyebrow: panel.querySelector(".or-eyebrow")?.textContent.trim(),
+					cost: panel.querySelectorAll(".or-info-cost").length,
+					defs: panel.querySelectorAll(".or-info-defs dt").length } : null;
+			});
+			check("pressing a card named in the log opens that Agent's card",
+				!!fromLog && /agent/i.test(fromLog.eyebrow || "") && fromLog.cost === 1,
+				JSON.stringify(fromLog));
+			// EVERY term the printed sentence uses is defined under it. Checked on
+			// whatever card the seeded game happened to play, because the property
+			// holds for all 90: no rules string in the game matches zero entries.
+			check("...with its rules jargon explained beneath the printed text",
+				!!fromLog && fromLog.defs > 0, JSON.stringify(fromLog));
+			await page.keyboard.press("Escape").catch(() => {});
+			await page.waitForSelector(".or-info", { state: "detached", timeout: 5_000 }).catch(() => {});
+		}
 		const geometry = await page.evaluate(() => {
 			const influence = document.querySelector(".or-influence").getBoundingClientRect();
 			const jupiter = [...document.querySelectorAll(".or-track")].at(-1).getBoundingClientRect();
@@ -5678,6 +5725,10 @@ try {
 		self.columns[self.hand[0].planet] = [self.hand[0], self.hand[1]];
 		for (const player of Object.values(gameView.players)) player.technology.robot = 1;
 		gameView.leader = { owner: "orbit-harness", level: 2 };
+		// Both hand-limit cases on one frame: the Gold badge holder at 6 of 6, and
+		// the badge-less seat holding 5 against a limit of 4, which is legal.
+		const opponent = Object.entries(gameView.players).find(([id]) => id !== "orbit-harness")[1];
+		opponent.hand = Array.from({ length: 5 }, () => ({ hidden: true }));
 		gameView.pending = null;
 		gameView.pending_pid = null;
 		gameView.turn_pid = "orbit-harness";
@@ -5685,6 +5736,33 @@ try {
 		gameView.log = Array.from({ length: 80 }, (_, i) => ({ turn: i + 1, message: `History ${i + 1}: Orbiter gains influence on Mercury.` }));
 		socket.send(JSON.stringify(fixture));
 		await page.waitForFunction(() => document.querySelectorAll(".or-log p").length === 80);
+		// THE HAND COUNTER IS THE BADGE'S NUMBER. The fixture holds the Gold badge
+		// and six cards, so the seat that owns it must read 6/6 while the seat
+		// without it reads against 4 — one `handLimit` behind both, because a
+		// second hand-rolled expression is how a counter ends up disagreeing with
+		// the badge printed beside it. The log rows are the pre-parts `message`
+		// shape here, which must still render as plain text.
+		const counters = await page.evaluate(() => ({
+			rails: [...document.querySelectorAll(".or-player")].map((rail) => ({
+				badge: rail.querySelector(".or-leader").textContent.trim(),
+				cards: rail.querySelector(".or-hand-count").textContent.replace(/\s+/g, " ").trim(),
+			})),
+			hand: document.querySelector(".or-hand-head .or-hand-count").textContent.replace(/\s+/g, " ").trim(),
+			legacy: document.querySelector(".or-log p").textContent.includes("History 1"),
+		}));
+		const badged = counters.rails.find((rail) => /gold/i.test(rail.badge));
+		const plain = counters.rails.find((rail) => /no badge/i.test(rail.badge));
+		check("the Gold badge raises that seat's hand limit to 6 on the rail and over the hand",
+			!!badged && badged.cards.startsWith("6 / 6") && counters.hand.startsWith("6 / 6"),
+			JSON.stringify(counters));
+		// STEERED to five cards and no badge, because it is the case that reads as
+		// broken: a hand is never discarded down, so losing the badge legitimately
+		// leaves a seat over its limit and the counter must SAY so rather than
+		// print a ratio that looks like an arithmetic bug.
+		check("...and a badge-less seat is counted against 4, over-limit cards marked as kept",
+			!!plain && plain.cards === "5 / 4 cards kept", JSON.stringify(counters));
+		check("a log entry written before the parts format still renders",
+			counters.legacy, JSON.stringify(counters.legacy));
 		await page.locator(".or-hand-zone .or-agent").first().click();
 		for (const selector of [".or-hand-zone .or-agent", ".or-influence button.or-bonus", ".or-tech-token", ".or-tech-space", ".or-slot.stacked"]) {
 			await page.locator(selector).first().click({ button: "right" });

@@ -88,7 +88,49 @@ function detailClick(open) {
   };
 }
 
-function MoveLog({ entries = [] }) {
+/* THE LOG IS THE GAME'S ONLY NARRATION, so an entry is not a sentence but a
+   list of PARTS the engine wrote: a plain string is literal text and a dict is
+   a token — `{c}` an Agent, `{p}` a planet, `{b}` a bonus token, `{f,l}` a
+   technology space. Every token opens the SAME detail modal the table does, so
+   "which card was that?" is never a question the log leaves open. Each token
+   also carries its own label in `v`, so the line still reads before the catalog
+   fetch lands. Entries persisted before this shape (and the harness fixture)
+   carry a flat `message` instead and render as plain text. */
+function LogPart({ part, game, catalog, onInfo }) {
+  if (typeof part === "string") return part;
+  if (part.p) return <PlanetName planet={part.p} />;
+  const open = (info) => (event) => { event.stopPropagation(); onInfo?.(info); };
+  if (part.c != null) {
+    const card = catalog?.cards?.[String(part.c)];
+    if (!card || !onInfo) return <b className="or-log-name">{part.v}</b>;
+    return <button type="button" className="or-log-ref or-log-card"
+      title={`${card.name} — ${card.description}`}
+      {...detailClick(open({ kind: "card", card }))}>{card.name}</button>;
+  }
+  if (part.b != null) {
+    const bonus = catalog?.bonuses?.[String(part.b)] || catalog?.bonuses?.[part.b];
+    const text = bonus?.description || part.v;
+    if (!onInfo) return <b className="or-log-name">{text}</b>;
+    return <button type="button" className="or-log-ref or-log-bonus" title={`${text} — tap to read`}
+      {...detailClick(open({ kind: "bonus", token: part.b }))}>{text}</button>;
+  }
+  if (part.f) {
+    const space = (game?.board?.[part.f] || []).find((row) => row.level === part.l);
+    if (!space || !onInfo) return <b className="or-log-name">{part.v}</b>;
+    return <button type="button" className={`or-log-ref or-log-tech or-${part.f}`}
+      title={`${part.v}: ${space.description}`}
+      {...detailClick(open({ kind: "tech", faction: part.f, level: part.l, description: space.description }))}>
+      {part.v}</button>;
+  }
+  return part.v || "";
+}
+
+function logText(entry) {
+  if (!entry.parts) return entry.message || "";
+  return entry.parts.map((part) => typeof part === "string" ? part : (part.v || "")).join("");
+}
+
+function MoveLog({ entries = [], game, catalog, myId, onInfo }) {
   const viewport = useRef(null);
   useEffect(() => {
     const node = viewport.current;
@@ -99,7 +141,18 @@ function MoveLog({ entries = [] }) {
     return () => observer.disconnect();
   }, [entries]);
   return <section className="or-log"><h2>Log</h2><div ref={viewport}>
-    {entries.map((entry, i) => <p key={`${entry.turn}-${i}`}><b>{entry.turn}</b>{entry.message}</p>)}
+    {entries.map((entry, i) => {
+      const seat = !entry.pid ? "" : entry.pid === myId ? " mine" : " theirs";
+      return <p key={`${entry.turn}-${i}`}
+        className={`or-log-line${seat}${entry.turn_start ? " turn-start" : ""}`}
+        title={logText(entry)}>
+        <b>{entry.turn}</b>
+        <span>{entry.parts
+          ? entry.parts.map((part, index) => <LogPart key={index} part={part}
+            game={game} catalog={catalog} onInfo={onInfo} />)
+          : entry.message}</span>
+      </p>;
+    })}
   </div></section>;
 }
 
@@ -131,16 +184,40 @@ function captureSummary(captured = []) {
 /* The badge is SHOWN FOR BOTH SEATS, including the seat that does not hold it.
    It used to render only under its owner, so "no badge" and "the panel just
    doesn't mention it" looked identical — and the badge is what sets a hand
-   limit of 4 / 5 / 6, which is the number printed over the hand. */
+   limit of 4 / 5 / 6, which is the number printed over the hand.
+   ONE function decides that limit and every counter on the page reads it. The
+   badge is the only thing that moves it, and it moves MID-TURN, so a limit
+   printed from a second hand-rolled expression is a counter that disagrees
+   with the badge sitting right beside it. */
+function handLimit(leader, pid) {
+  if (!pid || leader?.owner !== pid) return 4;
+  return leader.level >= 2 ? 6 : 5;
+}
+
 function LeaderBadge({ leader, pid }) {
   const level = leader?.owner === pid ? (leader.level || 0) : 0;
   const side = LEADER_SIDES[level];
   return <b className={`or-leader lv-${level}`}
-    title={side ? `${side} Leader badge — hand limit ${level === 2 ? 6 : 5}`
-      : "No Leader badge — hand limit 4"}>
+    title={side ? `${side} Leader badge — hand limit ${handLimit(leader, pid)}`
+      : `No Leader badge — hand limit ${handLimit(leader, pid)}`}>
     <i className="or-leader-medal" aria-hidden="true" />
     {side ? `${side} Leader` : "No badge"}
   </b>;
+}
+
+
+/* The cards counter is `held / limit` on BOTH rails, because the badge that
+   raises the limit can be on either seat and a bare count cannot say whether
+   five cards is normal. Going OVER the limit is legal — nobody ever discards
+   down — so the over case is marked as kept rather than rendered as a number
+   that looks broken. */
+function HandCount({ held, limit }) {
+  const over = held > limit;
+  return <span className={`or-hand-count${over ? " over" : ""}`}
+    title={over ? `${held} Agents held, over the limit of ${limit}. An effect put them there and a hand is never discarded down.`
+      : `${held} of a ${limit}-card hand limit, refilled at the end of that player’s turn.`}>
+    <b>{held}</b> / {limit} cards{over ? <em> kept</em> : null}
+  </span>;
 }
 
 
@@ -158,7 +235,8 @@ function PlayerRail({ player, name, active, me, leader, hint, onInfo }) {
     <div className="or-resources">
       <span><b>{player.credits}</b> Credits</span>
       <span><b>{player.zenithium}</b> Zenithium</span>
-      <span className="or-resource-cards"><b>{player.hand?.length || 0}</b> cards
+      <span className="or-resource-cards">
+        <HandCount held={player.hand?.length || 0} limit={handLimit(leader, player.__pid)} />
         {!!player.captured?.length && <span className="or-captures" aria-label="Captured planets">
           {captureSummary(player.captured)}
         </span>}
@@ -349,6 +427,82 @@ function Columns({ game, pid, name, mine, onInfo }) {
 }
 
 
+/* THE PRINTED SENTENCE IS THE AUTHORITY; THIS IS THE FOOTNOTE UNDER IT.
+   Every card, technology space and bonus token carries BGA's own prose, and
+   several of its terms are load-bearing jargon a first-time player cannot
+   guess — "transfer", "mobilize", "opposing card", and above all "middle
+   space" and "dominated", whose meanings are POSITIONS ON THE BOARD rather
+   than the readings the words suggest. `engine.py` reads `middle` as a track
+   whose disc sits on the centre space and `dominated` as one on the opponent's
+   side, so those two definitions are transcribed FROM the engine, not from
+   what the phrase looks like it means.
+   This is additive, and that is the whole difference from the icon vocabulary
+   that was tried on the card FACE and reverted: that replaced the prose with a
+   lossy regex summary, this leaves the prose untouched and explains its terms
+   beneath it. Order is the reading order of a term's first appearance. */
+const GLOSSARY = [
+  { k: "influence", re: /influence/i, t: "Influence",
+    d: "Move that planet’s disc one space toward your control zone. Reaching the fourth space captures the disc; any further movement in the same effect is lost." },
+  { k: "capture", re: /captur|dominat/i, t: "Capture",
+    d: "A disc that reaches your end of a track is yours to keep, and pays that planet’s face-up bonus if it is still there. Three discs from one planet, four different planets, or five discs in all wins the game at once." },
+  { k: "dominated", re: /dominated|opponent'?s side/i, t: "Dominated planet",
+    d: "A track whose disc currently sits on your OPPONENT’s side of the centre — the planets you are behind on, not the ones you lead." },
+  { k: "middle", re: /middle space|its middle|middle track/i, t: "Middle space",
+    d: "A track whose disc is on the centre space right now, level between both players. Not the three middle planets." },
+  { k: "credits", re: /credits?/i, t: "Credits",
+    d: "The spending money that pays to recruit Agents. Each Agent already in a column reduces that column’s next recruit cost by 1, never below 0." },
+  { k: "zenithium", re: /zenithium/i, t: "Zenithium",
+    d: "The rarer resource. It pays only for technology: advancing to level N costs N Zenithium, less any reduction the card grants." },
+  { k: "recruit", re: /recruit/i, t: "Recruit",
+    d: "Play an Agent from your hand into its own planet’s column, pay its reduced cost, gain 1 influence on that planet, then resolve its text." },
+  { k: "mobilize", re: /mobiliz/i, t: "Mobilize",
+    d: "Take the top Agent off the deck and put it straight into the column of its own colour. You pay nothing, its text does NOT resolve, and it brings no recruit influence with it unless the effect says otherwise." },
+  { k: "exile", re: /exile/i, t: "Exile",
+    d: "Discard the TOP Agent of a column — the one added most recently. Exiled Agents go to the Agent discard pile and stop reducing that column’s recruit cost." },
+  { k: "transfer", re: /transfer/i, t: "Transfer",
+    d: "Take the top Agent out of your opponent’s column and add it to your own column of the same planet. Its text does not resolve; you gain its body, not its effect." },
+  { k: "opposing", re: /opposing|opponent'?s card/i, t: "Opposing card",
+    d: "An Agent standing in your opponent’s column. Only the top one of a column can ever be taken or exiled." },
+  { k: "leader", re: /leader/i, t: "Leader badge",
+    d: "One badge, held by at most one player. Taking it when you do not have it gives the Silver side and a hand limit of 5; taking it again flips it to Gold and a limit of 6. Giving it up returns your limit to 4." },
+  { k: "bonus", re: /bonus/i, t: "Bonus token",
+    d: "Eight tokens start face up: one on each planet and one on each technology track’s level-2 space. Claiming one resolves its effect immediately and removes it for the rest of the game." },
+  { k: "technology", re: /technolog|develop/i, t: "Develop technology",
+    d: "Advance one faction track by one level, paying the NEW level in Zenithium. You then resolve that level and every level below it, from the top down." },
+  { k: "reduction", re: /reduction/i, t: "Reduction",
+    d: "A discount on the Zenithium cost of the advance only. The price never goes below 0, and the level you reach is unchanged." },
+  { k: "corresponding", re: /corresponding|of the same color|different color/i, t: "Corresponding colour",
+    d: "Every Agent belongs to exactly one planet, printed in its colour along the bottom of the card. “The corresponding planet” is that one." },
+  { k: "adjacent", re: /adjacent/i, t: "Adjacent planets",
+    d: "Neighbours in the fixed board order Mercury · Venus · Terra · Mars · Jupiter. Mercury and Jupiter are the two ends and are not adjacent to each other." },
+  { k: "tiers", re: /\d+\/\d+\/\d+|respectively/i, t: "Tiered cost",
+    d: "Pick ONE of the listed rungs and pay it for the reward at the same position. You may always decline and take nothing." },
+  { k: "discard", re: /discard/i, t: "Discard from hand",
+    d: "Put that Agent from your hand into the Agent discard pile. It is not played and its text never resolves." },
+  { k: "hand", re: /\bhand\b/i, t: "Hand limit",
+    d: "At the end of your turn you draw back up to 4 Agents, or 5 with the Silver Leader badge and 6 with the Gold. You never discard down if an effect pushed you above it." },
+  { k: "firstlevel", re: /first level you have reached/i, t: "First levels reached",
+    d: "Counts how many of the three technology tracks you have advanced to level 1 or higher — at most 3, whatever the levels above 1 are." },
+  { k: "give", re: /you can give|if you give/i, t: "Optional cost",
+    d: "You choose whether to pay. Declining costs nothing and simply skips the part of the effect that hangs off it." },
+];
+
+function glossaryFor(...texts) {
+  const text = texts.filter(Boolean).join(" ");
+  return GLOSSARY.filter((entry) => entry.re.test(text));
+}
+
+function Glossary({ terms }) {
+  if (!terms.length) return null;
+  return <div className="or-info-defs">
+    <h3>What these words mean here</h3>
+    <dl>{terms.map((entry) => <div key={entry.k}>
+      <dt>{entry.t}</dt><dd>{entry.d}</dd>
+    </div>)}</dl>
+  </div>;
+}
+
+
 /* One modal, four shapes — a card, a bonus token, a technology space, or a
    whole column. Every readable thing on the table opens it, so no piece of
    rules text on this page is a dead end. */
@@ -377,25 +531,35 @@ function InfoModal({ info, catalog, onClose, onInfo }) {
         <span className="or-info-cost"><b>{card.cost}</b> Credits</span>
       </p>
       <p className="or-info-text">{card.description}</p>
-      <p className="or-info-note">Recruiting costs the printed price minus the Agents already in
-        its <PlanetName planet={card.planet} /> column, and gains 1 influence there before this
-        text resolves.</p>
+      <p className="or-info-note">One card, three uses. <b>Recruit</b> it for its printed
+        {" "}{card.cost} Credits minus the Agents already in
+        its <PlanetName planet={card.planet} /> column, gaining 1 influence there before the text
+        above resolves. Or discard it to <b>develop {card.faction} technology</b>, paying the new
+        level in Zenithium. Or discard it to <b>become Leader</b> for
+        the {card.faction} action.</p>
+      <Glossary terms={glossaryFor(card.description)} />
     </>;
   } else if (info.kind === "bonus") {
     const bonus = catalog?.bonuses?.[String(info.token)] || catalog?.bonuses?.[info.token];
     eyebrow = "Bonus token";
     title = bonus?.description || `Bonus token ${info.token}`;
-    body = <p className="or-info-note">A planet’s token is claimed by the first player to capture a
-      disc from that planet. A technology token sits on level 2 and is claimed by the first player
-      to reach it, resolving after that level’s own effect.</p>;
+    body = <>
+      <p className="or-info-note">A planet’s token is claimed by the first player to capture a
+        disc from that planet. A technology token sits on level 2 and is claimed by the first player
+        to reach it, resolving after that level’s own effect. A claimed token resolves at once and
+        leaves the board for good.</p>
+      <Glossary terms={glossaryFor(bonus?.description)} />
+    </>;
   } else if (info.kind === "tech") {
     tint = `or-${info.faction}`;
     eyebrow = `${info.faction} technology`;
     title = `Level ${info.level}`;
     body = <>
       <p className="or-info-text">{info.description}</p>
-      <p className="or-info-note">Developing costs the new level in Zenithium, then resolves that
-        level and every level below it, top to bottom.</p>
+      <p className="or-info-note">Reaching this space costs {info.level} Zenithium, less any
+        reduction. You then resolve level {info.level} and every level below it, top to bottom, so
+        a lower space pays out again on every later advance up this track.</p>
+      <Glossary terms={glossaryFor(info.description)} />
     </>;
   } else if (info.kind === "column") {
     tint = `or-${info.planet}`;
@@ -410,6 +574,13 @@ function InfoModal({ info, catalog, onClose, onInfo }) {
         </button>
       </li>)}
     </ul>;
+    body = <>
+      {body}
+      <p className="or-info-note">{info.cards.length} Agent{info.cards.length === 1 ? "" : "s"} here.
+        Only the top one can be exiled or transferred, and the stack takes {info.cards.length} off
+        the printed price of the next <PlanetName planet={info.planet} /> recruit. Press any Agent
+        to read it in full.</p>
+    </>;
   }
 
   return <div className="or-info-back" onClick={onClose}>
@@ -794,7 +965,7 @@ export default function Orbit({ myId, authUser, onExit }) {
 
           <section className="or-hand-zone">
             <div className="or-hand-head"><span className="or-eyebrow">Your hand</span>
-              <span>{me.hand.length} / {game.leader?.owner === myId ? (game.leader.level === 2 ? 6 : 5) : 4}</span></div>
+              <HandCount held={me.hand.length} limit={handLimit(game.leader, myId)} /></div>
             <Hand>{me.hand.map((card) => <AgentCard card={card} key={card.id} selected={selectedCard === card.id} onInfo={setInfo}
               onClick={isMyTurn && !game.pending ? () => setSelectedCard(card.id) : null} />)}</Hand>
             {selectedCard != null && isMyTurn && !game.pending && <div className="or-action-bar">
@@ -813,7 +984,7 @@ export default function Orbit({ myId, authUser, onExit }) {
         </div>
         <div className="or-sideboards"><TechBoard game={game} myId={myId} otherId={otherId} catalog={catalog}
           myName={names[myId]} theirName={names[otherId]} onInfo={setInfo} />
-          <MoveLog entries={game.log} />
+          <MoveLog entries={game.log} game={game} catalog={catalog} myId={myId} onInfo={setInfo} />
         </div>
       </div>}
     </main>

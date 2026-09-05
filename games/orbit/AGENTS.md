@@ -395,6 +395,58 @@ were each a real misread on the table, so they are worth not undoing:
   must fit either target without page-level horizontal or vertical scrolling.
   `screens.mjs` measures both targets so future content-height changes cannot
   quietly spend that fit.
+- **THE LOG NARRATES; IT DOES NOT NAME THE CARD AND STOP.** It used to write one
+  line per card play and leave every disc, Credit, token and stolen Agent to be
+  inferred from a board that had already moved — a player had to open the card to
+  find out what their own turn did. `_log` now takes PARTS, not a sentence: a
+  plain string is text and a dict is a token the client renders as a pressable
+  chip (`{"c"}` an Agent, `{"p"}` a planet, `{"b"}` a bonus, `{"f","l"}` a
+  technology space), each carrying its own label in `v` so the line reads before
+  the catalog fetch lands and in a raw database dump. **The flat sentence is
+  derived by the reader and never stored beside the parts.** Pre-parts rows (and
+  the `screens.mjs` fixture) carry `message` instead and still render as text; do
+  not remove that fallback.
+  - **Every mutation writes a line, and `test_every_material_change_is_written_down`
+    holds it there** — nine categories checked SEPARATELY (influence, both
+    resources, captures, the badge, technology, columns, bonus slots, hand size),
+    because "some entry was appended" passes on exactly the log this replaced.
+    An effect that produces NOTHING writes a line too, with the reason: no legal
+    target, an unpayable cost, a missing Leader badge, a disc already captured
+    this turn. That silence was the most common "what just happened?".
+  - **The test collects entries from `_log`, never by slicing `game["log"]`.** A
+    long game hits `LOG_CAP` and the eviction shifts every index, which made a
+    first cut read an empty slice and report a badge moving unlogged.
+  - **The log is broadcast to both seats unredacted, so it must never name a card
+    nobody can see.** `test_the_log_never_names_a_card_nobody_can_see` checks the
+    named Agent is in a column or the discard pile *at the moment the line is
+    written* — after the move is too late, since a reshuffle in the same action
+    can legitimately pull a just-discarded Agent back into the hidden deck. This
+    is why an end-of-turn draw logs a COUNT and the mulligan logs how many were
+    replaced, never which.
+  - `LOG_CAP` is 400 and `persist.py` imports it rather than keeping a second
+    number. Measured on a pathological 122-turn random game at the cap: the log
+    is 91% of the raw blob and takes it from 3.4KB to 8.6KB compressed. A real
+    game is well under the cap.
+- **A modal explains the words its printed sentence uses.** The prose stays the
+  authority — this is a footnote under it, which is the whole difference from the
+  icon vocabulary tried on the card FACE and reverted, and it is where "transfer",
+  "mobilize" and "opposing card" stop being guesses. Two of the definitions are
+  transcribed FROM `engine.py` rather than from what the phrase looks like it
+  means: **`middle` is a track whose disc sits on the CENTRE SPACE, not the three
+  middle planets**, and `dominated` is a track on the opponent's side. That near
+  miss is recorded under `bga_magnitude_audit.py` for the same reason.
+  `test_client_glossary.py` reads the JSX AS TEXT and fails if any of the 128
+  printed strings matches no term, because an unmatched one renders an empty
+  heading and leaves the reader where they started.
+- **One `handLimit()` decides the hand counter, and both rails plus the hand head
+  read it.** The limit moves MID-TURN with the badge, and a second hand-rolled
+  expression is how a counter ends up disagreeing with the badge printed beside
+  it. Both seats print `held / limit` — a bare count cannot say whether five cards
+  is normal, and the badge can be on either seat. **Going over the limit is LEGAL**
+  (a hand is never discarded down, so losing the badge strands you above it, which
+  happens in every game) and is labelled `kept` rather than rendered as a ratio
+  that reads like an arithmetic bug. `screens.mjs` steers both cases onto one
+  frame: Gold badge at 6/6, badge-less at 5/4 kept.
 - **On phones the Log is the final board section**, after the hand and any live
   action controls. It is history, not the next decision, and must not split the
   board state from the cards a player acts with. All sizes keep the full log and

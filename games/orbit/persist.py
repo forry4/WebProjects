@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from core import rooms as _rooms
 
+from .engine import LOG_CAP
+
 
 MARKER = "_c"
-LOG_CAP = 300
 
 
 def compact_state(state: dict) -> dict:

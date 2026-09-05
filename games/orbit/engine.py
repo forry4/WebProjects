@@ -45,10 +45,109 @@ def _player(game: dict, pid: str) -> dict:
     return game["players"][pid]
 
 
-def _log(game: dict, message: str, **data) -> None:
-    game["log"].append({"turn": game["turn_number"], "message": message, **data})
-    if len(game["log"]) > 300:
-        del game["log"][:-300]
+# ── The display log ─────────────────────────────────────────────────────────
+# THE LOG IS THE ONLY PLACE A PLAYER CAN READ WHAT ACTUALLY HAPPENED, so every
+# mutation below writes one.  An entry is a list of PARTS: a plain string is
+# literal text and a dict is a token the client renders as a pressable chip —
+# `{"c": id}` an Agent, `{"p": name}` a planet, `{"b": type}` a bonus token,
+# `{"f": faction, "l": level}` a technology space.  Each token carries its own
+# label in `v`, so the log stays readable before the catalog fetch lands and in
+# a raw database dump.  The flat sentence is derived by the reader, never stored
+# beside the parts: one fact, one copy.
+LOG_CAP = 400
+
+RESOURCE_LABEL = {"credits": "Credits", "zenithium": "Zenithium"}
+# Zenithium is a mass noun; Credits are countable, so "1 Credits" is wrong.
+RESOURCE_ONE = {"credits": "Credit", "zenithium": "Zenithium"}
+
+
+LEADER_SIDES = {1: "Silver", 2: "Gold"}
+# Named for the log's "nothing happened, and here is why" lines.  An effect that
+# silently evaporates is the single most common thing a player asks about.
+TASK_LABEL = {
+    "influence": "influence",
+    "influence_other": "influence on another planet",
+    "influence_split": "split influence",
+    "split_influence": "split influence",
+    "exile": "exile",
+    "exile_for_matching": "exile",
+    "exile_tier": "exile",
+    "transfer": "transfer",
+    "discard_hand": "discard",
+    "develop": "develop",
+    "reset_planet": "disc reset",
+    "take_board_bonus": "bonus claim",
+    "spend_tier": "spend",
+    "optional_exile_each": "exile",
+    "two_adjacent": "influence",
+    "adjacent_three": "influence",
+}
+
+
+def _resource_label(resource: str, amount: int) -> str:
+    return RESOURCE_ONE[resource] if amount == 1 else RESOURCE_LABEL[resource]
+
+
+def _tok_card(card_id: int) -> dict:
+    return {"c": int(card_id), "v": CARDS[int(card_id)]["name"]}
+
+
+def _tok_planet(planet: str) -> dict:
+    return {"p": planet, "v": planet}
+
+
+def _tok_bonus(token_type: int) -> dict:
+    return {"b": int(token_type), "v": BONUS_TYPES[int(token_type)]["description"]}
+
+
+def _tok_tech(faction: str, level: int) -> dict:
+    return {"f": faction, "l": int(level), "v": f"{faction.title()} level {level}"}
+
+
+def _log(game: dict, *parts, **data) -> None:
+    game["log"].append({"turn": game["turn_number"], "parts": list(parts), **data})
+    if len(game["log"]) > LOG_CAP:
+        del game["log"][:-LOG_CAP]
+
+
+def _who(game: dict, pid: str) -> str:
+    return game["names"].get(pid, pid)
+
+
+def _possessive(game: dict, actor: str, owner: str) -> str:
+    return "their own" if owner == actor else f"{_who(game, owner)}’s"
+
+
+def _gain_resource(game: dict, pid: str, resource: str, amount: int, note: str = "") -> None:
+    player = _player(game, pid)
+    suffix = f" {note}" if note else ""
+    if amount <= 0:
+        if note:
+            _log(game, f"{_who(game, pid)} gains no {RESOURCE_LABEL[resource]}{suffix}.", pid=pid)
+        return
+    player[resource] += amount
+    _log(game, f"{_who(game, pid)} gains {amount} {_resource_label(resource, amount)}"
+               f"{suffix} (now {player[resource]}).", pid=pid)
+
+
+def _spend_resource(game: dict, pid: str, resource: str, amount: int,
+                    verb: str = "pays", note: str = "") -> None:
+    player = _player(game, pid)
+    player[resource] -= amount
+    if amount <= 0:
+        return
+    suffix = f" {note}" if note else ""
+    _log(game, f"{_who(game, pid)} {verb} {amount} {_resource_label(resource, amount)}"
+               f"{suffix} (now {player[resource]}).", pid=pid)
+
+
+def _give_resource(game: dict, pid: str, resource: str, amount: int) -> None:
+    other = _opponent(game, pid)
+    _player(game, pid)[resource] -= amount
+    _player(game, other)[resource] += amount
+    _log(game, f"{_who(game, pid)} gives {amount} {_resource_label(resource, amount)} to "
+               f"{_who(game, other)} ({_who(game, pid)} {_player(game, pid)[resource]}, "
+               f"{_who(game, other)} {_player(game, other)[resource]}).", pid=pid)
 
 
 def _draw_agent(game: dict) -> int | None:
@@ -63,13 +162,18 @@ def _draw_agent(game: dict) -> int | None:
     return game["agent_deck"].pop()
 
 
-def _draw_to(game: dict, pid: str, limit: int) -> None:
+def _draw_to(game: dict, pid: str, limit: int) -> int:
+    """Refill toward ``limit`` and report how many Agents were actually drawn."""
+
     hand = _player(game, pid)["hand"]
+    drawn = 0
     while len(hand) < limit:
         card_id = _draw_agent(game)
         if card_id is None:
-            return
+            return drawn
         hand.append(card_id)
+        drawn += 1
+    return drawn
 
 
 def _leader_limit(game: dict, pid: str) -> int:
@@ -87,13 +191,16 @@ def _gain_leader(game: dict, pid: str, requested_level: int = 1) -> None:
         badge["level"] = min(2, badge["level"] + 1)
     else:
         badge.update(owner=pid, level=1)
-    _log(game, f"{game['names'][pid]} takes the Leader badge.", pid=pid)
+    side = LEADER_SIDES[badge["level"]]
+    _log(game, f"{_who(game, pid)} takes the {side} Leader badge — their hand limit "
+               f"is now {_leader_limit(game, pid)}.", pid=pid)
 
 
 def _give_up_leader(game: dict, pid: str) -> None:
     if game["leader"]["owner"] == pid:
         game["leader"] = {"owner": None, "level": 0}
-        _log(game, f"{game['names'][pid]} gives up the Leader badge.", pid=pid)
+        _log(game, f"{_who(game, pid)} gives up the Leader badge — their hand limit "
+                   f"returns to {BASE_HAND_LIMIT}.", pid=pid)
 
 
 def _winner_pid(game: dict) -> str | None:
@@ -116,7 +223,14 @@ def _check_victory(game: dict) -> bool:
     game["winner"] = victor
     game["pending"] = None
     game["pending_pid"] = None
-    _log(game, f"{game['names'][victor]} wins Orbit.", pid=victor)
+    captured = _player(game, victor)["captured"]
+    if any(captured.count(planet) >= 3 for planet in PLANETS):
+        how = "an Absolute majority — three discs from one planet"
+    elif len(set(captured)) >= 4:
+        how = "a Democratic majority — four different planets"
+    else:
+        how = "a Popular majority — five discs in all"
+    _log(game, f"{_who(game, victor)} wins Orbit with {how}.", pid=victor)
     return True
 
 
@@ -146,15 +260,19 @@ def _draw_bonus_type(game: dict) -> int | None:
     return game["bonus_deck"].pop()
 
 
-def _award_bonus(game: dict, pid: str, token_type: int) -> None:
+def _award_bonus(game: dict, pid: str, token_type: int, source: str = "") -> None:
     game["bonus_discard"].append(token_type)
-    _log(
-        game,
-        f"{game['names'][pid]} resolves a bonus: {BONUS_TYPES[token_type]['description']}.",
-        pid=pid,
-        bonus=token_type,
-    )
+    origin = f" from the {source}" if source else ""
+    _log(game, f"{_who(game, pid)} claims a bonus token{origin}: ",
+         _tok_bonus(token_type), ".", pid=pid)
     _queue_tasks(game, bonus_effects(token_type), pid)
+
+
+def _capture_summary(player: dict) -> str:
+    captured = player["captured"]
+    planets = len(set(captured))
+    return (f"{len(captured)} disc{'' if len(captured) == 1 else 's'} "
+            f"from {planets} planet{'' if planets == 1 else 's'}")
 
 
 def _capture(game: dict, pid: str, planet: str) -> list[dict]:
@@ -162,41 +280,51 @@ def _capture(game: dict, pid: str, planet: str) -> list[dict]:
     player["captured"].append(planet)
     game["captured_this_turn"].append(planet)
     game["influence"][planet] = None
-    _log(game, f"{game['names'][pid]} captures {planet.title()}.", pid=pid, planet=planet)
+    _log(game, f"{_who(game, pid)} CAPTURES the ", _tok_planet(planet),
+         f" disc — they now hold {_capture_summary(player)}.", pid=pid)
     if _check_victory(game):
         return []
     token = game["planet_bonus"].get(planet)
     if token is None:
+        _log(game, "The ", _tok_planet(planet),
+             " bonus token was already taken, so the capture pays nothing extra.", pid=pid)
         return []
     game["planet_bonus"][planet] = None
     game["bonus_discard"].append(token)
-    _log(
-        game,
-        f"{game['names'][pid]} claims {planet.title()}'s bonus.",
-        pid=pid,
-        planet=planet,
-        bonus=token,
-    )
+    _log(game, f"{_who(game, pid)} takes the ", _tok_planet(planet), " bonus token: ",
+         _tok_bonus(token), ".", pid=pid)
     return bonus_effects(token)
 
 
 def _gain_influence(game: dict, pid: str, planet: str, amount: int) -> list[dict]:
     """Move one disc step at a time and return any immediate bonus tasks."""
 
-    if amount <= 0 or game["influence"][planet] is None:
+    if amount <= 0:
+        return []
+    if game["influence"][planet] is None:
+        _log(game, f"{_who(game, pid)} gains {amount} influence on ", _tok_planet(planet),
+             ", but that disc was captured this turn — the movement is lost.", pid=pid)
         return []
     direction = 1 if pid == game["order"][0] else -1
-    gained_tasks: list[dict] = []
+    moved = 0
+    captured = False
     for _ in range(amount):
-        position = game["influence"][planet]
-        if position is None:
+        game["influence"][planet] += direction
+        moved += 1
+        if abs(game["influence"][planet]) >= CONTROL_POSITION:
+            captured = True
             break
-        position += direction
-        game["influence"][planet] = position
-        if abs(position) >= CONTROL_POSITION:
-            gained_tasks.extend(_capture(game, pid, planet))
-            break
-    return gained_tasks
+    step = "space" if moved == 1 else "spaces"
+    if captured:
+        lost = amount - moved
+        wasted = "" if not lost else f" The other {lost} {'is' if lost == 1 else 'are'} lost."
+        _log(game, f"{_who(game, pid)} gains {amount} influence on ", _tok_planet(planet),
+             f" — the disc moves {moved} {step} into their control zone.{wasted}", pid=pid)
+    else:
+        remaining = CONTROL_POSITION - game["influence"][planet] * direction
+        _log(game, f"{_who(game, pid)} gains {amount} influence on ", _tok_planet(planet),
+             f" — the disc moves {moved} {step} their way, {remaining} from capture.", pid=pid)
+    return _capture(game, pid, planet) if captured else []
 
 
 def _columns(game: dict, pid: str) -> dict[str, list[int]]:
@@ -255,23 +383,15 @@ def _pay_cost(game: dict, pid: str, cost: dict) -> bool:
             return False
         _give_up_leader(game, pid)
         return True
-    if resource == "credits_to_opponent":
-        if player["credits"] < amount:
+    if resource in ("credits_to_opponent", "zenithium_to_opponent"):
+        held = "credits" if resource == "credits_to_opponent" else "zenithium"
+        if player[held] < amount:
             return False
-        player["credits"] -= amount
-        _player(game, _opponent(game, pid))["credits"] += amount
-        return True
-    if resource == "zenithium_to_opponent":
-        if player["zenithium"] < amount:
-            return False
-        player["zenithium"] -= amount
-        _player(game, _opponent(game, pid))["zenithium"] += amount
+        _give_resource(game, pid, held, amount)
         return True
     if player[resource] < amount:
         return False
-    player[resource] -= amount
-    if resource == "zenithium_to_opponent":
-        _player(game, _opponent(game, pid))["zenithium"] += amount
+    _spend_resource(game, pid, resource, amount)
     return True
 
 
@@ -310,26 +430,40 @@ def _advance_technology(game: dict, pid: str, faction: str, discount: int = 0) -
         return False
     player["zenithium"] -= cost
     player["technology"][faction] = old_level + 1
-    _log(
-        game,
-        f"{game['names'][pid]} develops {faction.title()} technology to level {old_level + 1}.",
-        pid=pid,
-        faction=faction,
-        level=old_level + 1,
-    )
+    new_level = old_level + 1
+    price = (f"for {cost} Zenithium (now {player['zenithium']})" if cost
+             else "for free" if discount else "at no cost")
+    if discount and cost:
+        price += f", discounted by {discount}"
+    cascade = (f" Levels {new_level} down to 1 resolve in turn." if new_level > 1
+               else " Level 1 resolves.")
+    _log(game, f"{_who(game, pid)} develops ", _tok_tech(faction, new_level),
+         f" {price}.{cascade}", pid=pid)
     _queue_tasks(game, _develop_tasks(game, pid, faction), pid)
     return True
 
 
-def _discard_top(game: dict, owner_pid: str, planet: str) -> int:
-    card_id = _columns(game, owner_pid)[planet].pop()
+def _discard_top(game: dict, actor_pid: str, owner_pid: str, planet: str) -> int:
+    """Exile the top Agent of a column.  Logging lives HERE, not at each caller:
+    `exile`, `exile_tier` and `optional_exile_each` all end up here, and three of
+    the four used to move a card with nothing written down."""
+
+    column = _columns(game, owner_pid)[planet]
+    card_id = column.pop()
     game["agent_discard"].append(card_id)
+    _log(game, f"{_who(game, actor_pid)} exiles ", _tok_card(card_id), " from ",
+         f"{_possessive(game, actor_pid, owner_pid)} ", _tok_planet(planet),
+         f" column to the discard pile ({len(column)} left there).", pid=actor_pid)
     return card_id
 
 
 def _transfer_top(game: dict, pid: str, planet: str) -> int:
-    card_id = _columns(game, _opponent(game, pid))[planet].pop()
+    other = _opponent(game, pid)
+    card_id = _columns(game, other)[planet].pop()
     _columns(game, pid)[planet].append(card_id)
+    _log(game, f"{_who(game, pid)} transfers ", _tok_card(card_id),
+         f" out of {_who(game, other)}’s ", _tok_planet(planet),
+         f" column into their own ({len(_columns(game, pid)[planet])} there now).", pid=pid)
     return card_id
 
 
@@ -483,19 +617,25 @@ def _apply_task_choice(game: dict, task: dict, move: dict) -> None:
         _queue_tasks(game, bonus, pid)
     elif kind == "optional":
         queue.pop(0)
-        if move["accept"] and _pay_cost(game, pid, task["cost"]):
-            _queue_tasks(game, task["then"], pid)
+        label = task.get("label", "the optional effect")
+        if not move["accept"]:
+            _log(game, f"{_who(game, pid)} declines: {label}.", pid=pid)
+        else:
+            _log(game, f"{_who(game, pid)} accepts: {label}.", pid=pid)
+            if _pay_cost(game, pid, task["cost"]):
+                _queue_tasks(game, task["then"], pid)
     elif kind == "choose_branch":
         queue.pop(0)
+        _log(game, f"{_who(game, pid)} chooses: "
+                   f"{task['branches'][move['branch']]['label']}.", pid=pid)
         _queue_tasks(game, task["branches"][move["branch"]]["tasks"], pid)
     elif kind in ("exile", "exile_for_matching"):
         owner = task.get("owner", "self" if kind == "exile_for_matching" else "opponent")
         owner_pid = pid if owner == "self" else _opponent(game, pid)
         planet = move["planet"]
-        card_id = _discard_top(game, owner_pid, planet)
+        card_id = _discard_top(game, pid, owner_pid, planet)
         task["done"] = task.get("done", 0) + 1
         task.setdefault("used", []).append(planet)
-        _log(game, f"{game['names'][pid]} exiles {CARDS[card_id]['name']} from {planet.title()}.", pid=pid, card_id=card_id)
         reward = task.get("reward")
         if reward == "matching_influence" or kind == "exile_for_matching":
             _queue_tasks(game, [{"type": "influence", "planet": planet, "amount": task.get("amount", 1)}], pid)
@@ -510,7 +650,6 @@ def _apply_task_choice(game: dict, task: dict, move: dict) -> None:
         planet = move["planet"]
         card_id = _transfer_top(game, pid, planet)
         task["done"] = task.get("done", 0) + 1
-        _log(game, f"{game['names'][pid]} transfers {CARDS[card_id]['name']} from {planet.title()}.", pid=pid, card_id=card_id)
         reward = task.get("reward")
         if reward == "matching_influence":
             _queue_tasks(game, [influence_task(planet, 1)], pid)
@@ -520,8 +659,11 @@ def _apply_task_choice(game: dict, task: dict, move: dict) -> None:
             queue.remove(task)
     elif kind == "discard_hand":
         card_id = move["card_id"]
-        _player(game, pid)["hand"].remove(card_id)
+        hand = _player(game, pid)["hand"]
+        hand.remove(card_id)
         game["agent_discard"].append(card_id)
+        _log(game, f"{_who(game, pid)} discards ", _tok_card(card_id),
+             f" from hand ({len(hand)} card{'' if len(hand) == 1 else 's'} left).", pid=pid)
         reward = task.get("reward")
         if reward == "matching_influence":
             _queue_tasks(game, [influence_task(CARDS[card_id]["planet"], 1)], pid)
@@ -540,9 +682,14 @@ def _apply_task_choice(game: dict, task: dict, move: dict) -> None:
     elif kind == "exile_tier":
         queue.pop(0)
         threshold = move["tier"]
-        if threshold:
+        if not threshold:
+            _log(game, f"{_who(game, pid)} exiles nothing from their ",
+                 _tok_planet(task["planet"]), " column.", pid=pid)
+        else:
+            _log(game, f"{_who(game, pid)} exiles {threshold} Agents from their ",
+                 _tok_planet(task["planet"]), " column.", pid=pid)
             for _ in range(threshold):
-                _discard_top(game, pid, task["planet"])
+                _discard_top(game, pid, pid, task["planet"])
             reward_amount = {2: 2, 4: 4, 7: 7}[threshold] if task["reward"] == "zenithium" else {2: 1, 4: 2, 7: 3}[threshold]
             reward = {"type": task["reward"], "amount": reward_amount, "target": "self"}
             if task["reward"] == "influence":
@@ -551,12 +698,17 @@ def _apply_task_choice(game: dict, task: dict, move: dict) -> None:
     elif kind == "spend_tier":
         queue.pop(0)
         cost = move["cost"]
-        if cost:
-            _player(game, pid)[task["resource"]] -= cost
+        if not cost:
+            _log(game, f"{_who(game, pid)} spends nothing and gains no influence.", pid=pid)
+        else:
+            _spend_resource(game, pid, task["resource"], cost,
+                            verb="spends", note=f"for {move['amount']} influence")
             _queue_tasks(game, [{"type": "influence", "amount": move["amount"], "exclude": task["exclude"]}], pid)
     elif kind == "reset_planet":
         queue.pop(0)
         game["influence"][move["planet"]] = 0
+        _log(game, f"{_who(game, pid)} returns the ", _tok_planet(move["planet"]),
+             " disc to the centre space.", pid=pid)
     elif kind == "take_board_bonus":
         queue.pop(0)
         area = move["bonus_area"]
@@ -564,12 +716,18 @@ def _apply_task_choice(game: dict, task: dict, move: dict) -> None:
         board = game["planet_bonus"] if area == "planet" else game["technology_bonus"]
         token = board[slot]
         board[slot] = None
-        _award_bonus(game, pid, token)
+        _award_bonus(game, pid, token,
+                     f"{slot} planet" if area == "planet" else f"{slot} technology track")
     elif kind == "optional_exile_each":
         index = task.get("index", 0)
         planet = task["planets"][index]
+        if not move["accept"] and _columns(game, pid)[planet]:
+            # Only a real choice is worth a line: this task walks FOUR planets,
+            # and logging every empty column would bury the turn in "nothing".
+            _log(game, f"{_who(game, pid)} declines to exile from their ",
+                 _tok_planet(planet), " column.", pid=pid)
         if move["accept"] and _columns(game, pid)[planet]:
-            _discard_top(game, pid, planet)
+            _discard_top(game, pid, pid, planet)
             reward = task["reward"]
             if reward == "influence":
                 _queue_tasks(game, [influence_task(planet, 1)], pid)
@@ -610,6 +768,8 @@ def _drain_pending(game: dict) -> None:
         # Choice tasks remain at the front until the owning player responds.
         if kind == "optional" and not _can_pay(game, pid, task["cost"]):
             game["pending"]["queue"].pop(0)
+            _log(game, f"{_who(game, pid)} cannot pay for: "
+                       f"{task.get('label', 'the optional effect')}.", pid=pid)
             continue
         if kind in {
             "influence",
@@ -639,6 +799,9 @@ def _drain_pending(game: dict) -> None:
                 )
                 if available < task["count"]:
                     game["pending"]["queue"].pop(0)
+                    _log(game, f"{_who(game, owner_pid)} has fewer than {task['count']} "
+                               f"Agents to exile, so the effect and its reward are skipped.",
+                         pid=pid)
                     continue
             if kind == "influence" and task.get("planet"):
                 game["pending"]["queue"].pop(0)
@@ -651,68 +814,95 @@ def _drain_pending(game: dict) -> None:
                 task["options"] = moves
                 return
             # Unavailable effects are ignored.  A full exile cost does not pay
-            # its reward unless the required number of cards existed.
+            # its reward unless the required number of cards existed.  SAY SO:
+            # an effect that evaporates with nothing written down is the thing
+            # players ask about most.
             game["pending"]["queue"].pop(0)
+            _log(game, f"{_who(game, pid)} has no legal target for the "
+                       f"{TASK_LABEL.get(kind, kind)} effect, so it is skipped.", pid=pid)
             continue
 
         game["pending"]["queue"].pop(0)
         player = _player(game, pid)
         if kind in ("credits", "zenithium"):
             target_pid = pid if task.get("target", "self") == "self" else _opponent(game, pid)
-            _player(game, target_pid)[kind] += task["amount"]
+            _gain_resource(game, target_pid, kind, task["amount"])
         elif kind == "leader":
             _gain_leader(game, pid, task.get("level", 1))
         elif kind == "if_leader":
             if game["leader"]["owner"] == pid:
                 _queue_tasks(game, task["then"], pid)
+            else:
+                _log(game, f"{_who(game, pid)} does not hold the Leader badge, "
+                           f"so the conditional part of this effect is skipped.", pid=pid)
         elif kind == "if_credits":
             if player["credits"] >= task["amount"]:
                 _queue_tasks(game, task["then"], pid)
+            else:
+                _log(game, f"{_who(game, pid)} holds {player['credits']} Credits, short of "
+                           f"the {task['amount']} this effect needs — it is skipped.", pid=pid)
         elif kind == "draw_bonus":
             token = _draw_bonus_type(game)
             if token is not None:
-                _award_bonus(game, pid, token)
+                _award_bonus(game, pid, token, "face-down reserve")
+            else:
+                _log(game, "The bonus reserve is empty, so no token is drawn.", pid=pid)
         elif kind == "fixed_bonus":
             token = game["technology_bonus"].get(task["faction"])
             if token is not None:
                 game["technology_bonus"][task["faction"]] = None
-                _award_bonus(game, pid, token)
+                _award_bonus(game, pid, token, f"{task['faction']} technology track")
         elif kind == "mobilize":
             draw_count = 1 if task.get("influence_each") else task["count"]
             for _ in range(draw_count):
                 card_id = _draw_agent(game)
                 if card_id is None:
+                    _log(game, "The Agent deck is empty, so nothing is mobilized.", pid=pid)
                     break
                 planet = CARDS[card_id]["planet"]
                 _columns(game, pid)[planet].append(card_id)
-                _log(game, f"{game['names'][pid]} mobilizes {CARDS[card_id]['name']}.", pid=pid, card_id=card_id)
+                _log(game, f"{_who(game, pid)} mobilizes ", _tok_card(card_id),
+                     " off the deck into their ", _tok_planet(planet),
+                     " column, unresolved.", pid=pid)
                 if task.get("influence_each"):
                     followups = [influence_task(planet, 1)]
                     if task["count"] > 1:
                         followups.append({**task, "count": task["count"] - 1})
                     _queue_tasks(game, followups, pid)
         elif kind == "transfer_each":
+            moved = False
             for planet in task["planets"]:
                 if _columns(game, _opponent(game, pid))[planet]:
-                    card_id = _transfer_top(game, pid, planet)
-                    _log(
-                        game,
-                        f"{game['names'][pid]} transfers {CARDS[card_id]['name']} from {planet.title()}.",
-                        pid=pid,
-                        card_id=card_id,
-                    )
+                    _transfer_top(game, pid, planet)
+                    moved = True
+            if not moved:
+                _log(game, f"{_who(game, _opponent(game, pid))} has no Agents to transfer.",
+                     pid=pid)
         elif kind == "steal":
-            opponent = _player(game, _opponent(game, pid))
+            other_pid = _opponent(game, pid)
+            opponent = _player(game, other_pid)
             amount = min(task["amount"], opponent[task["resource"]])
-            opponent[task["resource"]] -= amount
-            player[task["resource"]] += amount
+            if amount <= 0:
+                _log(game, f"{_who(game, other_pid)} has no "
+                           f"{RESOURCE_LABEL[task['resource']]} to steal.", pid=pid)
+            else:
+                opponent[task["resource"]] -= amount
+                player[task["resource"]] += amount
+                _log(game, f"{_who(game, pid)} steals {amount} "
+                           f"{_resource_label(task['resource'], amount)} from "
+                           f"{_who(game, other_pid)} ({_who(game, pid)} {player[task['resource']]}, "
+                           f"{_who(game, other_pid)} {opponent[task['resource']]}).", pid=pid)
         elif kind == "per_tech_first":
             count = sum(level >= 1 for level in player["technology"].values())
-            player[task["resource"]] += count * task["amount"]
+            _gain_resource(game, pid, task["resource"], count * task["amount"],
+                           f"for {count} developed technology track{'' if count == 1 else 's'}")
         elif kind == "per_nonempty":
             owner_pid = pid if task["owner"] == "self" else _opponent(game, pid)
             count = sum(bool(column) for column in _columns(game, owner_pid).values())
-            player["credits"] += count * task["amount"]
+            whose = "their own" if owner_pid == pid else f"{_who(game, owner_pid)}’s"
+            _gain_resource(game, pid, "credits", count * task["amount"],
+                           f"for {count} occupied column{'' if count == 1 else 's'} in "
+                           f"{whose} board")
         elif kind == "all_planets":
             _queue_tasks(
                 game,
@@ -724,6 +914,8 @@ def _drain_pending(game: dict) -> None:
             for level in (1, 2, 3):
                 if level not in player["row_bonuses"] and all(value >= level for value in player["technology"].values()):
                     player["row_bonuses"].append(level)
+                    _log(game, f"{_who(game, pid)} now has all three technology tracks at "
+                               f"level {level} — the row bonus grants {level} influence.", pid=pid)
                     newly.append(influence_task("", level))
             for reward in newly:
                 reward.pop("planet")
@@ -737,10 +929,20 @@ def _drain_pending(game: dict) -> None:
 
 def _finish_turn(game: dict) -> None:
     pid = game["turn_pid"]
-    _draw_to(game, pid, _leader_limit(game, pid))
+    limit = _leader_limit(game, pid)
+    drawn = _draw_to(game, pid, limit)
+    held = len(_player(game, pid)["hand"])
+    if drawn:
+        _log(game, f"{_who(game, pid)} draws {drawn} Agent{'' if drawn == 1 else 's'} "
+                   f"back up to their hand limit ({held} of {limit}).", pid=pid)
+    elif held > limit:
+        _log(game, f"{_who(game, pid)} keeps {held} Agents, over their limit of {limit} — "
+                   f"a hand is never discarded down.", pid=pid)
     for planet in game["captured_this_turn"]:
         if game["influence"][planet] is None:
             game["influence"][planet] = 0
+            _log(game, "A fresh ", _tok_planet(planet),
+                 " disc appears on the centre space.")
     game["captured_this_turn"] = []
     game["pending"] = None
     game["pending_pid"] = None
@@ -760,6 +962,10 @@ def _finish_turn(game: dict) -> None:
         game["phase"] = "over"
         game["winner"] = None
         _log(game, "The Agent supply is exhausted; the game ends in a draw.")
+        return
+    if game["phase"] != "over":
+        _log(game, f"Turn {game['turn_number']} — {_who(game, game['turn_pid'])} to play.",
+             pid=game["turn_pid"], turn_start=True)
 
 
 def _begin_resolution(game: dict, pid: str, tasks: list[dict], source: str) -> None:
@@ -776,15 +982,21 @@ def _play_card_action(game: dict, pid: str, move: dict) -> tuple[bool, str | Non
     player["hand"].remove(card_id)
     action = move["action"]
     if action == "recruit":
-        cost = max(0, card["cost"] - len(player["columns"][card["planet"]]))
+        already = len(player["columns"][card["planet"]])
+        cost = max(0, card["cost"] - already)
         player["credits"] -= cost
         player["columns"][card["planet"]].append(card_id)
-        _log(game, f"{game['names'][pid]} recruits {card['name']} for {cost} Credits.", pid=pid, card_id=card_id, action=action)
+        discount = (f" — printed {card['cost']}, reduced by the {already} Agent"
+                    f"{'' if already == 1 else 's'} already there" if already else "")
+        _log(game, f"{_who(game, pid)} recruits ", _tok_card(card_id), " into their ",
+             _tok_planet(card["planet"]), f" column for {cost} Credits{discount} "
+             f"(now {player['credits']}).", pid=pid, action=action)
         _begin_resolution(game, pid, [influence_task(card["planet"], 1), *card_effects(card_id)], card["name"])
     elif action == "technology":
         game["agent_discard"].append(card_id)
         faction = card["faction"]
-        _log(game, f"{game['names'][pid]} discards {card['name']} to develop {faction.title()} technology.", pid=pid, card_id=card_id, action=action)
+        _log(game, f"{_who(game, pid)} discards ", _tok_card(card_id),
+             f" to develop {faction.title()} technology.", pid=pid, action=action)
         game["pending"] = {"source": card["name"], "queue": [], "context": {}}
         game["pending_pid"] = pid
         if not _advance_technology(game, pid, faction):
@@ -800,7 +1012,8 @@ def _play_card_action(game: dict, pid: str, move: dict) -> tuple[bool, str | Non
             tasks.append({"type": "credits", "amount": 3, "target": "self"})
         else:
             tasks.append({"type": "mobilize", "count": 2, "influence_each": False})
-        _log(game, f"{game['names'][pid]} discards {card['name']} for the {faction.title()} Leader action.", pid=pid, card_id=card_id, action=action)
+        _log(game, f"{_who(game, pid)} discards ", _tok_card(card_id),
+             f" for the {faction.title()} Leader action.", pid=pid, action=action)
         _begin_resolution(game, pid, tasks, card["name"])
     return True, None
 
@@ -872,6 +1085,10 @@ def new_game(
         game["technology_bonus"][faction] = game["bonus_deck"].pop()
     # The second player begins one step toward their Terra control zone.
     game["influence"]["terra"] = -1
+    _log(game, f"Orbit begins. {_who(game, order[0])} plays first; "
+               f"{_who(game, order[1])} starts with 1 ", _tok_planet("terra"),
+         f" influence. Both hold {STARTING_CREDITS} Credits and "
+         f"{STARTING_ZENITHIUM} Zenithium.")
     _save_rng(game, rng)
     return game
 
@@ -918,13 +1135,17 @@ def apply_move(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
         for card_id in selected:
             hand.remove(card_id)
             game["agent_discard"].append(card_id)
-        _draw_to(game, pid, 4)
+        _draw_to(game, pid, BASE_HAND_LIMIT)
         game["mulligan_done"].append(pid)
-        _log(game, f"{game['names'][pid]} replaces {len(selected)} starting card(s).", pid=pid)
+        _log(game, f"{_who(game, pid)} replaces {len(selected)} starting "
+                   f"Agent{'' if len(selected) == 1 else 's'} and draws back to "
+                   f"{BASE_HAND_LIMIT}.", pid=pid)
         if len(game["mulligan_done"]) == 2:
             game["phase"] = "play"
             game["turn_pid"] = game["order"][0]
             game["turn_number"] = 1
+            _log(game, f"Turn 1 — {_who(game, game['turn_pid'])} to play.",
+                 pid=game["turn_pid"], turn_start=True)
         return True, None
     if game.get("pending"):
         task = game["pending"]["queue"][0]
