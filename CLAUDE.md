@@ -660,7 +660,14 @@ git push                      # deploy-pages.yml builds + publishes (~2-3 min)
   `core.hooksPath` redirects ALL hooks to `.githooks/`, so personal hooks in `.git/hooks` stop
   firing — move them in if you have any.
 
-- **Backend** (`**/*.py`) deploys to Render on push to main. The deploy job **verifies itself**: it
+- **Backend deploys to Render on push to main — but NOT on `**/*.py`.** `deploy-render.yml` carries a
+  hand-curated path list, one entry per game, and **a game that is mounted in `app.py` but missing
+  from that list is served in prod off whatever code an unrelated deploy happened to carry.** Orbit
+  shipped without its entry and was found on 2026-09-05 running a build from the previous day with
+  22 commits since — a rewrite of its server-authoritative `engine.py` passed every gate and would
+  never have reached the server. **The symptom is silence, not a red run**, because no workflow fires
+  at all. Adding a game to `app.py` means adding it here in the same push; the file also triggers on
+  itself, so a fix to the list can actually land. The deploy job **verifies itself**: it
   polls `/health` until it reports the pushed commit and FAILS if that never happens.
 - **The deploy hook returning 200 is NOT a successful deploy** (this cost a real gap): it only means
   Render accepted the request. A failed Docker build — the Dockerfile's Cython parity gate is *designed*

@@ -306,6 +306,25 @@ Two things the build already surfaced:
   there. On Rag Tag that was most of the harness bugs and every one looked like an
   engine bug. Suspect the harness first.
 
+## Deploying the Orbit backend
+
+**Orbit shipped without an entry in `deploy-render.yml`'s path list, so its server
+code never deployed at all.** `app.py` mounts it and prod has been serving `/orbit`
+the whole time — off whatever build an unrelated backend change happened to carry.
+Found 2026-09-05: prod was on `90b58898` from the previous day with 22 commits
+since, and a rewrite of the server-authoritative `engine.py` passed pytest, the
+Rust parity gate, smoke and screens and would never have reached the server.
+
+- **The symptom is silence, not a red run.** Nothing fails, because no workflow
+  fires. `/health` and `/orbit/health` report the running commit — check them
+  against `git log` rather than assuming a green push deployed anything.
+- `games/orbit/**/*.py` is the trigger now, with `ai/**` and `tools/**` negated:
+  `main.py` imports only `bot`/`engine`/`persist`/`cards`/`boards`/`effects`, and
+  eight of those 22 commits touched `tools/` alone — each would have rebuilt the
+  image and restarted prod for an offline audit script.
+- The workflow also triggers on ITSELF, because a fix to the list of things that
+  deploy otherwise cannot deploy.
+
 ## Client display contract
 
 `Orbit.jsx` renders; `engine.py` decides. These are the presentation rules that

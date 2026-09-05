@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
     paths:
+      # THIS FILE TRIGGERS ITSELF, and the reason is the Orbit gap below: a fix to
+      # the list of things that deploy cannot deploy, so it sits inert until some
+      # unrelated backend change happens along — which is the same silence it was
+      # written to end. A workflow edit is a change to WHAT SHIPS, so unlike the
+      # .md and tests/ exclusions it earns its restart, and this file changes about
+      # monthly. The /health gate below then proves the new filter actually worked.
+      - '.github/workflows/deploy-render.yml'
       - 'app.py'   # composition root — creates the FastAPI app + mounts the features
       - 'core/**/*.py'   # shared DB + auth layer + room primitives, imported by every game
       # Spender's TOP-LEVEL modules: main.py (router/rooms/WS), engine.py (the
@@ -27,6 +34,22 @@ on:
       - 'games/dontminion/**/*.py'
       - 'games/dissonance/**/*.py'
       - 'games/rag_tag/**/*.py'
+      # ORBIT WAS MISSING FROM THIS LIST FROM THE DAY IT SHIPPED, and app.py mounts
+      # it, so /orbit has been served in prod the whole time off whatever code an
+      # unrelated backend deploy happened to carry. Measured 2026-09-05: prod was
+      # running 90b58898 (2026-09-04) with 22 commits since, and a rewrite of the
+      # server-authoritative engine.py passed every gate and would never have
+      # reached the server. A game added to app.py must be added here in the same
+      # push; the symptom is silence, not a red run.
+      - 'games/orbit/**/*.py'
+      # ...but NOT its offline halves, for the same reason ai/offline is excluded
+      # above: main.py imports only bot/engine/persist/cards/boards/effects, while
+      # ai/ is the Phase 1 simulator and tools/ is the BGA audit stack. Eight of
+      # those 22 commits touched tools/ alone and would each have rebuilt the image
+      # and restarted prod — the ~3 minutes of downtime the tests exclusion below
+      # exists to stop. Negations must stay AFTER the pattern they narrow.
+      - '!games/orbit/ai/**'
+      - '!games/orbit/tools/**'
       # Every trigger above is *.py-scoped except `books/**` and `ai/models/**`, so
       # books/CLAUDE.md alone would restart prod for a docs edit (a real cold start for
       # no code change). Trailing negative rather than `paths-ignore`: GitHub rejects
