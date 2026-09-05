@@ -40,6 +40,34 @@ the order that took Rag Tag's harness from 13/30 to full 40/40 parity.
    parser that silently matches nothing, which presents as a rules bug. Dump the
    real stream first with `log_inspect.py` in that worktree.
 
+### Auditing the cards against real games
+
+`tools/bga_card_audit.py` compares our 90 cards and 8 bonus tokens against what BGA
+actually charged and produced, with no replay in between. Run it against a corpus of
+game-server logs (`$ZENITH_CORPUS`, filled by `zenith_live.py` on `cob-mining`).
+
+Three findings worth keeping:
+
+- **A full move replay is blocked, and not by us.** The spectator log carries no setup
+  dump and no hand reveal — the largest single payload in a whole game is 318 bytes — so
+  the deck order is unrecoverable and a seeded replay would diverge immediately for
+  reasons that say nothing about the rules. The effects, however, are all there: BGA
+  brackets a card play with its consequences under one `move_id`.
+- **Our cost is a CEILING, not an equality.** Zenith discounts, so what BGA charges on
+  the day is at most the printed cost — card 502 was charged 10, 8 and 5 across three
+  games. A first cut of the audit tested equality and reported five "mismatches" and
+  nineteen cards "varying", which reads as a broken transcription of half the deck. It
+  was the instrument. Measured: **0 cards were ever charged more than our value**, and 29
+  were seen at exactly it.
+- **Most real tables use an expansion we do not implement.** Table option `101` is
+  "Secret Agents" (1 = Ignore, 2 = Play with), and it maps to the ten `goodies=1` rows.
+  Seven of the first ten games harvested had it on. Filter on the option before
+  downloading; the audit also skips any log containing those card ids.
+
+No pytest gates this: the corpus lives outside the repo, so a test would have to skip
+when it is absent, and `core/tests/test_no_conditional_skips.py` bans that. Same call as
+Rag Tag's parity harness — it stays a tool you run, and findings become unit tests.
+
 Two things the build already surfaced:
 
 - **A move's identity is the WHOLE dict.** `choose` is polymorphic — it answers
