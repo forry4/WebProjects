@@ -24,6 +24,35 @@ must never calculate resources, influence, captures, or card outcomes itself.
   normalized replay fixtures rather than baking BGA presentation data into the
   engine.
 
+## The replay harness
+
+`tools/bga_replay.py`, built in two halves and deliberately in this order — it is
+the order that took Rag Tag's harness from 13/30 to full 40/40 parity.
+
+1. **The engine-driving half is written and PROVEN.** `--selftest` plays random
+   games, records the intents, and replays them through the same `drive()` a real
+   log will use, asserting an identical final state. Gated in
+   `tests/test_bga_replay.py`, which needs no corpus and so always runs. This is
+   what makes "the parser or the rules" a sound conclusion when a real log fails,
+   rather than a guess — an uncalibrated oracle blames the thing it measures.
+2. **`parse_actions` is UNIMPLEMENTED on purpose.** No Zenith logs exist yet; the
+   `cob-mining` cron fills `$ZENITH_CORPUS`. Guessing BGA's event names yields a
+   parser that silently matches nothing, which presents as a rules bug. Dump the
+   real stream first with `log_inspect.py` in that worktree.
+
+Two things the build already surfaced:
+
+- **A move's identity is the WHOLE dict.** `choose` is polymorphic — it answers
+  whichever sub-decision is pending, in at least nine payload shapes (`card_id`,
+  `planet`, `planets`, `faction`, `tier`, `branch`, `accept`, `cost`+`amount`,
+  `bonus_area`+`slot`). A first cut keyed it on `planet` and the selftest caught
+  it inside one game: two pending choices both matched `planet: null`.
+- **The hard part will be SETUP, not moves.** `new_game` shuffles the deck, bonus
+  pool, agent deck, seating and (on `random`) the board sides; a real table had a
+  specific one of each, so a replay must force the setup rather than seed its way
+  there. On Rag Tag that was most of the harness bugs and every one looked like an
+  engine bug. Suspect the harness first.
+
 ## Client display contract
 
 `Orbit.jsx` renders; `engine.py` decides. These are the presentation rules that
