@@ -91,6 +91,12 @@ TASK_KIND = {
     "draw_bonus": "bonus", "take_board_bonus": "bonus", "reset_planet": "reset_planet",
     "discard_hand": "discard", "exile": "discard", "exile_tier": "discard",
     "optional_exile_each": "discard",
+    # Tech-only types, added for `bga_tech_audit`. Safe for the card audit by
+    # measurement, not by hope: none of the four appears anywhere in CARD_EFFECTS, so
+    # adding them cannot widen what a card is allowed to have produced. (`steal` needs
+    # no row -- it names its payout in `resource`, which the walk below already reads.)
+    "all_planets": "influence", "two_adjacent": "influence",
+    "exile_for_matching": "discard",
 }
 
 #: Kinds that turn up in a segment without the card causing them -- see the docstring.
@@ -121,6 +127,8 @@ def declared_kinds(tasks, out=None):
                 out.add(TASK_KIND[value])
             elif isinstance(value, dict) and TASK_KIND.get(value.get("resource")):
                 out.add(TASK_KIND[value["resource"]])
+        if task.get("type") == "exile_for_matching" or                 task.get("reward") == "matching_influence":
+            out.add("influence")
         for key in WRAPPERS:
             declared_kinds(task.get(key), out)
         # `choose_branch` keeps its alternatives under `branches`, each a {label, tasks}.

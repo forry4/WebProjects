@@ -124,10 +124,47 @@ data, none did**, and the opening influence held 85/85.
   no setup dump. Hardcoding the plausible reading would have produced a confident
   agreement between two things that were never compared.
 
-Both audits report zero, so **both were re-proved non-vacuous at that zero baseline**:
-seven perturbations (an influence amount, a named planet, a zenithium amount, the
-exile_tier ladder, a card's own planet, and two cards stripped of an effect) each drive
-the count off zero, and the pre-perturbation output is restored exactly afterwards.
+`tools/bga_tech_audit.py` is the fourth, and it covers the two systems the other three
+have to throw away — a segment containing a tech advance or a bonus token is *discarded*
+by the card audits, so until now neither `TECH_EFFECTS` nor `BONUS_EFFECTS` had been
+checked at all.
+
+- **The bonus tokens check themselves.** `gainBonus` carries `bonus_desc`, BGA's own
+  words for what the token does. All **8 tokens seen, 35 gains, every description
+  identical to ours** — no inference required.
+- **The tech ladder is an A/B, not a comparison.** Two things block a direct check: the
+  board is double-sided (`TECH_EFFECTS` is keyed `(faction, side, level)` and `setTech`
+  reports no side), and our engine resolves an advance *cumulatively and downward* —
+  reaching level 4 fires 4, 3, 2, 1 (`_develop_tasks`). Inferring the side and then
+  declaring agreement would be circular, so the two readings — ours and "only level L
+  fires" — are made to *compete* on the same evidence, where a side counts as possible
+  only if it explains every advance of that faction in that game, both players'.
+  Result: **our reading is contradicted nowhere and pins the side uniquely in 9 of 9
+  game-factions; the rival is impossible in 7 of 9.** One bit of freedom against up to
+  five levels of consequence is a real constraint.
+- **`influence` is ambient here too, and that cost a wrong answer first.** Counting it as
+  evidence made robot and animod impossible on *every* log, while a hand check of those
+  same logs matched the ladder step for step. The cause is the rule the magnitude audit
+  measured 85/85: a card entering a column advances that column's planet, and `mobilize`
+  puts cards into columns — so any ladder step that mobilizes drags influence behind it
+  whatever its own `influence_each` says. What still discriminates is mobilize, transfer,
+  discard, zenithium, credits and leader.
+- **Level 2 pays the faction's fixed token from `_develop_tasks`, not from
+  `TECH_EFFECTS`** — add it explicitly or the ladder gets blamed for a bonus it never
+  declared. It is also a genuine asymmetry between the readings: reaching level 5 pays it
+  under ours and not under the rival.
+- The four tech-only task types (`all_planets`, `two_adjacent`, `exile_for_matching`,
+  `steal`) were added to the shared `TASK_KIND`. Safe for the card audits **by
+  measurement, not by hope**: none appears anywhere in `CARD_EFFECTS`, so it cannot widen
+  what a card is allowed to have produced. All three older audits were re-run to confirm
+  their numbers did not move.
+
+Every audit reports zero, so **each was proved non-vacuous at that zero baseline**:
+eleven perturbations in all — an influence amount, a named planet, a zenithium amount,
+the exile_tier ladder, a card's own planet, two cards stripped of an effect, two tech
+levels given wrong effects, a bonus description altered, and the level-2 fixed token
+withheld — each drives its count off zero, and the pre-perturbation output is restored
+exactly afterwards.
 
 No pytest gates any of this: the corpus lives outside the repo, so a test would have to
 skip when it is absent, and `core/tests/test_no_conditional_skips.py` bans that. Same call
