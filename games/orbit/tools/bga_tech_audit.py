@@ -102,10 +102,24 @@ NOISE = frozenset({
 AMBIENT = frozenset({"influence", "gain_planet", "reset_planet"})
 
 
+def ambient_for(kinds):
+    """AMBIENT, plus what a capture drags in behind it.
+
+    A CAPTURED PLANET PAYS A BONUS TOKEN, and that token is the board's doing, not the
+    ladder's. Making the capture ambient without its payout is not a half-measure, it is
+    a false accusation: two game-factions came out IMPOSSIBLE the moment the corpus grew
+    to include a tech advance that filled a track, and in both the only unexplained kind
+    was the `bonus` the capture had just paid.
+    """
+    return AMBIENT | ({"bonus"} if "gain_planet" in kinds else set())
+
+
 def advances(path):
     """-> [(faction, level, player, [events])] for every tech advance in a log."""
     grouped = collections.defaultdict(list)
     for packet in json.load(open(path, encoding="utf-8")):
+        if packet.get("move_id") is None:
+            continue                  # `wakeupPlayers` in a live table: no game state
         for event in packet.get("data") or []:
             grouped[int(packet["move_id"])].append(event)
 
@@ -232,17 +246,17 @@ def main(argv=None):
         for faction, level, player, events in rows:
             by_faction[faction].append((level, player, events))
         for faction, entries in sorted(by_faction.items()):
+            seen = [(level, ) + observed_kinds(events) for level, _p, events in entries]
             fits = {}
             for cumulative in (True, False):
-                ok = []
-                for side in SIDES:
+                ok = [
+                    side for side in SIDES
                     if all(
-                        (observed_kinds(events)[0] - AMBIENT)
-                        <= explainable(faction, side, level,
-                                       observed_kinds(events)[1], cumulative)
-                        for level, _player, events in entries
-                    ):
-                        ok.append(side)
+                        (kinds - ambient_for(kinds))
+                        <= explainable(faction, side, level, tokens, cumulative)
+                        for level, kinds, tokens in seen
+                    )
+                ]
                 fits[cumulative] = ok
             detail.append((name, faction, len(entries), fits[True], fits[False]))
             totals["cumulative_unique"] += len(fits[True]) == 1

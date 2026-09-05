@@ -183,6 +183,11 @@ def segments(path):
     """
     by = collections.defaultdict(list)
     for packet in json.load(open(path, encoding="utf-8")):
+        if packet.get("move_id") is None:
+            # A LIVE table's history carries `wakeupPlayers` nudges with move_id null.
+            # They hold no game state, and a bare int() on them is what stopped these
+            # audits reading an in-progress game at all.
+            continue
         for event in packet.get("data") or []:
             by[int(packet["move_id"])].append(event)
 

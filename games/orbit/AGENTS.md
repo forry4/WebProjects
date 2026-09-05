@@ -72,25 +72,35 @@ the order that took Rag Tag's harness from 13/30 to full 40/40 parity.
 actually charged and produced, with no replay in between. Run it against a corpus of
 game-server logs (`$ZENITH_CORPUS`, filled by `zenith_live.py` on `cob-mining`).
 
-**The corpus grows on a daily cron, and how it grows is the constraint on every audit
-below.** `cob_daily.bat` runs three steps in a deliberate order — an unmetered manifest
-refresh, then the unmetered game-server harvest, then the metered replay downloader.
-The free harvest goes first so the ~10/day replay quota is never spent on a table the
-game server would have handed over for nothing. Two properties are worth knowing before
-planning any work that needs more logs:
+**The corpus comes from games that are STILL BEING PLAYED, and that is the single most
+important fact about it.** `cob_daily.bat` runs an unmetered live harvest and then the
+original metered downloader.
 
-- **The free path is opportunistic, not a yield.** A table is fetchable from the game
-  server only while its status is `finished`, and that is *not* a grace period it ages
-  out of: a 25-table sample found the 0–12h olds already `archive` and only the 12–24h
-  band open at all (3 of 5). Most games are never catchable there. Run it daily and take
-  what is open; do not plan around it.
+- **The live source is the lobby's own table list** —
+  `/tablemanager/tablemanager/tableinfos.html?status=active_now&games=2082`, the call the
+  site's `ly_metasite.js` makes. **One request returns every active table** (1110 for
+  Zenith, 1097 of them in progress), each with a `progression`, so *which* games are worth
+  fetching is decided without fetching any. `zenith_live.py --source active` takes the
+  most advanced first and re-fetches a held game only once it has moved on by 25 points.
+- **A partial log is fully auditable, and that is why this works.** These audits attribute
+  per *segment*; they never needed a finished game. The `gameover` requirement that used
+  to gate the harvester was guarding a *replay* concern we do not have. Verified directly:
+  a single in-progress table audited clean on every axis — 7 cards attributed, opening
+  influence 7/7, 4 tech advances, 3 bonus tokens.
+- **It removed the archive race, which was the real bottleneck.** The old path could only
+  see games that had already FINISHED, and a 25-table sample showed most archive within
+  hours — 0–12h olds already gone, only the 12–24h band open at all. That is why daily
+  runs kept returning zero. A game being played right now cannot age out from under us.
+  It is also *fewer* requests than what it replaced: 1 list + 30 fetches against ~80
+  enumeration calls plus a 200-table status scan.
 - **Every table counts, including the 88% running Secret Agents.** A pre-check that
   skipped them was built and then removed: it optimised for a constraint that was not
   real, and cost seven-eighths of the available games to avoid ten opaque segments per
   log. `scrape_target.table_filter` remains as an unused opt-in hook; reach for it only
   for a table that is genuinely unreadable, never one that is merely partly opaque.
-- **The corpus grows ~10 logs a day from the metered pass and cannot be hurried.** The
-  ~4600-table archive backlog, not the live window, is where coverage actually comes from.
+- **Live logs carry `wakeupPlayers` packets with `move_id: null`.** They hold no game
+  state, and a bare `int()` on them is what stopped all three readers from opening an
+  in-progress game at all. Skip them; do not assume a packet has a move id.
 
 Three findings worth keeping:
 
@@ -113,15 +123,16 @@ Three findings worth keeping:
   the 90 we implement or the boards they are played on. **The exclusion is now per
   SEGMENT** — only the segment in which a goodies card is *played* is opaque — and the
   corpus went 3 logs → 11 at zero quota cost, taking cleanly-attributable cards from 56
-  to 78 and segments from 85 to 328.
+  to 78 and segments from 85 to 328 (and on to 83 cards / 465 segments once the live
+  source below landed).
   Two checks back the reasoning rather than assuming it: the audits see **98 distinct
   card ids, 88 ours + exactly the 10 goodies and nothing else**, and splitting the corpus
   base-only vs expansion-only gives **identical clean results** for the 90 (0 findings on
   every axis either way; opening influence 243/243 within the expansion games alone).
 
 `tools/bga_effect_audit.py` is the companion that checks what a card DOES, not what it
-costs. Result on 11 logs: of 78 cards whose effects could be cleanly attributed,
-**all 78 produced nothing our data cannot account for**.
+costs. Result on 19 logs: **every one of the 90 cards has now been played**, 83 could be
+cleanly attributed, and **all 83 produced nothing our data cannot account for**.
 
 Four things make that number mean something, and each was a wrong answer first:
 
@@ -158,13 +169,13 @@ audit duly reported as unaccounted effects — the parser accusing the data of i
 
 `tools/bga_magnitude_audit.py` is the third and sharpest: not what kind of effect, but
 **how much, and onto which planet**. It reuses the effect audit's segmenter, so only the
-comparison is new. On 11 logs: **460 grants that could have contradicted our data, none
-did**, and the opening influence held 328/328.
+comparison is new. On 19 logs: **649 grants that could have contradicted our data, none
+did**, and the opening influence held 465/465.
 
 - **It measures what the kinds audit ASSUMED.** That audit treats `influence` as ambient
   because "every card advances its own planet when played" — a load-bearing assumption
   carried on nothing. Here it is checked: the first `movePlanet` of a segment is the
-  played card's own planet at +1, in 328 of 328 segments.
+  played card's own planet at +1, in 465 of 465 segments.
 - **What a card can grant is a SET, not a number**, because half the deck's payouts are
   computed: `exile_tier` pays 2/4/7, `card_cost` pays the cost of some card, `per_nonempty`
   pays per track (and BGA emits one event per track where our engine adds the lump sum —
@@ -197,16 +208,23 @@ checked at all.
   declaring agreement would be circular, so the two readings — ours and "only level L
   fires" — are made to *compete* on the same evidence, where a side counts as possible
   only if it explains every advance of that faction in that game, both players'.
-  Result: **our reading is contradicted nowhere and pins the side uniquely in 31 of 31
-  game-factions; the rival is impossible in 27 of 31.** One bit of freedom against up to
+  Result: **our reading is contradicted nowhere and pins the side uniquely in 50 of 52
+  game-factions; the rival is impossible in 37 of 52.** One bit of freedom against up to
   five levels of consequence is a real constraint.
 - **`influence` is ambient here too, and that cost a wrong answer first.** Counting it as
   evidence made robot and animod impossible on *every* log, while a hand check of those
   same logs matched the ladder step for step. The cause is the rule the magnitude audit
-  measured 328/328: a card entering a column advances that column's planet, and `mobilize`
+  measured 465/465: a card entering a column advances that column's planet, and `mobilize`
   puts cards into columns — so any ladder step that mobilizes drags influence behind it
   whatever its own `influence_each` says. What still discriminates is mobilize, transfer,
   discard, zenithium, credits and leader.
+- **A CAPTURED PLANET PAYS A BONUS TOKEN, and that is the board's doing, not the
+  ladder's.** Making the capture ambient without its payout is not a half-measure but a
+  false accusation: two game-factions went IMPOSSIBLE the moment the corpus grew to
+  include a tech advance that filled a track, and in both the only unexplained kind was
+  the `bonus` the capture had just paid. `ambient_for()` adds it only when `gain_planet`
+  is present — and a control confirms the conditional is conservative, since making
+  `bonus` ambient unconditionally leaves the rival reading dead in the same 37 cases.
 - **Level 2 pays the faction's fixed token from `_develop_tasks`, not from
   `TECH_EFFECTS`** — add it explicitly or the ladder gets blamed for a bonus it never
   declared. It is also a genuine asymmetry between the readings: reaching level 5 pays it

@@ -56,6 +56,8 @@ def moves_of(path):
     """A log grouped by move_id, which is how BGA brackets a play with its effects."""
     grouped = collections.defaultdict(list)
     for packet in json.load(open(path, encoding="utf-8")):
+        if packet.get("move_id") is None:
+            continue                  # `wakeupPlayers` in a live table: no game state
         for event in packet.get("data") or []:
             grouped[int(packet["move_id"])].append(event)
     return grouped
