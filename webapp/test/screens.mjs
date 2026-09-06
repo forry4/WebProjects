@@ -5531,8 +5531,10 @@ try {
 		check("the five-planet and three-track boards render", board
 			&& await page.locator(".or-track").count() === 5
 			&& await page.locator(".or-tech-col").count() === 3);
-		check("the influence board has no opponent/you axis copy",
-			(await page.locator(".or-influence-head").textContent()).trim() === "Planet control");
+		const influenceCopy = await page.locator(".or-influence").textContent();
+		check("the influence board omits the redundant planet control heading",
+			!influenceCopy.includes("Planet control") && await page.locator(".or-influence-head").count() === 0,
+			influenceCopy.slice(0, 120));
 
 		// WHOSE IS IT. Both rails carry a Leader chip (including the "No badge"
 		// state — it used to render only under its owner, so no badge and no chip
@@ -5579,6 +5581,13 @@ try {
 			JSON.stringify(ladder.levels));
 		check("...and every space on them is exactly the same height",
 			ladder.heights.length === 1, JSON.stringify(ladder.heights));
+		const techText = await page.evaluate(() => [...document.querySelectorAll(".or-tech-text")].map((el) => {
+			const style = getComputedStyle(el);
+			return { lines: style.webkitLineClamp, align: style.alignSelf };
+		}));
+		check("technology descriptions use the full three-line space",
+			techText.length === 15 && techText.every(({ lines, align }) => lines === "3" && align === "start"),
+			JSON.stringify(techText));
 		await page.locator(".or-tech-token").first().click({ timeout: 10_000 }).catch(() => {});
 		const tokenInfo = await page.evaluate(() => {
 			const panel = document.querySelector(".or-info");
@@ -5605,6 +5614,9 @@ try {
 			&& actionCopy.some((text) => text.includes("Credits"))
 			&& actionCopy.some((text) => text.includes("Zenithium"))
 			&& actionCopy.some((text) => text.includes("Leader")),
+			JSON.stringify(actionCopy));
+		check("the Become Leader use names its faction bonus",
+			actionCopy.some((text) => /Become Leader · \w+ \(gain 1 Zenithium\)|Become Leader · \w+ \(gain 3 Credits\)|Become Leader · \w+ \(mobilize 2\)/.test(text)),
 			JSON.stringify(actionCopy));
 		// STEERED to Recruit, and asserted below rather than sampled: the deal is
 		// seeded, so "some games recruit" would be "this game never recruits" for
@@ -5781,9 +5793,11 @@ try {
 			planet: [...el.classList].find((name) => ["or-mercury", "or-venus", "or-terra", "or-mars", "or-jupiter"].includes(name)),
 			color: getComputedStyle(el).color,
 			outline: getComputedStyle(el).outlineColor,
+			border: getComputedStyle(el).borderTopColor,
 		}));
 		check("a selected card is highlighted in its planet color",
-			!!selectedStyle.planet && selectedStyle.color === selectedStyle.outline, JSON.stringify(selectedStyle));
+			!!selectedStyle.planet && selectedStyle.color === selectedStyle.outline
+			&& selectedStyle.color === selectedStyle.border, JSON.stringify(selectedStyle));
 		for (const selector of [".or-hand-zone .or-agent", ".or-influence button.or-bonus", ".or-tech-token", ".or-tech-space", ".or-slot.stacked"]) {
 			await page.locator(selector).first().click({ button: "right" });
 			check(`right-click opens details for ${selector}`, await page.locator(".or-info").isVisible());

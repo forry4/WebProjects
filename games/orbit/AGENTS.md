@@ -339,6 +339,10 @@ were each a real misread on the table, so they are worth not undoing:
   value, which is how `.or-agent` painted a cream border over its planet colour
   and `.or-column-head`'s badge painted itself on its own text. Factions keep their three glyphs — a faction has no
   colour, and the alphabet is small.
+- **The influence panel starts with the tracks.** The redundant "Planet control"
+  heading is omitted so the five tracks have the available height; a selected
+  hand card keeps its planet tint for the border, outline and shadow even while
+  it is focused or hovered.
 - **Two seat colours, resolved once.** `--or-me` (the game accent) and
   `--or-them`; every seat-owned panel sets `--or-seat` from them and paints its
   stripe, dot and active glow from that. The technology board NAMES both seats
@@ -348,7 +352,8 @@ were each a real misread on the table, so they are worth not undoing:
   possessive, is what made a player read their own recruit into the opponent's
   board.
 - **Technology is five compact, equal rungs.** The level has one narrow rail and
-  the effect is one normally aligned block; never indent only its first line.
+  the effect is one top-aligned block with room for three lines; never indent
+  only its first line.
   Player tokens live on that rail at the level they are AT, while level 0 is
   simply no token. All fifteen spaces have one fixed height and readable copy;
   the modal carries whatever a long effect cannot show. The level-2 bonus is a
@@ -361,6 +366,8 @@ were each a real misread on the table, so they are worth not undoing:
   identical, and the badge is what sets the hand limit printed over the hand.
   The two sides are **Silver** and **Gold**, as the imported BGA card text names
   them ("place it on the Silver side … flip it to the Gold side").
+  The hand's Become Leader action names the faction's extra effect beside it:
+  Robot gains 1 Zenithium, Human gains 3 Credits, and Animod mobilizes 2.
 - **The player rail is the turn/status rail too.** Context such as "Choose an
   Agent" or "Resolve effect" sits beside the player's name, never in a second
   heading over the hand. Captures are literal miniature planet-coloured discs

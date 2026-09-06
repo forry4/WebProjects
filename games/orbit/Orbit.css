@@ -254,8 +254,6 @@
 
 /* ── Influence board ─────────────────────────────────────────────────────── */
 .or-influence { padding: .62rem .8rem .68rem; }
-.or-influence-head { display: grid; grid-template-columns: 1fr; align-items: center; gap: .7rem; min-height: 1.8rem; padding-bottom: .25rem; }
-.or-influence-head h2 { margin: 0; color: var(--or-ink); font-size: 1rem; }
 .or-track { display: grid; grid-template-columns: 7rem minmax(240px, 1fr) 2rem; gap: .7rem; align-items: center; min-height: 40px; padding: .18rem 0; border-top: 1px solid rgba(255,255,255,.065); }
 .or-track-name { min-width: 0; font-size: .84rem; }
 .or-track-name .or-pl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -349,7 +347,7 @@
 }
 .or-tech-rail { align-self: stretch; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .16rem; padding-right: .2rem; border-right: 1px solid rgba(255,255,255,.08); }
 .or-tech-lv { color: var(--lby-accent); font-size: .7rem; font-weight: 950; line-height: 1; letter-spacing: .02em; }
-.or-tech-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: #cbd0e1; font-size: .66rem; line-height: 1.18; }
+.or-tech-text { align-self: start; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; color: #cbd0e1; font-size: .66rem; line-height: 1.14; }
 .or-tech-seats { display: flex; gap: .14rem; }
 .or-tech-seats i { width: .5rem; height: .5rem; border-radius: 50%; box-shadow: 0 0 0 1px #0007; }
 .or-tech-seats i.mine { background: var(--or-me); }
@@ -439,7 +437,21 @@
 .or-agent { display: flex; flex-direction: column; width: 145px; min-width: 145px; height: 184px; padding: .48rem; overflow: hidden; border: 2px solid currentColor; border-radius: 11px; background: linear-gradient(160deg, rgba(255,255,255,.13), rgba(13,15,31,.98) 36%); text-align: left; box-shadow: 0 7px 17px #0005; cursor: pointer; transition: transform .14s, box-shadow .14s; }
 .or-agent:hover { box-shadow: 0 9px 22px #0009, 0 0 0 1px var(--or-line); }
 .or-agent.playable:hover { transform: translateY(-5px); box-shadow: 0 10px 24px #0009, 0 0 0 2px var(--lby-accent); }
-.or-agent.selected { transform: translateY(-5px); outline: 3px solid currentColor; outline-offset: 2px; box-shadow: 0 10px 24px #0009, 0 0 0 3px currentColor, 0 0 0 5px color-mix(in srgb, currentColor 34%, transparent); }
+.or-agent.or-mercury { --or-card-tint: #a783cf; }
+.or-agent.or-venus { --or-card-tint: #f1a41b; }
+.or-agent.or-terra { --or-card-tint: #3aa9e4; }
+.or-agent.or-mars { --or-card-tint: #e0574a; }
+.or-agent.or-jupiter { --or-card-tint: #70b59a; }
+.or-agent.selected,
+.or-agent.selected:hover,
+.or-agent.selected:focus,
+.or-agent.selected:focus-visible {
+  transform: translateY(-5px);
+  border-color: var(--or-card-tint, currentColor);
+  outline: 3px solid var(--or-card-tint, currentColor);
+  outline-offset: 2px;
+  box-shadow: 0 10px 24px #0009, 0 0 0 3px var(--or-card-tint, currentColor), 0 0 0 5px color-mix(in srgb, var(--or-card-tint, currentColor) 34%, transparent);
+}
 .or-agent:disabled { cursor: default; }
 /* A card you cannot play is still a card you can read, so it stays enabled and
    only loses the lifted "this click plays it" affordance. */
@@ -628,8 +640,6 @@
   .or-capture-disc { width: .62rem; height: .62rem; }
   .or-board-main { gap: 8px; }
   .or-influence { padding: .55rem .6rem .7rem; }
-  .or-influence-head { display: flex; justify-content: space-between; gap: .6rem; padding: 0 0 .38rem; }
-  .or-influence-head h2 { font-size: .9rem; }
   /* The planet name stays above its vertical track; the fixed-size bonus gets
      its own narrow column beside the track midpoint. No absolute positioning
      and no shared cell means the token cannot overlap a disc, even at 320px. */
@@ -664,13 +674,11 @@
   .or-score-rail .or-player + .or-player { border-left: 1px solid var(--or-line); border-top: 1px solid var(--or-line); }
   .or-score-rail .or-player.active { border-left-color: var(--or-seat); }
 
-  .or-influence-head { align-items: center; }
   .or-influence { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); column-gap: .18rem; }
-  .or-influence-head { grid-column: 1 / -1; }
   .or-influence .or-track {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 1.5rem;
-    grid-template-rows: auto minmax(0, 9rem);
+    grid-template-rows: auto minmax(0, 10rem);
     gap: .28rem;
     min-width: 0;
     min-height: 0;
@@ -687,7 +695,7 @@
     grid-template-columns: 1fr;
     grid-template-rows: repeat(9, 1fr);
     width: 100%;
-    height: 9rem;
+    height: 10rem;
     padding: 0;
   }
   .or-influence .or-track-spaces::before {

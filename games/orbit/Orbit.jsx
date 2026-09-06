@@ -24,6 +24,11 @@ const styles = baseCss + lobbyCss + gameMenuCss + createModalCss
 
 const PLANETS = ["mercury", "venus", "terra", "mars", "jupiter"];
 const FACTIONS = ["robot", "human", "animod"];
+const LEADER_EFFECT = {
+  robot: "gain 1 Zenithium",
+  human: "gain 3 Credits",
+  animod: "mobilize 2",
+};
 /* PLANETS CARRY NO SYMBOL. The five planets used to each print a glyph (☿ ♀ ⊕
    ♂ ♃) beside their name on the card, the column head, the influence row and
    every capture chip — four places to learn an alphabet that the colour already
@@ -283,9 +288,6 @@ function InfluenceBoard({ game, myId, catalog, onInfo }) {
   const mineIsPositive = game.order?.[0] === myId;
   const spaces = [-4, -3, -2, -1, 0, 1, 2, 3, 4];
   return <section className="or-influence" aria-label="Planet influence board">
-    <header className="or-influence-head">
-      <h2>Planet control</h2>
-    </header>
     {PLANETS.map((planet) => {
       const raw = game.influence?.[planet];
       const position = raw == null ? null : (mineIsPositive ? raw : -raw);
@@ -973,7 +975,8 @@ export default function Orbit({ myId, authUser, onExit }) {
                   ? `Recruit · ${recruitCost} Credits`
                   : action === "technology"
                     ? `Develop ${selectedAgent?.faction || "Technology"} · ${technologyCost} Zenithium`
-                    : `Become Leader · ${selectedAgent?.faction || "Faction"}`;
+                    : `Become Leader · ${selectedAgent?.faction || "Faction"}${selectedAgent?.faction
+                      ? ` (${LEADER_EFFECT[selectedAgent.faction]})` : ""}`;
                 return <button type="button" key={action} disabled={!move} onClick={() => move && sendMove(move)}>{label}</button>;
               })}</div>
             </div>}
