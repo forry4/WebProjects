@@ -285,7 +285,6 @@ function InfluenceBoard({ game, myId, catalog, onInfo }) {
   return <section className="or-influence" aria-label="Planet influence board">
     <header className="or-influence-head">
       <h2>Planet control</h2>
-      <span><b>Opponent</b><i aria-hidden="true">↔</i><b>You</b></span>
     </header>
     {PLANETS.map((planet) => {
       const raw = game.influence?.[planet];

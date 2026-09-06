@@ -5531,6 +5531,8 @@ try {
 		check("the five-planet and three-track boards render", board
 			&& await page.locator(".or-track").count() === 5
 			&& await page.locator(".or-tech-col").count() === 3);
+		check("the influence board has no opponent/you axis copy",
+			(await page.locator(".or-influence-head").textContent()).trim() === "Planet control");
 
 		// WHOSE IS IT. Both rails carry a Leader chip (including the "No badge"
 		// state — it used to render only under its owner, so no badge and no chip
@@ -5932,7 +5934,14 @@ try {
 					const b = row.querySelector(".or-track-spaces").getBoundingClientRect();
 					return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
 				}).length;
-			return { scrollers, cells: cells.length, panels, offscreen, bonuses, tokenOverlaps };
+			const bonusRight = [...document.querySelectorAll(".or-influence .or-track")].every((row) => {
+				const bonus = row.querySelector(".or-bonus").getBoundingClientRect();
+				const track = row.querySelector(".or-track-spaces").getBoundingClientRect();
+				return bonus.left >= track.right - 1
+					&& bonus.top + bonus.height / 2 >= track.top
+					&& bonus.top + bonus.height / 2 <= track.bottom;
+			});
+			return { scrollers, cells: cells.length, panels, offscreen, bonuses, tokenOverlaps, bonusRight };
 		});
 		check("no board on a phone hides content behind a sideways scroll",
 			inner.scrollers.length === 0, JSON.stringify(inner.scrollers));
@@ -5942,7 +5951,7 @@ try {
 			inner.panels === 0, JSON.stringify(inner));
 		check("bonus tokens are uniformly compact and clear of every planet track",
 			inner.bonuses.every(({ w, h }) => Math.abs(w - h) <= 1 && w <= 30)
-			&& inner.tokenOverlaps === 0, JSON.stringify(inner));
+			&& inner.tokenOverlaps === 0 && inner.bonusRight, JSON.stringify(inner));
 
 		// PHONE HIERARCHY. Technology starts as three tiny progress summaries,
 		// expands back to all fifteen real spaces, and the Log comes after the

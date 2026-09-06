@@ -254,10 +254,8 @@
 
 /* ── Influence board ─────────────────────────────────────────────────────── */
 .or-influence { padding: .62rem .8rem .68rem; }
-.or-influence-head { display: grid; grid-template-columns: 7rem minmax(0, 1fr) 2rem; align-items: center; gap: .7rem; min-height: 1.8rem; padding-bottom: .25rem; }
+.or-influence-head { display: grid; grid-template-columns: 1fr; align-items: center; gap: .7rem; min-height: 1.8rem; padding-bottom: .25rem; }
 .or-influence-head h2 { margin: 0; color: var(--or-ink); font-size: 1rem; }
-.or-influence-head span { grid-column: 2; display: flex; justify-content: space-between; align-items: center; color: #7f88a6; font-size: .6rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
-.or-influence-head span i { color: #626c8d; font-size: .7rem; font-style: normal; }
 .or-track { display: grid; grid-template-columns: 7rem minmax(240px, 1fr) 2rem; gap: .7rem; align-items: center; min-height: 40px; padding: .18rem 0; border-top: 1px solid rgba(255,255,255,.065); }
 .or-track-name { min-width: 0; font-size: .84rem; }
 .or-track-name .or-pl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -585,7 +583,6 @@
   .or-hand-zone { order: 6; }
   .or-board-main, .or-sideboards, .or-hand-zone, .or-decision, .or-status, .or-result, .or-mulligan { grid-column: 1; }
   .or-track { grid-template-columns: 6.5rem minmax(180px, 1fr) 2rem; }
-  .or-influence-head { grid-template-columns: 6.5rem minmax(0, 1fr) 2rem; }
 }
 
 @media (max-width: 760px) {
@@ -633,10 +630,9 @@
   .or-influence { padding: .55rem .6rem .7rem; }
   .or-influence-head { display: flex; justify-content: space-between; gap: .6rem; padding: 0 0 .38rem; }
   .or-influence-head h2 { font-size: .9rem; }
-  .or-influence-head span { width: 52%; font-size: .53rem; }
-  /* The name and the fixed-size bonus own a real header row; the track owns the
-     next row. No absolute positioning and no shared cell means the token cannot
-     overlap a disc, even at 320px. */
+  /* The planet name stays above its vertical track; the fixed-size bonus gets
+     its own narrow column beside the track midpoint. No absolute positioning
+     and no shared cell means the token cannot overlap a disc, even at 320px. */
   .or-influence .or-track { grid-template-columns: minmax(0, 1fr) 1.85rem; grid-template-rows: 1.85rem 1.45rem; gap: .34rem .45rem; min-height: 0; padding: .45rem 0 .38rem; }
   .or-influence .or-track-name { grid-column: 1; grid-row: 1; align-self: center; font-size: .72rem; }
   .or-influence .or-track > .or-bonus { grid-column: 2; grid-row: 1; }
@@ -669,15 +665,12 @@
   .or-score-rail .or-player.active { border-left-color: var(--or-seat); }
 
   .or-influence-head { align-items: center; }
-  .or-influence-head span { width: auto; flex-direction: column; align-items: flex-end; gap: 0; line-height: 1.05; }
-  .or-influence-head span i { font-size: 0; line-height: .7; }
-  .or-influence-head span i::after { content: "↕"; color: #626c8d; font-size: .72rem; }
   .or-influence { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); column-gap: .18rem; }
   .or-influence-head { grid-column: 1 / -1; }
   .or-influence .or-track {
     display: grid;
-    grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(0, 9rem) auto;
+    grid-template-columns: minmax(0, 1fr) 1.5rem;
+    grid-template-rows: auto minmax(0, 9rem);
     gap: .28rem;
     min-width: 0;
     min-height: 0;
@@ -711,7 +704,7 @@
   .or-influence .or-space::before { left: 50%; top: 50%; transform: translate(-50%, -50%); }
   .or-influence .or-space.goal::before { top: 50%; }
   .or-influence .or-disc { left: 50%; top: 50%; transform: translate(-50%, -50%); }
-  .or-influence .or-track > .or-bonus { grid-column: 1; grid-row: 3; justify-self: center; width: 1.5rem; height: 1.5rem; }
+  .or-influence .or-track > .or-bonus { grid-column: 2; grid-row: 2; align-self: center; justify-self: center; width: 1.5rem; height: 1.5rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

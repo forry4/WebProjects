@@ -376,8 +376,9 @@ were each a real misread on the table, so they are worth not undoing:
   moves". The page selects no text (`user-select: none`, inputs exempt), because
   the hold gesture and the OS callout fight over the same press.
 - **Every bonus is a fixed-size physical token.** Rules text never determines a
-  token's width; pressing it opens the effect. Planet rows give the name/token
-  pair and the disc track separate grid rows on mobile, so they cannot overlap.
+  token's width; pressing it opens the effect. On phones each planet's track is
+  vertical and its token sits to the right of the track midpoint, so it cannot
+  overlap a disc.
   A technology bonus sits on its LEVEL-2 space, which is the space that pays it,
   not above the whole column.
 - **Placed Agents are one mini-card stack, not two controls.** The top Agent is
