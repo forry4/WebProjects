@@ -294,7 +294,7 @@ function InfluenceBoard({ game, myId, catalog, onInfo }) {
       return <div className={`or-track or-${planet}`} key={planet}>
         <div className="or-track-name"><PlanetName planet={planet} /></div>
         <div className="or-track-spaces">
-          {spaces.map((space) => <span className={`or-space${Math.abs(space) === 4 ? " goal" : ""}`} key={space}>
+          {spaces.map((space) => <span className={`or-space${Math.abs(space) === 4 ? " goal" : ""}${space === 0 ? " middle" : ""}`} key={space}>
             {position === space && <i className="or-disc" />}
           </span>)}
         </div>

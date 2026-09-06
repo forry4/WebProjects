@@ -5835,12 +5835,19 @@ try {
 				});
 				const occupied = document.querySelector(".or-tech-space.mine.theirs");
 				const vacant = document.querySelector(".or-tech-space:not(.mine):not(.theirs)");
+				const middle = [...document.querySelectorAll(".or-space.middle")]
+					.map((el) => getComputedStyle(el, "::before"))
+					.map((style) => ({ width: parseFloat(style.width), height: parseFloat(style.height) }));
+				const regular = [...document.querySelectorAll(".or-space:not(.middle):not(.goal)")]
+					.map((el) => getComputedStyle(el, "::before"))
+					.map((style) => ({ width: parseFloat(style.width), height: parseFloat(style.height) }));
 				return { goalsExtend, dots: occupied.querySelectorAll(".or-tech-seats i").length,
 					noGlow: getComputedStyle(occupied).boxShadow === "none"
-						&& getComputedStyle(occupied).borderColor === getComputedStyle(vacant).borderColor };
+						&& getComputedStyle(occupied).borderColor === getComputedStyle(vacant).borderColor,
+					middle: middle.length === 5 && middle.every(({ width, height }) => width > regular[0].width && height > regular[0].height) };
 			});
 			check(`${label}: track lines stop at both goal spots and technology uses dots without side lighting`,
-				trackStyle.goalsExtend && trackStyle.dots === 2 && trackStyle.noGlow, JSON.stringify(trackStyle));
+				trackStyle.goalsExtend && trackStyle.dots === 2 && trackStyle.noGlow && trackStyle.middle, JSON.stringify(trackStyle));
 		};
 		await checkTrackPresentation("Desktop");
 		// The desktop targets are product sizes, not incidental screenshots.
@@ -5942,20 +5949,24 @@ try {
 				const r = el.getBoundingClientRect();
 				return { w: Math.round(r.width), h: Math.round(r.height) };
 			});
-			const tokenOverlaps = [...document.querySelectorAll(".or-influence .or-track")]
-				.filter((row) => {
-					const a = row.querySelector(".or-bonus").getBoundingClientRect();
-					const b = row.querySelector(".or-track-spaces").getBoundingClientRect();
-					return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
-				}).length;
 			const bonusRight = [...document.querySelectorAll(".or-influence .or-track")].every((row) => {
 				const bonus = row.querySelector(".or-bonus").getBoundingClientRect();
 				const track = row.querySelector(".or-track-spaces").getBoundingClientRect();
-				return bonus.left >= track.right - 1
+				const center = track.left + track.width / 2;
+				return bonus.left >= center - 1
+					&& bonus.right <= track.right + 1
 					&& bonus.top + bonus.height / 2 >= track.top
 					&& bonus.top + bonus.height / 2 <= track.bottom;
 			});
-			return { scrollers, cells: cells.length, panels, offscreen, bonuses, tokenOverlaps, bonusRight };
+			const trackCentered = [...document.querySelectorAll(".or-influence .or-track")].every((row) => {
+				const cell = row.getBoundingClientRect();
+				const track = row.querySelector(".or-track-spaces").getBoundingClientRect();
+				const name = row.querySelector(".or-track-name").getBoundingClientRect();
+				const center = cell.left + cell.width / 2;
+				return Math.abs(track.left + track.width / 2 - center) <= 1
+					&& Math.abs(name.left + name.width / 2 - center) <= 1;
+			});
+			return { scrollers, cells: cells.length, panels, offscreen, bonuses, bonusRight, trackCentered };
 		});
 		check("no board on a phone hides content behind a sideways scroll",
 			inner.scrollers.length === 0, JSON.stringify(inner.scrollers));
@@ -5965,7 +5976,7 @@ try {
 			inner.panels === 0, JSON.stringify(inner));
 		check("bonus tokens are uniformly compact and clear of every planet track",
 			inner.bonuses.every(({ w, h }) => Math.abs(w - h) <= 1 && w <= 30)
-			&& inner.tokenOverlaps === 0 && inner.bonusRight, JSON.stringify(inner));
+			&& inner.bonusRight && inner.trackCentered, JSON.stringify(inner));
 
 		// PHONE HIERARCHY. Technology starts as three tiny progress summaries,
 		// expands back to all fifteen real spaces, and the Log comes after the

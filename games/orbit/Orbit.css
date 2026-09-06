@@ -264,6 +264,7 @@
 .or-track-spaces::before { content: ""; position: absolute; left: calc(100% / 18); right: calc(100% / 18); top: 0; border-top: 3px solid currentColor; }
 .or-space::before { content: ""; position: absolute; left: 50%; top: -7px; width: 10px; height: 10px; transform: translateX(-50%); border: 2px solid currentColor; border-radius: 50%; background: #111429; }
 .or-space.goal::before { width: 16px; height: 16px; top: -10px; border-width: 3px; }
+.or-space.middle::before { width: 14px; height: 14px; top: -9px; border-width: 3px; }
 .or-disc { position: absolute; z-index: 2; left: 50%; top: -12px; width: 21px; height: 21px; transform: translateX(-50%); border: 3px solid #f6f1df; border-radius: 50%; background: currentColor; box-shadow: 0 2px 8px #000; }
 
 /* A planet's name IS its identity — the colour and the word, with no glyph to
@@ -677,7 +678,7 @@
   .or-influence { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); column-gap: .18rem; }
   .or-influence .or-track {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 1.5rem;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 10rem);
     gap: .28rem;
     min-width: 0;
@@ -712,7 +713,7 @@
   .or-influence .or-space::before { left: 50%; top: 50%; transform: translate(-50%, -50%); }
   .or-influence .or-space.goal::before { top: 50%; }
   .or-influence .or-disc { left: 50%; top: 50%; transform: translate(-50%, -50%); }
-  .or-influence .or-track > .or-bonus { grid-column: 2; grid-row: 2; align-self: center; justify-self: center; width: 1.5rem; height: 1.5rem; }
+  .or-influence .or-track > .or-bonus { grid-column: 1; grid-row: 2; align-self: center; justify-self: end; width: 1.5rem; height: 1.5rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
