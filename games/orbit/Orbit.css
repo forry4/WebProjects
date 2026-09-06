@@ -676,14 +676,16 @@
   .or-score-rail .or-player.active { border-left-color: var(--or-seat); }
 
   .or-influence { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); column-gap: .18rem; }
+  .or-influence { grid-template-rows: minmax(0, 1fr); align-items: stretch; height: 212px; box-sizing: border-box; }
   .or-influence .or-track {
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 10rem);
-    gap: .28rem;
+    grid-template-columns: minmax(0, 1fr) 1.5rem;
+    grid-template-rows: .95rem minmax(0, 1fr);
+    gap: .12rem .28rem;
     min-width: 0;
     min-height: 0;
-    padding: .35rem .08rem .45rem;
+    align-self: stretch;
+    padding: .12rem .08rem .16rem;
     border-top: 0;
     border-left: 1px solid rgba(255,255,255,.065);
   }
@@ -696,7 +698,9 @@
     grid-template-columns: 1fr;
     grid-template-rows: repeat(9, 1fr);
     width: 100%;
-    height: 10rem;
+    height: auto;
+    min-height: 0;
+    align-self: stretch;
     padding: 0;
   }
   .or-influence .or-track-spaces::before {
@@ -706,6 +710,7 @@
     bottom: calc(100% / 18);
     width: 0;
     height: auto;
+    transform: translateX(-50%);
     border-top: 0;
     border-left: 3px solid currentColor;
   }
@@ -713,7 +718,7 @@
   .or-influence .or-space::before { left: 50%; top: 50%; transform: translate(-50%, -50%); }
   .or-influence .or-space.goal::before { top: 50%; }
   .or-influence .or-disc { left: 50%; top: 50%; transform: translate(-50%, -50%); }
-  .or-influence .or-track > .or-bonus { grid-column: 1; grid-row: 2; align-self: center; justify-self: end; width: 1.5rem; height: 1.5rem; }
+  .or-influence .or-track > .or-bonus { grid-column: 2; grid-row: 2; align-self: center; justify-self: center; width: 1.5rem; height: 1.5rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

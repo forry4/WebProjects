@@ -5949,24 +5949,29 @@ try {
 				const r = el.getBoundingClientRect();
 				return { w: Math.round(r.width), h: Math.round(r.height) };
 			});
+			const tokenOverlaps = [...document.querySelectorAll(".or-influence .or-track")]
+				.filter((row) => {
+					const a = row.querySelector(".or-bonus").getBoundingClientRect();
+					const b = row.querySelector(".or-track-spaces").getBoundingClientRect();
+					return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+				}).length;
 			const bonusRight = [...document.querySelectorAll(".or-influence .or-track")].every((row) => {
 				const bonus = row.querySelector(".or-bonus").getBoundingClientRect();
 				const track = row.querySelector(".or-track-spaces").getBoundingClientRect();
-				const center = track.left + track.width / 2;
-				return bonus.left >= center - 1
-					&& bonus.right <= track.right + 1
+				return bonus.left >= track.right - 1
 					&& bonus.top + bonus.height / 2 >= track.top
 					&& bonus.top + bonus.height / 2 <= track.bottom;
 			});
 			const trackCentered = [...document.querySelectorAll(".or-influence .or-track")].every((row) => {
-				const cell = row.getBoundingClientRect();
 				const track = row.querySelector(".or-track-spaces").getBoundingClientRect();
 				const name = row.querySelector(".or-track-name").getBoundingClientRect();
-				const center = cell.left + cell.width / 2;
-				return Math.abs(track.left + track.width / 2 - center) <= 1
-					&& Math.abs(name.left + name.width / 2 - center) <= 1;
+				return Math.abs(track.left + track.width / 2 - (name.left + name.width / 2)) <= 1;
 			});
-			return { scrollers, cells: cells.length, panels, offscreen, bonuses, bonusRight, trackCentered };
+			const influence = document.querySelector(".or-influence").getBoundingClientRect();
+			const trackHeights = [...document.querySelectorAll(".or-influence .or-track-spaces")]
+				.map((el) => Math.round(el.getBoundingClientRect().height));
+			return { scrollers, cells: cells.length, panels, offscreen, bonuses, tokenOverlaps, bonusRight,
+				trackCentered, trackHeights, influenceHeight: Math.round(influence.height) };
 		});
 		check("no board on a phone hides content behind a sideways scroll",
 			inner.scrollers.length === 0, JSON.stringify(inner.scrollers));
@@ -5976,7 +5981,10 @@ try {
 			inner.panels === 0, JSON.stringify(inner));
 		check("bonus tokens are uniformly compact and clear of every planet track",
 			inner.bonuses.every(({ w, h }) => Math.abs(w - h) <= 1 && w <= 30)
-			&& inner.bonusRight && inner.trackCentered, JSON.stringify(inner));
+			&& inner.tokenOverlaps === 0 && inner.bonusRight && inner.trackCentered, JSON.stringify(inner));
+		check("phone influence rails use the panel height without growing the panel",
+			inner.trackHeights.length === 5 && Math.min(...inner.trackHeights) > 160 && inner.influenceHeight <= 212,
+			JSON.stringify(inner));
 
 		// PHONE HIERARCHY. Technology starts as three tiny progress summaries,
 		// expands back to all fifteen real spaces, and the Log comes after the
