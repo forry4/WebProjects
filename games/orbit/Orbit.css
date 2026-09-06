@@ -231,10 +231,9 @@
 .or-resources { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .75rem; margin-top: .18rem; color: var(--or-dim); font-size: .7rem; }
 .or-resources b { color: var(--or-ink); font-size: .88rem; }
 .or-resource-cards { display: inline-flex; align-items: center; gap: .24rem; }
-/* The count, on both rails and over the hand. The LIMIT joins it only when it is
-   not the count -- a turn ends by drawing back up to it, so `6 / 6` would be
-   permanent. Over the limit is LEGAL (a hand is never discarded down), so that
-   state is labelled rather than painted as an error. */
+/* The count, on both rails and over the hand. Keeping the limit beside the
+   count makes the two player boxes comparable at a glance. Over the limit is
+   LEGAL (a hand is never discarded down), so that state is still tinted. */
 .or-hand-count { display: inline-flex; align-items: baseline; gap: .22rem; white-space: nowrap; }
 .or-hand-count.over { color: #ecd9a4; }
 .or-hand-count em { font-size: .82em; font-style: normal; letter-spacing: .04em; opacity: .85; }
@@ -264,8 +263,9 @@
 .or-track-name .or-pl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .or-track-spaces { display: grid; grid-template-columns: repeat(9, 1fr); align-items: center; }
 .or-space { position: relative; height: 20px; border-top: 3px solid transparent; }
-.or-track-spaces { position: relative; padding-inline: 10px; }
-.or-track-spaces::before { content: ""; position: absolute; left: 0; right: 0; top: 0; border-top: 3px solid currentColor; }
+.or-track-spaces { position: relative; }
+/* Anchor the rail between the centres of the first and last spots. */
+.or-track-spaces::before { content: ""; position: absolute; left: calc(100% / 18); right: calc(100% / 18); top: 0; border-top: 3px solid currentColor; }
 .or-space::before { content: ""; position: absolute; left: 50%; top: -7px; width: 10px; height: 10px; transform: translateX(-50%); border: 2px solid currentColor; border-radius: 50%; background: #111429; }
 .or-space.goal::before { width: 16px; height: 16px; top: -10px; border-width: 3px; }
 .or-disc { position: absolute; z-index: 2; left: 50%; top: -12px; width: 21px; height: 21px; transform: translateX(-50%); border: 3px solid #f6f1df; border-radius: 50%; background: currentColor; box-shadow: 0 2px 8px #000; }
@@ -440,7 +440,8 @@
    (`.or-column-head`'s count badge had the identical bug.) */
 .or-agent { display: flex; flex-direction: column; width: 145px; min-width: 145px; height: 184px; padding: .48rem; overflow: hidden; border: 2px solid currentColor; border-radius: 11px; background: linear-gradient(160deg, rgba(255,255,255,.13), rgba(13,15,31,.98) 36%); text-align: left; box-shadow: 0 7px 17px #0005; cursor: pointer; transition: transform .14s, box-shadow .14s; }
 .or-agent:hover { box-shadow: 0 9px 22px #0009, 0 0 0 1px var(--or-line); }
-.or-agent.playable:hover, .or-agent.selected { transform: translateY(-5px); box-shadow: 0 10px 24px #0009, 0 0 0 2px var(--lby-accent); }
+.or-agent.playable:hover { transform: translateY(-5px); box-shadow: 0 10px 24px #0009, 0 0 0 2px var(--lby-accent); }
+.or-agent.selected { transform: translateY(-5px); outline: 3px solid currentColor; outline-offset: 2px; box-shadow: 0 10px 24px #0009, 0 0 0 3px currentColor, 0 0 0 5px color-mix(in srgb, currentColor 34%, transparent); }
 .or-agent:disabled { cursor: default; }
 /* A card you cannot play is still a card you can read, so it stays enabled and
    only loses the lifted "this click plays it" affordance. */
@@ -645,6 +646,72 @@
   .or-action-bar { align-items: stretch; flex-direction: column; }
   .or-action-bar > div { display: grid; grid-template-columns: 1fr; }
   .or-action-bar button { width: 100%; }
+}
+
+/* Phone table order and orientation. The two player boxes become individual
+   grid items so the influence board can sit between them. Each planet track is
+   vertical here: the opponent's goal is at the top and your goal is at the
+   bottom, matching the low/high reading of the physical track. */
+@media (max-width: 760px) {
+  .or-score-rail { display: contents; }
+  .or-score-rail .or-player {
+    grid-column: 1;
+    border: 1px solid var(--or-line);
+    border-radius: 15px;
+    background: var(--or-panel);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, .24);
+  }
+  .or-score-rail .or-player.theirs { order: 1; }
+  .or-board-main > .or-influence { order: 2; }
+  .or-score-rail .or-player.mine { order: 3; }
+  .or-sideboards > .or-tech { order: 4; }
+  .or-score-rail .or-player + .or-player { border-left: 1px solid var(--or-line); border-top: 1px solid var(--or-line); }
+  .or-score-rail .or-player.active { border-left-color: var(--or-seat); }
+
+  .or-influence-head { align-items: center; }
+  .or-influence-head span { width: auto; flex-direction: column; align-items: flex-end; gap: 0; line-height: 1.05; }
+  .or-influence-head span i { font-size: 0; line-height: .7; }
+  .or-influence-head span i::after { content: "↕"; color: #626c8d; font-size: .72rem; }
+  .or-influence { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); column-gap: .18rem; }
+  .or-influence-head { grid-column: 1 / -1; }
+  .or-influence .or-track {
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 9rem) auto;
+    gap: .28rem;
+    min-width: 0;
+    min-height: 0;
+    padding: .35rem .08rem .45rem;
+    border-top: 0;
+    border-left: 1px solid rgba(255,255,255,.065);
+  }
+  .or-influence .or-track:first-of-type { border-left: 0; }
+  .or-influence .or-track-name { grid-column: 1; grid-row: 1; justify-self: center; align-self: end; font-size: .62rem; text-align: center; }
+  .or-influence .or-track-spaces {
+    grid-column: 1;
+    grid-row: 2;
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: repeat(9, 1fr);
+    width: 100%;
+    height: 9rem;
+    padding: 0;
+  }
+  .or-influence .or-track-spaces::before {
+    left: 50%;
+    right: auto;
+    top: calc(100% / 18);
+    bottom: calc(100% / 18);
+    width: 0;
+    height: auto;
+    border-top: 0;
+    border-left: 3px solid currentColor;
+  }
+  .or-influence .or-space { width: 100%; height: auto; border: 0; }
+  .or-influence .or-space::before { left: 50%; top: 50%; transform: translate(-50%, -50%); }
+  .or-influence .or-space.goal::before { top: 50%; }
+  .or-influence .or-disc { left: 50%; top: 50%; transform: translate(-50%, -50%); }
+  .or-influence .or-track > .or-bonus { grid-column: 1; grid-row: 3; justify-self: center; width: 1.5rem; height: 1.5rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

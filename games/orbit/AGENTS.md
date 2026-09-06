@@ -404,9 +404,9 @@ were each a real misread on the table, so they are worth not undoing:
   absorbs spare height. The left grid uses `minmax(0, 1fr)` so a six-card hand
   cannot force it over the right column. Hand cards scale uniformly to fit six
   on desktop. Do not stretch the influence panel into blank space below Jupiter.
-  At one column the
-  wrappers become `display: contents`; on phones the order is influence →
-  technology → placed Agents → decision → hand → log.
+  At one column the wrappers become `display: contents`; on phones the order is
+  opponent rail → vertical influence tracks → your rail → technology → decision
+  → hand → log.
 - **The desktop targets are 2560×1600 and 1920×1080.** Orbit's in-game header
   is full-bleed with the menu/name 20px from the viewport edges; unlike lobby
   headers, it must not inherit the centred page measure. The table may grow to
@@ -460,22 +460,18 @@ were each a real misread on the table, so they are worth not undoing:
 - **One `handLimit()` decides the hand counter, and both rails plus the hand head
   read it.** The limit moves MID-TURN with the badge, and a second hand-rolled
   expression is how a counter ends up disagreeing with the badge printed beside
-  it. **It is PRINTED only when it is not the count.** Every turn ends by drawing
-  back up to it, so a seat sits at its limit for almost the whole game and a
-  permanent `6 / 6` on both rails is a tautology with the width of a real fact;
-  the badge chip beside it already names the limit, as does the tooltip. The two
-  states that differ earn the ink: below it mid-turn, and ABOVE it after the badge
-  is given up. **Going over is LEGAL** — a hand is never discarded down, so losing
-  the badge strands you above it, which happens in every game — and is labelled
-  `kept`, because a bare `5` beside a limit of 4 is what reads as an arithmetic
-  bug. `screens.mjs` steers all three shapes onto frames rather than sampling: at
-  6 cards, over at 5 / 4 kept, below at 4 / 6.
+  it. Every counter always shows `N / N cards`, including when a hand is exactly
+  at its limit; an over-limit hand remains legal and is tinted, without adding a
+  second word to the count. `screens.mjs` steers all three shapes onto frames:
+  6 / 6, 5 / 4, and 4 / 6.
 - **On phones the Log is the final board section**, after the hand and any live
   action controls. It is history, not the next decision, and must not split the
   board state from the cards a player acts with. All sizes keep the full log and
   scroll its own viewport to the newest entry on updates and resizes.
-- **Influence lines extend beyond both goal circles.** Technology seat dots
-  identify the occupied level; do not add blue/orange borders or side glows to it.
+- **Influence lines stop at both goal circles.** On phones the tracks rotate
+  vertically with the opponent's goal above and yours below. Technology seat
+  dots identify the occupied level; do not add blue/orange borders or side glows
+  to it.
 - **Nothing on the table scrolls sideways except the hand.** The influence rows,
   the technology grid and both placed-Agent grids reflow instead: on a phone a
   planet's name moves above its track, and the placed-Agent columns are chips so

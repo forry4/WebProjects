@@ -206,20 +206,15 @@ function LeaderBadge({ leader, pid }) {
 }
 
 
-/* THE LIMIT IS PRINTED ONLY WHEN IT IS NOT THE COUNT. Every turn ends by drawing
-   back up to it, so a seat sits AT its limit for almost the whole game and a
-   permanent `6 / 6` on both rails is a tautology taking up the width of a real
-   fact. The two states where the number differs are the ones worth the ink:
-   below it mid-turn (cards already played, and how many come back), and ABOVE it
-   after the badge is given up, which is legal — a hand is never discarded down —
-   and is the state a bare `5` next to a limit of 4 makes look broken. The badge
-   chip beside this already names the limit in full, and so does the tooltip. */
+/* Always show the held count and the hand limit together. Both player boxes use
+   the same compact `N / N cards` treatment so the two hands are immediately
+   comparable, including while a player is temporarily below or above the limit. */
 function HandCount({ held, limit }) {
   const over = held > limit;
   return <span className={`or-hand-count${over ? " over" : ""}`}
     title={over ? `${held} Agents held, over the limit of ${limit}. An effect put them there and a hand is never discarded down.`
       : `${held} of a ${limit}-card hand limit, refilled at the end of that player’s turn.`}>
-    <b>{held}</b>{held === limit ? null : <> / {limit}</>} cards{over ? <em> kept</em> : null}
+    <b>{held}</b> / {limit} cards
   </span>;
 }
 

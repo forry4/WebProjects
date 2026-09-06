@@ -5736,11 +5736,10 @@ try {
 		gameView.log = Array.from({ length: 80 }, (_, i) => ({ turn: i + 1, message: `History ${i + 1}: Orbiter gains influence on Mercury.` }));
 		socket.send(JSON.stringify(fixture));
 		await page.waitForFunction(() => document.querySelectorAll(".or-log p").length === 80);
-		// THE HAND COUNTER PRINTS THE LIMIT ONLY WHEN IT IS NOT THE COUNT. Every
-		// turn ends by drawing back up to it, so a permanent `6 / 6` on both rails
-		// is a tautology; the two states that differ are the ones worth the ink.
-		// All THREE shapes are steered onto frames rather than sampled, because the
-		// seeded deal would otherwise park one of them at "never" for good.
+		// Every player box and the hand header use the same `N / N cards` shape,
+		// including when a hand is exactly at its limit. All THREE shapes are
+		// steered onto frames rather than sampled, because the seeded deal would
+		// otherwise park one of them at "never" for good.
 		const readCounters = () => page.evaluate(() => ({
 			rails: [...document.querySelectorAll(".or-player")].map((rail) => ({
 				badge: rail.querySelector(".or-leader").textContent.trim(),
@@ -5752,16 +5751,15 @@ try {
 		const counters = await readCounters();
 		const badged = counters.rails.find((rail) => /gold/i.test(rail.badge));
 		const plain = counters.rails.find((rail) => /no badge/i.test(rail.badge));
-		// AT the limit: the count alone, on the rail and over the hand. The Gold
-		// badge's 6 is still asserted — through `handLimit`, one line below.
-		check("a seat sitting at its hand limit prints the count and no ratio",
-			!!badged && badged.cards === "6 cards" && counters.hand === "6 cards",
+		// AT the limit: both counts include the limit so the two player boxes have
+		// the same readable contract.
+		check("a seat sitting at its hand limit prints the count and ratio",
+			!!badged && badged.cards === "6 / 6 cards" && counters.hand === "6 / 6 cards",
 			JSON.stringify(counters));
-		// ABOVE it: the case that reads as broken. A hand is never discarded down,
-		// so giving up the badge legitimately strands a seat over its limit, and a
-		// bare `5` beside a limit of 4 is exactly what has to be explained.
-		check("...a seat over its limit shows what it is over and that it keeps them",
-			!!plain && plain.cards === "5 / 4 cards kept", JSON.stringify(counters));
+		// ABOVE it: the ratio remains the same compact contract; the tint and title
+		// still explain that the hand is legally over its limit.
+		check("...a seat over its limit still shows the count and ratio",
+			!!plain && plain.cards === "5 / 4 cards", JSON.stringify(counters));
 		// BELOW it, mid-turn: the ratio says how many come back at end of turn.
 		self.hand = self.hand.slice(0, 4);
 		gameView.legal_moves = [{ action: "recruit", card_id: self.hand[0].id }];
@@ -5777,6 +5775,13 @@ try {
 		check("a log entry written before the parts format still renders",
 			counters.legacy, JSON.stringify(counters.legacy));
 		await page.locator(".or-hand-zone .or-agent").first().click();
+		const selectedStyle = await page.locator(".or-hand-zone .or-agent.selected").first().evaluate((el) => ({
+			planet: [...el.classList].find((name) => ["or-mercury", "or-venus", "or-terra", "or-mars", "or-jupiter"].includes(name)),
+			color: getComputedStyle(el).color,
+			outline: getComputedStyle(el).outlineColor,
+		}));
+		check("a selected card is highlighted in its planet color",
+			!!selectedStyle.planet && selectedStyle.color === selectedStyle.outline, JSON.stringify(selectedStyle));
 		for (const selector of [".or-hand-zone .or-agent", ".or-influence button.or-bonus", ".or-tech-token", ".or-tech-space", ".or-slot.stacked"]) {
 			await page.locator(selector).first().click({ button: "right" });
 			check(`right-click opens details for ${selector}`, await page.locator(".or-info").isVisible());
@@ -5796,11 +5801,21 @@ try {
 			const trackStyle = await page.evaluate(() => {
 				const goalsExtend = [...document.querySelectorAll(".or-track-spaces")].every((track) => {
 					const r = track.getBoundingClientRect();
-					const goals = [...track.querySelectorAll(".goal")].map((el) => el.getBoundingClientRect());
+					const goals = [...track.querySelectorAll(".goal")];
 					const line = getComputedStyle(track, "::before");
-					return line.content !== "none" && parseFloat(line.borderTopWidth) > 0
-						&& goals[0].left + goals[0].width / 2 - 8 > r.left + 4
-						&& goals[1].left + goals[1].width / 2 + 8 < r.right - 4;
+					const vertical = parseFloat(line.borderLeftWidth) > 0 && parseFloat(line.borderTopWidth) === 0;
+					const horizontal = parseFloat(line.borderTopWidth) > 0 && parseFloat(line.borderLeftWidth) === 0;
+					const centers = goals.map((el) => {
+						const box = el.getBoundingClientRect();
+						return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+					});
+					const lineBox = vertical
+						? { start: r.top + r.height / 18, end: r.bottom - r.height / 18 }
+						: { start: r.left + r.width / 18, end: r.right - r.width / 18 };
+					return line.content !== "none" && (vertical || horizontal)
+						&& (vertical
+							? centers[0].y <= lineBox.start + 3 && centers[1].y >= lineBox.end - 3
+							: centers[0].x <= lineBox.start + 3 && centers[1].x >= lineBox.end - 3);
 				});
 				const occupied = document.querySelector(".or-tech-space.mine.theirs");
 				const vacant = document.querySelector(".or-tech-space:not(.mine):not(.theirs)");
@@ -5808,7 +5823,7 @@ try {
 					noGlow: getComputedStyle(occupied).boxShadow === "none"
 						&& getComputedStyle(occupied).borderColor === getComputedStyle(vacant).borderColor };
 			});
-			check(`${label}: track lines pass both ends and technology uses dots without side lighting`,
+			check(`${label}: track lines stop at both goal spots and technology uses dots without side lighting`,
 				trackStyle.goalsExtend && trackStyle.dots === 2 && trackStyle.noGlow, JSON.stringify(trackStyle));
 		};
 		await checkTrackPresentation("Desktop");
@@ -5873,13 +5888,19 @@ try {
 			};
 			const sections = [...document.querySelectorAll(
 				".or-influence, .or-tech, .or-score-rail, .or-hand-zone, .or-decision")];
+			const other = document.querySelector(".or-player.theirs").getBoundingClientRect();
+			const influence = document.querySelector(".or-influence").getBoundingClientRect();
+			const mine = document.querySelector(".or-player.mine").getBoundingClientRect();
 			return {
 				wide: document.documentElement.scrollWidth > window.innerWidth + 1,
 				outside: sections.filter((section) => !inside(section)).map((section) => section.className),
+				order: other.bottom <= influence.top + 1 && mine.top >= influence.bottom - 1,
 			};
 		});
 		check("the playable board stays inside a phone viewport",
 			!phone.wide && phone.outside.length === 0, JSON.stringify(phone));
+		check("the influence board sits between the opponent and your player boxes on a phone",
+			phone.order, JSON.stringify(phone));
 
 		// A SECTION CAN SIT INSIDE THE VIEWPORT AND STILL HIDE ITS CONTENT: the
 		// check above measures the panel's own box, and the influence rows, the
