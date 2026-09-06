@@ -5677,7 +5677,9 @@ try {
 				const panel = document.querySelector(".or-info");
 				return panel ? { eyebrow: panel.querySelector(".or-eyebrow")?.textContent.trim(),
 					cost: panel.querySelectorAll(".or-info-cost").length,
-					defs: panel.querySelectorAll(".or-info-defs dt").length } : null;
+					defs: panel.querySelectorAll(".or-info-defs dt").length,
+					defsHeading: panel.querySelector(".or-info-defs h3")?.textContent.trim(),
+					usesNote: /one card, three uses/i.test(panel.textContent || "") } : null;
 			});
 			check("pressing a card named in the log opens that Agent's card",
 				!!fromLog && /agent/i.test(fromLog.eyebrow || "") && fromLog.cost === 1,
@@ -5687,6 +5689,9 @@ try {
 			// holds for all 90: no rules string in the game matches zero entries.
 			check("...with its rules jargon explained beneath the printed text",
 				!!fromLog && fromLog.defs > 0, JSON.stringify(fromLog));
+			check("...with a Keywords heading and no three-use note",
+				!!fromLog && fromLog.defsHeading === "Keywords" && !fromLog.usesNote,
+				JSON.stringify(fromLog));
 			await page.keyboard.press("Escape").catch(() => {});
 			await page.waitForSelector(".or-info", { state: "detached", timeout: 5_000 }).catch(() => {});
 		}

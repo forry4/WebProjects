@@ -435,9 +435,9 @@
    block resolves to, so `color: var(--or-ink)` was quietly repainting the border
    over the `or-<planet>` class. The ink now lives on the children that need it.
    (`.or-column-head`'s count badge had the identical bug.) */
-.or-agent { display: flex; flex-direction: column; width: 145px; min-width: 145px; height: 184px; padding: .48rem; overflow: hidden; border: 2px solid currentColor; border-radius: 11px; background: linear-gradient(160deg, rgba(255,255,255,.13), rgba(13,15,31,.98) 36%); text-align: left; box-shadow: 0 7px 17px #0005; cursor: pointer; transition: transform .14s, box-shadow .14s; }
-.or-agent:hover { box-shadow: 0 9px 22px #0009, 0 0 0 1px var(--or-line); }
-.or-agent.playable:hover { transform: translateY(-5px); box-shadow: 0 10px 24px #0009, 0 0 0 2px var(--lby-accent); }
+.or-agent { display: flex; flex-direction: column; width: 145px; min-width: 145px; height: 184px; padding: .48rem; overflow: hidden; border: 2px solid currentColor; border-radius: 11px; background: linear-gradient(160deg, rgba(255,255,255,.13), rgba(13,15,31,.98) 36%); text-align: left; box-shadow: 0 7px 17px #0005; cursor: pointer; transition: transform .14s, box-shadow .14s; -webkit-tap-highlight-color: transparent; }
+.or-agent:focus { outline: none; }
+.or-agent:focus-visible { outline: 2px solid var(--or-card-tint, currentColor); outline-offset: 2px; }
 .or-agent.or-mercury { --or-card-tint: #a783cf; }
 .or-agent.or-venus { --or-card-tint: #f1a41b; }
 .or-agent.or-terra { --or-card-tint: #3aa9e4; }
@@ -452,6 +452,10 @@
   outline: 3px solid var(--or-card-tint, currentColor);
   outline-offset: 2px;
   box-shadow: 0 10px 24px #0009, 0 0 0 3px var(--or-card-tint, currentColor), 0 0 0 5px color-mix(in srgb, var(--or-card-tint, currentColor) 34%, transparent);
+}
+@media (hover: hover) and (pointer: fine) {
+  .or-agent:hover { box-shadow: 0 9px 22px #0009, 0 0 0 1px var(--or-line); }
+  .or-agent.playable:hover { transform: translateY(-5px); box-shadow: 0 10px 24px #0009, 0 0 0 2px var(--lby-accent); }
 }
 .or-agent:disabled { cursor: default; }
 /* A card you cannot play is still a card you can read, so it stays enabled and

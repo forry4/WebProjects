@@ -494,7 +494,7 @@ function glossaryFor(...texts) {
 function Glossary({ terms }) {
   if (!terms.length) return null;
   return <div className="or-info-defs">
-    <h3>What these words mean here</h3>
+    <h3>Keywords</h3>
     <dl>{terms.map((entry) => <div key={entry.k}>
       <dt>{entry.t}</dt><dd>{entry.d}</dd>
     </div>)}</dl>
@@ -530,12 +530,6 @@ function InfoModal({ info, catalog, onClose, onInfo }) {
         <span className="or-info-cost"><b>{card.cost}</b> Credits</span>
       </p>
       <p className="or-info-text">{card.description}</p>
-      <p className="or-info-note">One card, three uses. <b>Recruit</b> it for its printed
-        {" "}{card.cost} Credits minus the Agents already in
-        its <PlanetName planet={card.planet} /> column, gaining 1 influence there before the text
-        above resolves. Or discard it to <b>develop {card.faction} technology</b>, paying the new
-        level in Zenithium. Or discard it to <b>become Leader</b> for
-        the {card.faction} action.</p>
       <Glossary terms={glossaryFor(card.description)} />
     </>;
   } else if (info.kind === "bonus") {
